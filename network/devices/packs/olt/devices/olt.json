@@ -1,7 +1,7 @@
 {
-  "$schema": "netgeo.device.v1",
+  "$schema": "netgeo.device.v2",
   "category": "olt",
-  "_notes": "OLT (Optical Line Terminal) = sisi sentral FTTH. port type 'gpon' membawa rate riil di speed_mbps (GPON 2488/1244, XGS-PON 9953 sim/burst). 1 port PON melayani 1 splitter tree (32/64/128 ONU).",
+  "_notes": "OLT (Optical Line Terminal) = sisi sentral FTTH. port type 'gpon' membawa rate riil di speed_mbps (GPON 2488/1244, XGS-PON 9953 sim/burst). 1 port PON melayani 1 splitter tree (32/64/128 ONU). Migrated from network/devices/library/olt.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'olt:' when merging into the registry so pack authors can't forget it. capabilities_ref dropped (no capabilities.md consumer exists; the ftth block below already inlines the gating data that pointer was meant to resolve to). snmp_oids added (v2 field, mirrors backend _IF_MIB_OIDS).",
   "devices": [
     {
       "id": "huawei-ma5800-x7-chassis",
@@ -21,7 +21,11 @@
         { "pattern": "uplink-100ge{n}", "count": 4, "type": "qsfp", "speed_mbps": 100000 },
         { "pattern": "uplink-10ge{n}", "count": 8, "type": "sfp", "speed_mbps": 10000 }
       ],
-      "capabilities_ref": "olt-chassis-carrier",
+      "snmp_oids": {
+        "sysUpTime": "1.3.6.1.2.1.1.3.0",
+        "ifOperStatus": "1.3.6.1.2.1.2.2.1.8",
+        "ifHCInOctets": "1.3.6.1.2.1.31.1.1.1.6"
+      },
       "power": { "typical_w": 1200, "max_w": 3000, "psu": "redundant-dc", "feed": "DC-48V" },
       "physical": { "ru": 8, "form_factor": "modular-chassis", "service_slots": 8 },
       "ftth": {
@@ -51,7 +55,11 @@
         { "pattern": "uplink-10ge{n}", "count": 4, "type": "sfp", "speed_mbps": 10000 },
         { "pattern": "uplink-100ge{n}", "count": 2, "type": "qsfp", "speed_mbps": 100000 }
       ],
-      "capabilities_ref": "olt-pizzabox-metro",
+      "snmp_oids": {
+        "sysUpTime": "1.3.6.1.2.1.1.3.0",
+        "ifOperStatus": "1.3.6.1.2.1.2.2.1.8",
+        "ifHCInOctets": "1.3.6.1.2.1.31.1.1.1.6"
+      },
       "power": { "typical_w": 150, "max_w": 300, "psu": "dual-dc", "feed": "DC-48V/AC" },
       "physical": { "ru": 2, "form_factor": "2U-fixed", "service_slots": 2 },
       "ftth": {
@@ -81,7 +89,11 @@
         { "pattern": "xgs-1/2/{n}", "count": 16, "type": "gpon", "speed_mbps": 9953, "pon_standard": "XGS-PON", "split_max": 64, "split_recommended": 32 },
         { "pattern": "uplink-100ge{n}", "count": 8, "type": "qsfp", "speed_mbps": 100000 }
       ],
-      "capabilities_ref": "olt-chassis-carrier",
+      "snmp_oids": {
+        "sysUpTime": "1.3.6.1.2.1.1.3.0",
+        "ifOperStatus": "1.3.6.1.2.1.2.2.1.8",
+        "ifHCInOctets": "1.3.6.1.2.1.31.1.1.1.6"
+      },
       "power": { "typical_w": 1500, "max_w": 3500, "psu": "redundant-dc", "feed": "DC-48V" },
       "physical": { "ru": 12, "form_factor": "modular-chassis", "service_slots": 16 },
       "ftth": {

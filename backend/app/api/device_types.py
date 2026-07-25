@@ -7,14 +7,30 @@ registry with custom entries at runtime.
 
 Endpoints
 ---------
-GET    /api/device-types              — list all device types (built-in + custom)
+GET    /api/device-types              — list all device types (built-in + pack + custom)
 POST   /api/device-types              — add a custom device type
 DELETE /api/device-types/{id}         — remove a custom device type (built-ins protected)
 POST   /api/device-types/upload-iso   — parse ISO 9660 image and register device type
+GET    /api/device-packs              — list device library packs (id, enabled, device_count)
+POST   /api/device-packs/{id}/enable  — enable a pack (its devices join GET /device-types)
+POST   /api/device-packs/{id}/disable — disable a pack (its devices disappear, no restart)
+
+Device library packs (NG-DL-02 / docs/design/15-DEVICE-LIBRARY-PACKS.md)
+--------------------------------------------------------------------------
+A pack is a folder under ``network/devices/packs/<pack-id>/`` holding a
+``manifest.json`` plus ``devices/*.json`` (schema ``netgeo.device.v2`` —
+additive extension of the existing ``netgeo.device.v1`` library schema with
+optional ``snmp_oids``/``layout``/``rf``). Packs are scanned and their device
+JSON re-parsed on every call — no import-time filesystem walk, no in-memory
+cache, no plugin engine: enable/disable is just an entry in
+``network/devices/packs_enabled.json`` and takes effect on the next request.
 """
 from __future__ import annotations
 
+import json
+import logging
 import struct
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
@@ -23,6 +39,7 @@ from pydantic import BaseModel, Field
 from app.utils.ids import new_id
 
 router = APIRouter(tags=["device-types"])
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -95,13 +112,162 @@ _custom: dict[str, DeviceType] = {}
 
 
 # ---------------------------------------------------------------------------
+# Device library packs (drop-in JSON folders, see module docstring)
+# ---------------------------------------------------------------------------
+
+# repo-root/network/devices  (backend/app/api/ -> ../../../network/devices)
+_DEVICES_DIR = Path(__file__).resolve().parents[3] / "network" / "devices"
+_PACKS_DIR = _DEVICES_DIR / "packs"
+_PACKS_STATE_FILE = _DEVICES_DIR / "packs_enabled.json"
+
+# node.kind -> DeviceType.category, matching the styling _BUILTIN already uses
+# (network/devices/library/index.json node_kind_enum). Unknown kinds fall back
+# to the kind string itself — the frontend's category color map defaults
+# unknown values to a neutral color, so this never breaks rendering.
+_KIND_CATEGORY = {
+    "router": "wired", "switch": "wired", "ap": "wireless",
+    "olt": "fiber", "onu": "fiber",
+    "firewall": "security", "server": "infrastructure", "cloud": "infrastructure",
+}
+
+
+def _iter_pack_manifests() -> list[tuple[Path, dict]]:
+    """Scan ``packs/*/manifest.json``, skipping unreadable/invalid ones."""
+    if not _PACKS_DIR.is_dir():
+        return []
+    found: list[tuple[Path, dict]] = []
+    for manifest_path in sorted(_PACKS_DIR.glob("*/manifest.json")):
+        try:
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning("device pack %s: invalid manifest.json: %s", manifest_path.parent.name, exc)
+            continue
+        manifest.setdefault("id", manifest_path.parent.name)
+        found.append((manifest_path.parent, manifest))
+    return found
+
+
+def _load_pack_overrides() -> dict[str, bool]:
+    """Explicit enable/disable overrides on top of each manifest's default."""
+    if not _PACKS_STATE_FILE.exists():
+        return {}
+    try:
+        data = json.loads(_PACKS_STATE_FILE.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        logger.warning("packs_enabled.json: unreadable, ignoring overrides: %s", exc)
+        return {}
+    return data.get("overrides", {})
+
+
+def _save_pack_overrides(overrides: dict[str, bool]) -> None:
+    _PACKS_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _PACKS_STATE_FILE.write_text(json.dumps({"overrides": overrides}, indent=2) + "\n", encoding="utf-8")
+
+
+def _pack_enabled(pack_id: str, manifest: dict, overrides: dict[str, bool]) -> bool:
+    return overrides.get(pack_id, bool(manifest.get("enabled_by_default", False)))
+
+
+def list_packs() -> list[dict]:
+    """Every discovered pack's manifest plus its resolved enabled state."""
+    overrides = _load_pack_overrides()
+    return [
+        {**manifest, "enabled": _pack_enabled(manifest["id"], manifest, overrides)}
+        for _, manifest in _iter_pack_manifests()
+    ]
+
+
+def _device_json_to_type(pack_id: str, dev: dict) -> DeviceType:
+    kind = dev.get("kind", "custom")
+    power = dev.get("power") or {}
+    return DeviceType(
+        id=f"{pack_id}:{dev['id']}",
+        name=dev.get("display_name", dev["id"]),
+        category=_KIND_CATEGORY.get(kind, kind),
+        icon=kind,
+        description=dev.get("datasheet_note", ""),
+        builtin=True,  # read-only, like _BUILTIN — managed via pack enable/disable, not DELETE
+        power_watts_idle=power.get("typical_w"),
+        power_watts_max=power.get("max_w"),
+        snmp_oids=dev.get("snmp_oids") or _IF_MIB_OIDS,
+    )
+
+
+def _load_enabled_pack_devices() -> list[DeviceType]:
+    """Parse ``devices/*.json`` for every currently-enabled pack.
+
+    On-demand, not cached: a disabled pack costs nothing (never parsed); an
+    enabled pack is re-read every call. Fine at this scale (a handful of
+    packs, tens of devices) — add a cache only if profiling says otherwise.
+    """
+    overrides = _load_pack_overrides()
+    out: list[DeviceType] = []
+    for pack_dir, manifest in _iter_pack_manifests():
+        pack_id = manifest["id"]
+        if not _pack_enabled(pack_id, manifest, overrides):
+            continue
+        for device_file in sorted((pack_dir / "devices").glob("*.json")):
+            try:
+                data = json.loads(device_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("device pack %s: invalid %s: %s", pack_id, device_file.name, exc)
+                continue
+            for dev in data.get("devices", []):
+                if not dev.get("id") or not dev.get("kind"):
+                    logger.warning(
+                        "device pack %s: skipping device missing id/kind in %s",
+                        pack_id, device_file.name,
+                    )
+                    continue
+                out.append(_device_json_to_type(pack_id, dev))
+    return out
+
+
+class DevicePack(BaseModel):
+    id: str
+    name: str
+    version: str = "0.0.0"
+    categories: list[str] = []
+    device_count: int = 0
+    enabled_by_default: bool = False
+    source_note: str = ""
+    enabled: bool
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
 @router.get("/device-types", response_model=list[DeviceType])
 async def list_device_types() -> list[DeviceType]:
-    """Return all device types: built-ins first, then custom entries."""
-    return _BUILTIN + list(_custom.values())
+    """Return all device types: built-ins, then enabled pack devices, then custom."""
+    return _BUILTIN + _load_enabled_pack_devices() + list(_custom.values())
+
+
+@router.get("/device-packs", response_model=list[DevicePack])
+async def list_device_packs() -> list[DevicePack]:
+    """List every discovered device library pack and its enabled state."""
+    return [DevicePack(**p) for p in list_packs()]
+
+
+@router.post("/device-packs/{pack_id}/enable", response_model=DevicePack)
+async def enable_device_pack(pack_id: str) -> DevicePack:
+    return _set_pack_enabled(pack_id, True)
+
+
+@router.post("/device-packs/{pack_id}/disable", response_model=DevicePack)
+async def disable_device_pack(pack_id: str) -> DevicePack:
+    return _set_pack_enabled(pack_id, False)
+
+
+def _set_pack_enabled(pack_id: str, enabled: bool) -> DevicePack:
+    manifests = {m["id"]: m for _, m in _iter_pack_manifests()}
+    if pack_id not in manifests:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Device pack '{pack_id}' not found.")
+    overrides = _load_pack_overrides()
+    overrides[pack_id] = enabled
+    _save_pack_overrides(overrides)
+    return DevicePack(**manifests[pack_id], enabled=enabled)
 
 
 @router.post("/device-types", response_model=DeviceType, status_code=status.HTTP_201_CREATED)

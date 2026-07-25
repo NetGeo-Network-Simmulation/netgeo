@@ -848,6 +848,31 @@ export const deviceTypesApi = {
   },
 };
 
+/* --------------------------- Device library packs ------------------------ */
+/**
+ * Device library packs (NG-DL-02 / docs/design/15-DEVICE-LIBRARY-PACKS.md).
+ * A pack is a drop-in folder of brand devices that merges into
+ * `deviceTypesApi.list()` when enabled — see `backend/app/api/device_types.py`.
+ */
+export interface DevicePack {
+  id: string;
+  name: string;
+  version: string;
+  categories: string[];
+  device_count: number;
+  enabled_by_default: boolean;
+  source_note: string;
+  enabled: boolean;
+}
+
+export const devicePacksApi = {
+  list: () => http.get<DevicePack[]>('/device-packs').then((r) => r.data),
+  enable: (id: string) =>
+    http.post<DevicePack>(`/device-packs/${id}/enable`).then((r) => r.data),
+  disable: (id: string) =>
+    http.post<DevicePack>(`/device-packs/${id}/disable`).then((r) => r.data),
+};
+
 /* --------------------------- Host system / NICs -------------------------- */
 export const systemApi = {
   interfaces: () =>

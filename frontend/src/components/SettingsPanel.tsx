@@ -6,6 +6,7 @@
  *   3. Account — username display, sign-out
  */
 import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Cpu,
   KeyRound,
@@ -18,18 +19,21 @@ import {
   Package,
   ChevronDown,
   Radio,
+  Boxes,
 } from 'lucide-react';
 import { useUiStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
 import { useNosStore, type CustomNosEntry } from '@/store/nosStore';
+import { devicePacksApi, type DevicePack } from '@/api/client';
 import { cn } from '@/lib/cn';
 
-type Section = 'general' | 'nos' | 'devices' | 'account';
+type Section = 'general' | 'nos' | 'devices' | 'packs' | 'account';
 
 const SECTIONS: { key: Section; label: string; icon: typeof Cpu }[] = [
   { key: 'general', label: 'General', icon: Monitor },
   { key: 'nos', label: 'Network OS', icon: Package },
   { key: 'devices', label: 'Device Types', icon: Radio },
+  { key: 'packs', label: 'Device Packs', icon: Boxes },
   { key: 'account', label: 'Account', icon: Cpu },
 ];
 
@@ -77,6 +81,7 @@ export function SettingsPanel() {
         {activeSection === 'general' && <GeneralSection />}
         {activeSection === 'nos' && <NosSection />}
         {activeSection === 'devices' && <DeviceTypesSection />}
+        {activeSection === 'packs' && <DevicePacksSection />}
         {activeSection === 'account' && <AccountSection />}
       </div>
     </div>
@@ -545,6 +550,85 @@ function DeviceTypesSection() {
           <span className="rounded bg-fg/8 px-1.5 py-0.5 text-[10px] text-fg/40">built-in</span>
         </div>
       ))}
+    </div>
+  );
+}
+
+/* ---------- Device Library Packs (NG-DL-02) ---------- */
+
+function DevicePacksSection() {
+  const qc = useQueryClient();
+  const { data: packs, isLoading, isError } = useQuery({
+    queryKey: ['device-packs'],
+    queryFn: devicePacksApi.list,
+  });
+
+  const toggle = useMutation({
+    mutationFn: (pack: DevicePack) =>
+      pack.enabled ? devicePacksApi.disable(pack.id) : devicePacksApi.enable(pack.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['device-packs'] });
+      qc.invalidateQueries({ queryKey: ['device-types'] });
+    },
+  });
+
+  return (
+    <div className="space-y-6">
+      <SectionHeading>Device Library Packs</SectionHeading>
+      <p className="text-xs text-fg/45">
+        Brand device packs add vendor-specific models (Huawei, ZTE, Nokia, …) to the
+        device catalog. Disabled packs are never parsed, so only enable the brands
+        relevant to the project you're working on — this keeps the catalog fast.
+      </p>
+
+      {isLoading && <p className="text-xs text-fg/40">Loading packs…</p>}
+      {isError && (
+        <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+          Failed to load device packs.
+        </p>
+      )}
+
+      {packs && packs.length === 0 && (
+        <p className="rounded-md border border-dashed border-fg/10 p-4 text-center text-xs text-fg/35">
+          No device packs installed yet.
+        </p>
+      )}
+
+      {packs && packs.length > 0 && (
+        <div className="space-y-1.5">
+          {packs.map((p) => (
+            <div
+              key={p.id}
+              className="flex items-center justify-between rounded-md border border-fg/10 bg-fg/5 px-3 py-2"
+            >
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <p className="text-sm font-medium text-fg/85">{p.name}</p>
+                  <span className="rounded bg-fg/8 px-1.5 py-0.5 font-mono text-[10px] text-fg/50">
+                    {p.id}
+                  </span>
+                </div>
+                <p className="mt-0.5 text-xs text-fg/40">
+                  {p.device_count} device{p.device_count !== 1 ? 's' : ''} · v{p.version}
+                </p>
+              </div>
+              <button
+                onClick={() => toggle.mutate(p)}
+                disabled={toggle.isPending}
+                aria-pressed={p.enabled}
+                className={cn(
+                  'shrink-0 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors',
+                  p.enabled
+                    ? 'border-accent bg-accent/15 text-accent'
+                    : 'border-fg/10 bg-fg/5 text-fg/50 hover:border-fg/20 hover:text-fg/85',
+                )}
+              >
+                {p.enabled ? 'Enabled' : 'Disabled'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

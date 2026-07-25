@@ -9,7 +9,6 @@
     { "category": "routers", "file": "routers.json", "palette_group": "Routing", "count": 7 },
     { "category": "switches", "file": "switches.json", "palette_group": "Switching", "count": 7 },
     { "category": "firewalls", "file": "firewalls.json", "palette_group": "Security", "count": 3 },
-    { "category": "olt", "file": "olt.json", "palette_group": "FTTH / Access", "count": 3 },
     { "category": "onu", "file": "onu.json", "palette_group": "FTTH / Access", "count": 3 },
     { "category": "wireless-ap", "file": "wireless-ap.json", "palette_group": "Wireless", "count": 4 },
     { "category": "optical-transport", "file": "optical-transport.json", "palette_group": "Transport / Optical", "count": 3 },
@@ -20,7 +19,8 @@
     "Routing", "Switching", "Security", "FTTH / Access",
     "Wireless", "Transport / Optical", "Mobile / RAN", "Compute / Hosts"
   ],
-  "total_devices": 36,
+  "total_devices": 33,
+  "_migrated_out": "olt.json (3 devices) moved to network/devices/packs/olt/ — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4.",
   "loader_contract": {
     "step_1": "Baca index.json untuk daftar file & grouping palette.",
     "step_2": "Muat tiap file; tiap device punya id unik (kontrak stabil).",
