@@ -1,0 +1,223 @@
+{
+  "$schema": "netgeo.device.v2",
+  "category": "onu",
+  "_notes": "ONU/ONT = sisi pelanggan FTTH. Dimodelkan kind='host' subcategory='onu' (lihat README §2). 1 port 'gpon' uplink ke splitter tree OLT; sisi LAN = eth/wifi ke perangkat user. Migrated from network/devices/library/onu.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'onu:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none.",
+  "devices": [
+    {
+      "id": "huawei-eg8145x6-ont",
+      "display_name": "Huawei EG8145X6 (ONT GPON, Wi-Fi 6)",
+      "vendor": "Huawei",
+      "vendor_options": [
+        "Huawei"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "ont",
+        "gpon",
+        "wifi6",
+        "residential",
+        "hgu"
+      ],
+      "icon": {
+        "name": "ont",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 2488,
+          "pon_standard": "GPON",
+          "role": "uplink"
+        },
+        {
+          "pattern": "lan{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "wlan{n}",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 1774,
+          "wifi_standard": "Wi-Fi 6 (802.11ax)"
+        }
+      ],
+      "power": {
+        "typical_w": 10,
+        "max_w": 18,
+        "psu": "single",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "desktop"
+      },
+      "ftth": {
+        "rx_sensitivity_dbm": -28.0,
+        "rx_overload_dbm": -8.0,
+        "tx_power_dbm": 2.0,
+        "pon_class": "GPON Class B+/C+"
+      },
+      "datasheet_note": "ONT HGU residential populer; AX Wi-Fi 6; 4x GE LAN."
+    },
+    {
+      "id": "zte-f6600p-xgs-ont",
+      "display_name": "ZTE F6600P (ONT XGS-PON, Wi-Fi 6)",
+      "vendor": "ZTE",
+      "vendor_options": [
+        "ZTE"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "ont",
+        "xgs-pon",
+        "10g",
+        "wifi6",
+        "premium"
+      ],
+      "icon": {
+        "name": "ont",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 9953,
+          "pon_standard": "XGS-PON",
+          "role": "uplink"
+        },
+        {
+          "pattern": "lan10g",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 10000
+        },
+        {
+          "pattern": "lan{n}",
+          "count": 3,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "wlan{n}",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 2402,
+          "wifi_standard": "Wi-Fi 6 (802.11ax)"
+        }
+      ],
+      "power": {
+        "typical_w": 12,
+        "max_w": 20,
+        "psu": "single",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "desktop"
+      },
+      "ftth": {
+        "rx_sensitivity_dbm": -28.0,
+        "rx_overload_dbm": -9.0,
+        "tx_power_dbm": 4.0,
+        "pon_class": "XGS-PON N1/N2"
+      },
+      "datasheet_note": "ONT XGS-PON 10G premium; 1x10GE + 3xGE; layanan gigabit+."
+    },
+    {
+      "id": "fiberhome-sfu-onu",
+      "display_name": "FiberHome AN5506-01-A (SFU ONU GPON)",
+      "vendor": "FiberHome",
+      "vendor_options": [
+        "FiberHome",
+        "Generic"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "onu",
+        "gpon",
+        "sfu",
+        "bridge",
+        "budget"
+      ],
+      "icon": {
+        "name": "onu",
+        "emoji": "🔌"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 2488,
+          "pon_standard": "GPON",
+          "role": "uplink"
+        },
+        {
+          "pattern": "lan0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": 5,
+        "max_w": 8,
+        "psu": "single",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "desktop-small"
+      },
+      "ftth": {
+        "rx_sensitivity_dbm": -27.0,
+        "rx_overload_dbm": -8.0,
+        "tx_power_dbm": 2.0,
+        "pon_class": "GPON Class B+"
+      },
+      "datasheet_note": "SFU ONU bridge-mode 1xGE; murah; dipasangkan dengan router CPE terpisah."
+    }
+  ]
+}

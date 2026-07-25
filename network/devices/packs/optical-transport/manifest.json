@@ -1,0 +1,11 @@
+{
+  "id": "optical-transport",
+  "name": "Optical Transport (Transport / Optical)",
+  "version": "1.0.0",
+  "categories": [
+    "optical-transport"
+  ],
+  "device_count": 3,
+  "enabled_by_default": true,
+  "source_note": "Migrated from network/devices/library/optical-transport.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
+}

@@ -1,0 +1,175 @@
+{
+  "$schema": "netgeo.device.v2",
+  "category": "firewalls",
+  "devices": [
+    {
+      "id": "paloalto-pa3220-ngfw",
+      "display_name": "Palo Alto PA-3220 (NGFW)",
+      "vendor": "Palo Alto Networks",
+      "vendor_options": [
+        "Palo Alto Networks"
+      ],
+      "kind": "firewall",
+      "subcategory": "ngfw",
+      "tags": [
+        "ngfw",
+        "perimeter",
+        "ips",
+        "ssl-inspection",
+        "enterprise"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "panos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": true,
+        "image": "pa-vm:latest",
+        "ram_mb": 6144
+      },
+      "ports": [
+        {
+          "pattern": "ethernet1/{n}",
+          "count": 12,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "ethernet1/sfp{n}",
+          "count": 4,
+          "type": "sfp",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "typical_w": 150,
+        "max_w": 300,
+        "psu": "redundant",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "PA-3220 ~5Gbps threat-prevention; NGFW perimeter enterprise."
+    },
+    {
+      "id": "fortinet-fortigate-100f-utm",
+      "display_name": "FortiGate 100F (NGFW/UTM)",
+      "vendor": "Fortinet",
+      "vendor_options": [
+        "Fortinet"
+      ],
+      "kind": "firewall",
+      "subcategory": "utm",
+      "tags": [
+        "utm",
+        "ngfw",
+        "smb",
+        "sd-wan",
+        "budget"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "fortios",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": true,
+        "image": "fortios-vm:latest",
+        "ram_mb": 4096
+      },
+      "ports": [
+        {
+          "pattern": "port{n}",
+          "count": 22,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "port-sfp{n}",
+          "count": 4,
+          "type": "sfp",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "typical_w": 40,
+        "max_w": 60,
+        "psu": "single",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "FortiGate 100F: SP5 ASIC, threat-prot ~1Gbps; SMB/branch + SD-WAN."
+    },
+    {
+      "id": "paloalto-pa5450-dc-ngfw",
+      "display_name": "Palo Alto PA-5450 (DC NGFW)",
+      "vendor": "Palo Alto Networks",
+      "vendor_options": [
+        "Palo Alto Networks"
+      ],
+      "kind": "firewall",
+      "subcategory": "ngfw",
+      "tags": [
+        "ngfw",
+        "datacenter",
+        "high-throughput",
+        "100g",
+        "segmentation"
+      ],
+      "icon": {
+        "name": "firewall-dc",
+        "emoji": "🛡️"
+      },
+      "nos": [
+        "panos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "ethernet1/{n}",
+          "count": 8,
+          "type": "sfp28",
+          "speed_mbps": 25000
+        },
+        {
+          "pattern": "ethernet1/qsfp{n}",
+          "count": 4,
+          "type": "qsfp",
+          "speed_mbps": 100000
+        }
+      ],
+      "power": {
+        "typical_w": 1500,
+        "max_w": 3000,
+        "psu": "redundant",
+        "feed": "AC/DC"
+      },
+      "physical": {
+        "ru": 5,
+        "form_factor": "modular-chassis"
+      },
+      "datasheet_note": "PA-5450 modular DC NGFW; threat-prot puluhan Gbps; segmentasi DC."
+    }
+  ],
+  "_notes": "Migrated from network/devices/library/firewalls.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'firewalls:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none."
+}

@@ -1,0 +1,11 @@
+{
+  "id": "cell-site",
+  "name": "Cell Site / RAN (Mobile / RAN)",
+  "version": "1.0.0",
+  "categories": [
+    "cell-site"
+  ],
+  "device_count": 3,
+  "enabled_by_default": true,
+  "source_note": "Migrated from network/devices/library/cell-site.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
+}

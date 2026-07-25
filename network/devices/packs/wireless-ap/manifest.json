@@ -1,0 +1,11 @@
+{
+  "id": "wireless-ap",
+  "name": "Wireless AP (Wireless)",
+  "version": "1.0.0",
+  "categories": [
+    "wireless-ap"
+  ],
+  "device_count": 4,
+  "enabled_by_default": true,
+  "source_note": "Migrated from network/devices/library/wireless-ap.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
+}

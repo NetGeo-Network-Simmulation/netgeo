@@ -1,16 +1,35 @@
 """Device library packs (NG-DL-02) — loader, merge into /device-types, enable/disable.
 
-docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4: bootstrap slice #1 migrates the
-3-device ``olt.json`` library file into ``network/devices/packs/olt/``. These
-tests cover (a) the real ``olt`` pack loads and merges correctly, and (b) the
-generic loader mechanics (enable/disable, invalid manifest, unknown pack)
-against a synthetic pack in a tmp_path so they don't depend on repo content.
+docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4: slice #1 migrated the 3-device
+``olt.json`` library file into ``network/devices/packs/olt/``; slice #2
+migrated the remaining 8 orphan category files (33 devices) the same way,
+retiring ``network/devices/library/`` entirely. These tests cover (a) every
+real pack loads and merges correctly, and (b) the generic loader mechanics
+(enable/disable, invalid manifest, unknown pack) against a synthetic pack in
+a tmp_path so they don't depend on repo content.
 """
 from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.api import device_types as dt
+
+# Every real pack under network/devices/packs/ and its expected device_count
+# (network/devices/packs/<id>/manifest.json is the source of truth; this list
+# just needs to stay in sync so the parametrized test below is meaningful).
+_REAL_PACKS = {
+    "olt": 3,
+    "routers": 7,
+    "switches": 7,
+    "firewalls": 3,
+    "onu": 3,
+    "wireless-ap": 4,
+    "optical-transport": 3,
+    "cell-site": 3,
+    "servers": 3,
+}
 
 
 def test_real_olt_pack_is_enabled_by_default_and_merges_into_device_types():
@@ -38,13 +57,65 @@ def test_real_olt_pack_is_enabled_by_default_and_merges_into_device_types():
     assert huawei.snmp_oids == dt._IF_MIB_OIDS
 
 
+@pytest.mark.parametrize("pack_id,expected_count", sorted(_REAL_PACKS.items()))
+def test_real_pack_manifest_and_devices_match_expected_count(pack_id, expected_count):
+    packs = {p["id"]: p for p in dt.list_packs()}
+    assert pack_id in packs, f"{pack_id} pack manifest not discovered"
+    manifest = packs[pack_id]
+    assert manifest["enabled"] is True
+    assert manifest["device_count"] == expected_count
+
+    devices = [d for d in dt._load_enabled_pack_devices() if d.id.startswith(f"{pack_id}:")]
+    assert len(devices) == expected_count
+    for d in devices:
+        assert d.builtin is True
+        assert d.snmp_oids == dt._IF_MIB_OIDS  # falls back when the JSON omits it
+
+
 async def test_get_device_types_includes_enabled_pack_devices(client):
     resp = await client.get("/api/device-types")
     assert resp.status_code == 200
     ids = {d["id"] for d in resp.json()}
     assert "olt:zte-c320-pizzabox" in ids
+    assert "routers:cisco-asr9006-core" in ids
+    assert "servers:dell-r760-server" in ids
     # Built-in generic OLT fallback must still be present alongside the pack.
     assert "builtin-olt" in ids
+
+
+async def test_all_pack_device_ids_are_prefixed_and_collision_free(client):
+    resp = await client.get("/api/device-types")
+    ids = [d["id"] for d in resp.json()]
+    assert len(ids) == len(set(ids)), "duplicate device-type ids in /device-types"
+    assert len(ids) == len(dt._BUILTIN) + sum(_REAL_PACKS.values())
+
+    builtin_ids = {d.id for d in dt._BUILTIN}
+    for pack_id in _REAL_PACKS:
+        pack_ids = [i for i in ids if i.startswith(f"{pack_id}:")]
+        assert pack_ids, f"no devices found for pack {pack_id}"
+        for pid in pack_ids:
+            assert pid not in builtin_ids
+
+
+async def test_disable_then_enable_routers_pack_via_api(client, monkeypatch, tmp_path):
+    state_file = tmp_path / "packs_enabled.json"
+    monkeypatch.setattr(dt, "_PACKS_STATE_FILE", state_file)
+
+    resp = await client.post("/api/device-packs/routers/disable")
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is False
+
+    resp = await client.get("/api/device-types")
+    ids = {d["id"] for d in resp.json()}
+    assert "routers:cisco-asr9006-core" not in ids
+
+    resp = await client.post("/api/device-packs/routers/enable")
+    assert resp.status_code == 200
+    assert resp.json()["enabled"] is True
+
+    resp = await client.get("/api/device-types")
+    ids = {d["id"] for d in resp.json()}
+    assert "routers:cisco-asr9006-core" in ids
 
 
 async def test_disable_then_enable_olt_pack_via_api(client, monkeypatch, tmp_path):

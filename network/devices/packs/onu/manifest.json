@@ -1,0 +1,11 @@
+{
+  "id": "onu",
+  "name": "ONU/ONT (FTTH / Access)",
+  "version": "1.0.0",
+  "categories": [
+    "onu"
+  ],
+  "device_count": 3,
+  "enabled_by_default": true,
+  "source_note": "Migrated from network/devices/library/onu.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
+}

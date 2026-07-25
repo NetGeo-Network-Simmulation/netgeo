@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Validate network/devices/library/*.json against schema v2 (NG-DL-01).
+"""Validate network/devices/packs/*/devices/*.json against schema v2 (NG-DL-01/02).
 
-Schema v2 is v1 plus optional enrichment blocks — existing v1 files stay
-valid. Structural rules enforced here; also imported by
-backend/tests/test_device_library.py so CI runs it as a test.
+Schema v2 is v1 plus optional enrichment blocks — existing v1-derived pack
+files stay valid. Structural rules enforced here; also imported by
+backend/tests/test_device_packs_schema.py so CI runs it as a test.
 
 v2 optional blocks per device:
     chassis:  {"ru": int>=0, "watts": number>0, "weight_kg": number>0}
@@ -12,7 +12,11 @@ v2 optional blocks per device:
     optical_budget: {"tx_dbm": [lo, hi], "rx_sensitivity_dbm": num, "class": str}
     (v1 files already use a free-form "optical" key for DWDM notes — untouched)
 
-Usage: python3 scripts/validate_library.py   (exit 1 on findings)
+Also checks each pack's manifest.json: id present and matching its directory
+name, and device_count matching the number of devices actually found under
+devices/*.json — cheap, real drift checks for a drop-in-JSON mechanism.
+
+Usage: python3 scripts/validate_packs.py   (exit 1 on findings)
 """
 from __future__ import annotations
 
@@ -20,14 +24,14 @@ import json
 import sys
 from pathlib import Path
 
-LIBRARY = Path(__file__).resolve().parents[1] / "network" / "devices" / "library"
+PACKS = Path(__file__).resolve().parents[1] / "network" / "devices" / "packs"
 
 _PORT_TYPES = {"eth", "sfp", "sfp+", "sfp28", "qsfp", "wifi", "gpon", "serial", "console", "xfp"}
 
 
-def _check_device(fname: str, dev: dict, findings: list[str]) -> None:
+def _check_device(pack_id: str, fname: str, dev: dict, findings: list[str]) -> None:
     def bad(msg: str) -> None:
-        findings.append(f"{fname}: {dev.get('id', '?')}: {msg}")
+        findings.append(f"{pack_id}/{fname}: {dev.get('id', '?')}: {msg}")
 
     for key in ("id", "display_name", "vendor", "kind"):
         if not dev.get(key):
@@ -66,21 +70,47 @@ def _check_device(fname: str, dev: dict, findings: list[str]) -> None:
             bad("optical_budget block without rx_sensitivity_dbm")
 
 
+def _check_manifest(pack_dir: Path, findings: list[str]) -> None:
+    manifest_path = pack_dir / "manifest.json"
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        findings.append(f"{pack_dir.name}/manifest.json: invalid JSON: {exc}")
+        return
+
+    if manifest.get("id") != pack_dir.name:
+        findings.append(
+            f"{pack_dir.name}/manifest.json: id {manifest.get('id')!r} "
+            f"!= directory name {pack_dir.name!r}"
+        )
+
+    device_count = sum(
+        len(json.loads(f.read_text(encoding="utf-8")).get("devices", []))
+        for f in sorted((pack_dir / "devices").glob("*.json"))
+    )
+    if manifest.get("device_count") != device_count:
+        findings.append(
+            f"{pack_dir.name}/manifest.json: device_count {manifest.get('device_count')!r} "
+            f"!= actual {device_count}"
+        )
+
+
 def validate() -> list[str]:
     findings: list[str] = []
-    files = sorted(LIBRARY.glob("*.json"))
-    if not files:
-        return [f"no library files found under {LIBRARY}"]
-    for path in files:
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as exc:
-            findings.append(f"{path.name}: invalid JSON: {exc}")
-            continue
-        if path.name == "index.json":
-            continue
-        for dev in data.get("devices", []):
-            _check_device(path.name, dev, findings)
+    pack_dirs = sorted(p for p in PACKS.glob("*") if p.is_dir())
+    if not pack_dirs:
+        return [f"no device packs found under {PACKS}"]
+    for pack_dir in pack_dirs:
+        pack_id = pack_dir.name
+        _check_manifest(pack_dir, findings)
+        for path in sorted((pack_dir / "devices").glob("*.json")):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as exc:
+                findings.append(f"{pack_id}/{path.name}: invalid JSON: {exc}")
+                continue
+            for dev in data.get("devices", []):
+                _check_device(pack_id, path.name, dev, findings)
     return findings
 
 
@@ -89,5 +119,5 @@ if __name__ == "__main__":
     for p in problems:
         print(f"FAIL {p}")
     if not problems:
-        print(f"OK — library valid ({LIBRARY})")
+        print(f"OK — packs valid ({PACKS})")
     sys.exit(1 if problems else 0)

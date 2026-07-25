@@ -1,0 +1,11 @@
+{
+  "id": "firewalls",
+  "name": "Firewalls (Security)",
+  "version": "1.0.0",
+  "categories": [
+    "firewalls"
+  ],
+  "device_count": 3,
+  "enabled_by_default": true,
+  "source_note": "Migrated from network/devices/library/firewalls.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4. Note: paloalto-pa3220-ngfw is EOL upstream (successor PA-3410); migrated verbatim, no SKU swap — successor spec not yet verified."
+}

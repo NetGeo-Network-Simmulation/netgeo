@@ -1,0 +1,11 @@
+{
+  "id": "servers",
+  "name": "Servers & Hosts (Compute / Hosts)",
+  "version": "1.0.0",
+  "categories": [
+    "servers"
+  ],
+  "device_count": 3,
+  "enabled_by_default": true,
+  "source_note": "Migrated from network/devices/library/servers.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
+}

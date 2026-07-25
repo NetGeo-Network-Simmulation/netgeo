@@ -1,0 +1,188 @@
+{
+  "$schema": "netgeo.device.v2",
+  "category": "servers",
+  "_notes": "Server/host compute. kind='server' (bare-metal/vm-host) atau host generik untuk traffic endpoint (iperf/ping). Server vm-host juga jadi platform untuk node mode='emul' (container NOS). Migrated from network/devices/library/servers.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'servers:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none.",
+  "devices": [
+    {
+      "id": "dell-r760-server",
+      "display_name": "Dell PowerEdge R760 (2U Rack Server)",
+      "vendor": "Dell",
+      "vendor_options": [
+        "Dell",
+        "HPE",
+        "Supermicro",
+        "Lenovo"
+      ],
+      "kind": "server",
+      "subcategory": "bare-metal",
+      "tags": [
+        "server",
+        "compute",
+        "datacenter",
+        "vm-host",
+        "emulation-host"
+      ],
+      "icon": {
+        "name": "server",
+        "emoji": "🖥️"
+      },
+      "nos": [
+        "linux",
+        "esxi",
+        "forgeos"
+      ],
+      "default_mode": "emul",
+      "emulation": {
+        "available": true,
+        "image": "ubuntu:22.04",
+        "ram_mb": 2048
+      },
+      "ports": [
+        {
+          "pattern": "eno{n}",
+          "count": 2,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        },
+        {
+          "pattern": "ens{n}f0",
+          "count": 2,
+          "type": "sfp28",
+          "speed_mbps": 25000,
+          "role": "data-nic"
+        },
+        {
+          "pattern": "ens{n}f-100g",
+          "count": 2,
+          "type": "qsfp",
+          "speed_mbps": 100000,
+          "role": "data-nic"
+        }
+      ],
+      "power": {
+        "typical_w": 400,
+        "max_w": 1100,
+        "psu": "redundant",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 2,
+        "form_factor": "2U-rackmount"
+      },
+      "datasheet_note": "R760 dual-socket; NIC 1G mgmt + 25G/100G data; host emulasi NOS container."
+    },
+    {
+      "id": "generic-linux-host",
+      "display_name": "Generic Linux Host (Endpoint)",
+      "vendor": "Generic",
+      "vendor_options": [
+        "Generic"
+      ],
+      "kind": "host",
+      "subcategory": "endpoint",
+      "tags": [
+        "host",
+        "endpoint",
+        "traffic-gen",
+        "ping",
+        "iperf",
+        "lab"
+      ],
+      "icon": {
+        "name": "host-pc",
+        "emoji": "💻"
+      },
+      "nos": [
+        "linux",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": true,
+        "image": "alpine:latest",
+        "ram_mb": 128
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": 65,
+        "max_w": 150,
+        "psu": "single",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "desktop"
+      },
+      "datasheet_note": "Host generik untuk endpoint test (ping/iperf/curl); footprint minimal."
+    },
+    {
+      "id": "vm-host-hypervisor",
+      "display_name": "VM Host / Hypervisor (Compute Node)",
+      "vendor": "Generic",
+      "vendor_options": [
+        "VMware",
+        "Proxmox",
+        "KVM",
+        "Generic"
+      ],
+      "kind": "server",
+      "subcategory": "vm-host",
+      "tags": [
+        "hypervisor",
+        "vm-host",
+        "nfv",
+        "emulation-host",
+        "datacenter"
+      ],
+      "icon": {
+        "name": "server-stack",
+        "emoji": "🗄️"
+      },
+      "nos": [
+        "esxi",
+        "proxmox",
+        "kvm",
+        "forgeos"
+      ],
+      "default_mode": "emul",
+      "emulation": {
+        "available": true,
+        "image": "host-passthrough",
+        "ram_mb": 4096
+      },
+      "ports": [
+        {
+          "pattern": "vmnic{n}",
+          "count": 4,
+          "type": "sfp28",
+          "speed_mbps": 25000
+        },
+        {
+          "pattern": "vmnic-100g{n}",
+          "count": 2,
+          "type": "qsfp",
+          "speed_mbps": 100000
+        }
+      ],
+      "power": {
+        "typical_w": 500,
+        "max_w": 1400,
+        "psu": "redundant",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 2,
+        "form_factor": "2U-rackmount"
+      },
+      "datasheet_note": "Compute/hypervisor node untuk NFV & host emulasi NOS skala besar."
+    }
+  ]
+}

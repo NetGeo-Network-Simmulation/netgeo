@@ -1,0 +1,290 @@
+{
+  "$schema": "netgeo.device.v2",
+  "category": "wireless-ap",
+  "_notes": "Access Point WLAN. port 'wifi' = radio (speed_mbps = PHY rate agregat maks). Uplink eth/sfp ke switch (umumnya PoE-powered). Migrated from network/devices/library/wireless-ap.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'wireless-ap:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none.",
+  "devices": [
+    {
+      "id": "ubiquiti-u6-pro-wifi6",
+      "display_name": "Ubiquiti UniFi U6 Pro (Wi-Fi 6)",
+      "vendor": "Ubiquiti",
+      "vendor_options": [
+        "Ubiquiti"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi6",
+      "tags": [
+        "wifi6",
+        "indoor",
+        "smb",
+        "campus",
+        "poe"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "unifi",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "radio-2g4",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 573,
+          "band": "2.4GHz",
+          "wifi_standard": "Wi-Fi 6"
+        },
+        {
+          "pattern": "radio-5g",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 4800,
+          "band": "5GHz",
+          "wifi_standard": "Wi-Fi 6"
+        },
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": "poe-in"
+        }
+      ],
+      "power": {
+        "typical_w": 9,
+        "max_w": 13,
+        "psu": "poe",
+        "feed": "PoE"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "ceiling-mount"
+      },
+      "datasheet_note": "U6 Pro: 2x2 2.4G + 4x4 5G Wi-Fi 6; uplink GbE PoE."
+    },
+    {
+      "id": "cisco-c9166-wifi6e",
+      "display_name": "Cisco Catalyst 9166 (Wi-Fi 6E)",
+      "vendor": "Cisco",
+      "vendor_options": [
+        "Cisco"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi6e",
+      "tags": [
+        "wifi6e",
+        "6ghz",
+        "enterprise",
+        "campus",
+        "high-density"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "ios-ap",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "radio-2g4",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 575,
+          "band": "2.4GHz",
+          "wifi_standard": "Wi-Fi 6E"
+        },
+        {
+          "pattern": "radio-5g",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 2400,
+          "band": "5GHz",
+          "wifi_standard": "Wi-Fi 6E"
+        },
+        {
+          "pattern": "radio-6g",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 2400,
+          "band": "6GHz",
+          "wifi_standard": "Wi-Fi 6E"
+        },
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "sfp",
+          "speed_mbps": 5000,
+          "poe": "poe-in"
+        }
+      ],
+      "power": {
+        "typical_w": 20,
+        "max_w": 30,
+        "psu": "poe",
+        "feed": "PoE+/PoE++"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "ceiling-mount"
+      },
+      "datasheet_note": "C9166 tri-radio Wi-Fi 6E (6GHz); uplink mGig 5G; high-density enterprise."
+    },
+    {
+      "id": "ubiquiti-u7-pro-wifi7",
+      "display_name": "Ubiquiti UniFi U7 Pro (Wi-Fi 7)",
+      "vendor": "Ubiquiti",
+      "vendor_options": [
+        "Ubiquiti"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi7",
+      "tags": [
+        "wifi7",
+        "6ghz",
+        "mlo",
+        "320mhz",
+        "premium"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "unifi",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "radio-2g4",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 688,
+          "band": "2.4GHz",
+          "wifi_standard": "Wi-Fi 7"
+        },
+        {
+          "pattern": "radio-5g",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 4300,
+          "band": "5GHz",
+          "wifi_standard": "Wi-Fi 7"
+        },
+        {
+          "pattern": "radio-6g",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 5800,
+          "band": "6GHz",
+          "wifi_standard": "Wi-Fi 7 (320MHz, MLO)"
+        },
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "sfp",
+          "speed_mbps": 2500,
+          "poe": "poe-in"
+        }
+      ],
+      "power": {
+        "typical_w": 16,
+        "max_w": 22,
+        "psu": "poe",
+        "feed": "PoE+"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "ceiling-mount"
+      },
+      "datasheet_note": "U7 Pro: tri-band Wi-Fi 7, 6GHz 320MHz + MLO; uplink 2.5GbE PoE+."
+    },
+    {
+      "id": "mikrotik-cap-ax-wifi6",
+      "display_name": "MikroTik cAP ax (Wi-Fi 6 budget)",
+      "vendor": "MikroTik",
+      "vendor_options": [
+        "MikroTik"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi6",
+      "tags": [
+        "wifi6",
+        "budget",
+        "isp",
+        "capsman"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "routeros",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": true,
+        "image": "mikrotik/routeros:7",
+        "ram_mb": 256
+      },
+      "ports": [
+        {
+          "pattern": "radio-2g4",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 574,
+          "band": "2.4GHz",
+          "wifi_standard": "Wi-Fi 6"
+        },
+        {
+          "pattern": "radio-5g",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 1200,
+          "band": "5GHz",
+          "wifi_standard": "Wi-Fi 6"
+        },
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": "poe-in"
+        }
+      ],
+      "power": {
+        "typical_w": 7,
+        "max_w": 11,
+        "psu": "poe",
+        "feed": "PoE"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "ceiling-mount"
+      },
+      "datasheet_note": "cAP ax: Wi-Fi 6 budget, CAPsMAN-managed; cocok deployment ISP/hotspot."
+    }
+  ]
+}

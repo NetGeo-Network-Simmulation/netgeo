@@ -120,10 +120,10 @@ _DEVICES_DIR = Path(__file__).resolve().parents[3] / "network" / "devices"
 _PACKS_DIR = _DEVICES_DIR / "packs"
 _PACKS_STATE_FILE = _DEVICES_DIR / "packs_enabled.json"
 
-# node.kind -> DeviceType.category, matching the styling _BUILTIN already uses
-# (network/devices/library/index.json node_kind_enum). Unknown kinds fall back
-# to the kind string itself — the frontend's category color map defaults
-# unknown values to a neutral color, so this never breaks rendering.
+# node.kind -> DeviceType.category, matching the styling _BUILTIN already uses.
+# Unknown kinds fall back to the kind string itself — the frontend's category
+# color map defaults unknown values to a neutral color, so this never breaks
+# rendering.
 _KIND_CATEGORY = {
     "router": "wired", "switch": "wired", "ap": "wireless",
     "olt": "fiber", "onu": "fiber",

@@ -1,0 +1,11 @@
+{
+  "id": "routers",
+  "name": "Routers (Routing)",
+  "version": "1.0.0",
+  "categories": [
+    "routers"
+  ],
+  "device_count": 7,
+  "enabled_by_default": true,
+  "source_note": "Migrated from network/devices/library/routers.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
+}
