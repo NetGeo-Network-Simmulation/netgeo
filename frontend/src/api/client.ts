@@ -756,10 +756,29 @@ export interface RfStudyCreate {
   request: Record<string, unknown>;
   result: Record<string, unknown>;
 }
+/** Static ISP radio catalog (23 devices, real datasheet specs) served by
+ * `GET /api/rf/radios` — used to prefill Auto-Select/PtMP candidate fields.
+ * No cost/bandwidth here: those stay user-supplied (see `RadioCandidate`). */
+export interface RadioCatalogEntry {
+  id: string;
+  name: string;
+  vendor: string;
+  model: string;
+  type: string;
+  frequency_ghz: number;
+  tx_power_dbm: number;
+  antenna_gain_dbi: number;
+  rx_sensitivity_dbm: number;
+  max_range_km: number;
+  max_throughput_mbps: number;
+  standard: string;
+  notes: string;
+}
 export const rfApi = {
   coverage: (body: CoverageRasterRequest) =>
     http.post<CoverageRasterResult>('/rf/coverage', body).then((r) => r.data),
   models: () => http.get<PropagationModelInfo[]>('/rf/models').then((r) => r.data),
+  radios: () => http.get<RadioCatalogEntry[]>('/rf/radios').then((r) => r.data),
   ptp: (body: PtpRequest) => http.post<PtpResult>('/rf/ptp', body).then((r) => r.data),
   ptmp: (body: PtmpRequest) => http.post<PtmpResult>('/rf/ptmp', body).then((r) => r.data),
   productSelect: (body: ProductSelectRequest) =>

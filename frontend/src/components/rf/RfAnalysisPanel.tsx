@@ -25,7 +25,14 @@ import {
   fmtKm,
 } from './rfLogic';
 import { EndpointSelect } from './RfLinkBar';
-import type { PtpResult, PtmpResult, ProductSelectResult, RadioCandidate, RfStudyKind } from '@/api/client';
+import type {
+  PtpResult,
+  PtmpResult,
+  ProductSelectResult,
+  RadioCandidate,
+  RadioCatalogEntry,
+  RfStudyKind,
+} from '@/api/client';
 
 const TABS: { id: RfTab; label: string }[] = [
   { id: 'summary', label: 'Summary' },
@@ -104,6 +111,39 @@ function FieldInput({
         {suffix && <span className="shrink-0 text-[10px] text-fg/40">{suffix}</span>}
       </div>
     </label>
+  );
+}
+
+/** Prefill picker shared by the PtMP sector form and Auto-Select candidate
+ *  rows — same "reset to placeholder after pick" idiom as the saved-study
+ *  select above. Fills fields from the static radio catalog; the caller
+ *  decides which fields to patch (cost/bandwidth are never touched here —
+ *  the catalog carries no price, and ranking would mislead on a guess). */
+function CatalogPicker({
+  radios,
+  onSelect,
+  label = 'Prefill from catalog',
+}: {
+  radios: RadioCatalogEntry[];
+  onSelect: (r: RadioCatalogEntry) => void;
+  label?: string;
+}) {
+  if (radios.length === 0) return null;
+  return (
+    <select
+      aria-label={label}
+      value=""
+      onChange={(e) => {
+        const r = radios.find((x) => x.id === e.target.value);
+        if (r) onSelect(r);
+      }}
+      className="w-full rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-[11px] text-fg/70 focus:border-accent/50 focus:outline-none"
+    >
+      <option value="">{label}…</option>
+      {radios.map((r) => (
+        <option key={r.id} value={r.id}>{r.name}</option>
+      ))}
+    </select>
   );
 }
 
@@ -394,12 +434,13 @@ function PtmpBody() {
   const {
     ptmpApId, ptmpAzimuthDeg, ptmpBeamwidthDeg, ptmpDowntiltDeg, ptmpFreqMhz, ptmpBandwidthMhz,
     ptmpTxPowerDbm, ptmpTxGainDbi, ptmpRxSensitivityDbm, ptmpModelId, ptmpCpes, ptmpResult,
-    ptmpLastRequest, ptmpLoading, ptmpError, models,
+    ptmpLastRequest, ptmpLoading, ptmpError, models, radios,
     setPtmpApId, setPtmpAzimuth, setPtmpBeamwidth, setPtmpDowntilt, setPtmpFreqMhz, setPtmpBandwidthMhz,
     setPtmpTxPower, setPtmpTxGain, setPtmpRxSens, setPtmpModel, addCpeFromDevice, addManualCpe, removeCpe,
     calculatePtmp,
   } = useRfStore();
   const devices = useMapStore((s) => s.deviceList());
+  const apRadios = radios.filter((r) => r.type === 'ptmp_ap');
   const apOptions = devices.filter((d) => d.kind === 'ap' || d.kind === 'tower').map((d) => ({ id: d.id, name: d.name }));
   const cpeOptions = devices.filter((d) => d.kind === 'cpe').map((d) => ({ id: d.id, name: d.name }));
   const [manualLat, setManualLat] = useState('');
@@ -412,6 +453,17 @@ function PtmpBody() {
       <div>
         <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg/50">Sector</p>
         <EndpointSelect value={ptmpApId} onChange={setPtmpApId} options={apOptions} label="AP / Tower site" />
+        <div className="mt-2">
+          <CatalogPicker
+            radios={apRadios}
+            label="Prefill AP radio from catalog"
+            onSelect={(r) => {
+              setPtmpTxPower(r.tx_power_dbm);
+              setPtmpTxGain(r.antenna_gain_dbi);
+              setPtmpRxSens(r.rx_sensitivity_dbm);
+            }}
+          />
+        </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <FieldInput label="Azimuth" value={ptmpAzimuthDeg} onChange={setPtmpAzimuth} suffix="deg" step={5} min={0} />
           <FieldInput label="Beamwidth" value={ptmpBeamwidthDeg} onChange={setPtmpBeamwidth} suffix="deg" step={5} min={1} />
@@ -523,10 +575,12 @@ function PtmpBody() {
 /* -------------------------------------------------------------------------- */
 function CandidateRow({
   candidate,
+  radios,
   onChange,
   onRemove,
 }: {
   candidate: RadioCandidate;
+  radios: RadioCatalogEntry[];
   onChange: (patch: Partial<RadioCandidate>) => void;
   onRemove: () => void;
 }) {
@@ -546,6 +600,19 @@ function CandidateRow({
         >
           <X className="h-3.5 w-3.5" />
         </button>
+      </div>
+      <div className="mt-1.5">
+        <CatalogPicker
+          radios={radios}
+          onSelect={(r) =>
+            onChange({
+              name: r.name,
+              tx_power_dbm: r.tx_power_dbm,
+              antenna_gain_dbi: r.antenna_gain_dbi,
+              rx_sensitivity_dbm: r.rx_sensitivity_dbm,
+            })
+          }
+        />
       </div>
       <div className="mt-1.5 grid grid-cols-2 gap-1.5">
         <MiniField label="TX dBm" value={candidate.tx_power_dbm} onChange={(v) => onChange({ tx_power_dbm: v })} />
@@ -604,12 +671,15 @@ function ProductSelectResultView({ res }: { res: ProductSelectResult }) {
 function ProductSelectBody() {
   const {
     psDistanceM, psFreqMhz, psTargetMbps, psTxHeightM, psRxHeightM, psMiscLossDb, psModelId,
-    psCandidates, psResult, psLastRequest, psLoading, psError, models, result: ptpResult,
+    psCandidates, psResult, psLastRequest, psLoading, psError, models, result: ptpResult, radios,
     setPsDistance, setPsFreq, setPsTarget, setPsTxHeight, setPsRxHeight, setPsMiscLoss, setPsModel,
     addCandidate, updateCandidate, removeCandidate, fillFromPtp, calculateProductSelect,
   } = useRfStore();
 
   const canCalc = psCandidates.length > 0 && psDistanceM > 0 && psFreqMhz > 0 && !psLoading;
+  // 'antenna' catalog entries are passive (no tx power / sensitivity of their
+  // own) — not a sensible prefill for a candidate radio slot.
+  const candidateRadios = radios.filter((r) => r.type !== 'antenna');
 
   return (
     <div className="space-y-4">
@@ -656,6 +726,7 @@ function ProductSelectBody() {
             <CandidateRow
               key={i}
               candidate={c}
+              radios={candidateRadios}
               onChange={(patch) => updateCandidate(i, patch)}
               onRemove={() => removeCandidate(i)}
             />

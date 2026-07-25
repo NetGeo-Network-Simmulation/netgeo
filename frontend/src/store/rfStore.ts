@@ -20,6 +20,7 @@ import {
   type PtmpRequest,
   type PtmpResult,
   type RadioCandidate,
+  type RadioCatalogEntry,
   type ProductSelectRequest,
   type ProductSelectResult,
   type RfStudy,
@@ -80,6 +81,10 @@ interface RfState {
   setTab: (tab: RfTab) => void;
   loadModels: () => Promise<void>;
   calculate: () => Promise<void>;
+
+  /** Static radio catalog (see RadioCatalogEntry) — prefill only, optional. */
+  radios: RadioCatalogEntry[];
+  loadRadios: () => Promise<void>;
 
   /* ---- PtMP sector planner (NG-RF-04) ---- */
   ptmpApId: string | null;
@@ -199,6 +204,17 @@ export const useRfStore = create<RfState>((set, get) => ({
       }
     } catch {
       /* keep the 'fspl' default if the registry can't be reached */
+    }
+  },
+
+  radios: [],
+  loadRadios: async () => {
+    if (get().radios.length) return;
+    try {
+      const radios = await rfApi.radios();
+      set({ radios });
+    } catch {
+      /* catalog prefill is optional — manual candidate entry still works */
     }
   },
 

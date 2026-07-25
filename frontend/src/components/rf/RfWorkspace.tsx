@@ -18,6 +18,7 @@ import { RfLinkBar } from './RfLinkBar';
 
 export function RfWorkspace() {
   const loadModels = useRfStore((s) => s.loadModels);
+  const loadRadios = useRfStore((s) => s.loadRadios);
   const loadStudies = useRfStore((s) => s.loadStudies);
   const pickEndpoint = useRfStore((s) => s.pickEndpoint);
   const selectedId = useMapStore((s) => s.selectedDeviceId);
@@ -29,7 +30,8 @@ export function RfWorkspace() {
   // and a click on an existing AP/tower still picks it as an endpoint below.
   useEffect(() => {
     void loadModels();
-  }, [loadModels]);
+    void loadRadios();
+  }, [loadModels, loadRadios]);
 
   // Load saved PtMP/product-select studies for the mode selects (NG-RF cross-
   // cutting persistence) once a project is open.

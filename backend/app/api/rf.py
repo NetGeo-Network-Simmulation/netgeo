@@ -4,10 +4,20 @@ A study picks a propagation model by id and supplies geometry + params; the
 registry (``engine.propagation``) dispatches to a closed-form path-loss model.
 ``GET /api/rf/models`` lists the available models with their metadata;
 ``POST /api/rf/path-loss`` computes loss for a chosen model.
+
+``GET /api/rf/radios`` (NG-RF follow-up) serves the static ISP radio catalog
+(``app/data/device_catalog.json``, 23 devices with datasheet specs) so the
+frontend can prefill Auto-Select/PtMP candidate fields instead of the user
+typing tx power / antenna gain / rx sensitivity by hand.
 """
 from __future__ import annotations
 
+import json
+from functools import lru_cache
+from pathlib import Path
+
 from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 from app.api.deps import repo, translate_not_found
 from app.models import (
@@ -35,6 +45,41 @@ from app.utils.ids import new_id
 from engine import wireless as rf
 
 router = APIRouter(prefix="/rf", tags=["rf"])
+
+# ponytail: one static JSON catalog, read once and cached — promote to the
+# device-pack mechanism (network/devices/packs/) only if a second RF catalog
+# source shows up; a single source doesn't earn that machinery.
+_CATALOG_PATH = Path(__file__).resolve().parent.parent / "data" / "device_catalog.json"
+
+
+class RadioCatalogEntry(BaseModel):
+    id: str
+    name: str
+    vendor: str
+    model: str
+    type: str
+    frequency_ghz: float
+    tx_power_dbm: float
+    antenna_gain_dbi: float
+    rx_sensitivity_dbm: float
+    max_range_km: float
+    max_throughput_mbps: float
+    standard: str
+    notes: str = ""
+
+
+@lru_cache(maxsize=1)
+def _load_radio_catalog() -> list[dict]:
+    data = json.loads(_CATALOG_PATH.read_text(encoding="utf-8"))
+    return data["devices"]
+
+
+@router.get("/radios", response_model=list[RadioCatalogEntry])
+async def list_radios():
+    """Static ISP radio catalog (real datasheet specs) for prefilling
+    Auto-Select/PtMP candidate fields client-side. Read-only, no
+    cost/bandwidth here — those stay user-supplied (see ``RadioCandidate``)."""
+    return _load_radio_catalog()
 
 
 @router.get("/models", response_model=list[PropagationModelInfo])
