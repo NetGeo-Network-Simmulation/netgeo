@@ -134,7 +134,7 @@ function GeneralSection() {
             className="appearance-none rounded-md border border-fg/10 bg-recess/25 py-1.5 pl-3 pr-8 text-sm text-fg/90 outline-none focus:border-accent"
           >
             {[0.5, 1, 2, 4, 8].map((s) => (
-              <option key={s} value={s} className="bg-[#141A2E]">
+              <option key={s} value={s}>
                 {s}×
               </option>
             ))}

@@ -122,7 +122,7 @@ export function MapToolbar() {
                 min={0} max={100} step={2.5}
                 value={rainRate}
                 onChange={(e) => setRainRate(Number(e.target.value))}
-                className="w-full accent-blue-400"
+                className="w-full"
               />
               <div className="mt-1 flex justify-between text-[9px] text-fg/30">
                 <span>Clear</span>

@@ -58,7 +58,7 @@ export function ActivityAuthorPanel() {
             value={draft.name}
             onChange={(e) => updateDraft({ name: e.target.value })}
             placeholder="Lab: OSPF Multi-Area Basics"
-            className="w-full rounded-md border border-fg/15 bg-recess/60 px-2.5 py-1.5 text-sm text-fg/90 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
+            className="w-full rounded-md border border-fg/15 bg-recess/20 px-2.5 py-1.5 text-sm text-fg/90 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
           />
         </Field>
 
@@ -68,7 +68,7 @@ export function ActivityAuthorPanel() {
             onChange={(e) => updateDraft({ instructions: e.target.value })}
             rows={5}
             placeholder="What should the student build? Plain text — line breaks are preserved."
-            className="w-full resize-y rounded-md border border-fg/15 bg-recess/60 px-2.5 py-1.5 text-xs leading-relaxed text-fg/85 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
+            className="w-full resize-y rounded-md border border-fg/15 bg-recess/20 px-2.5 py-1.5 text-xs leading-relaxed text-fg/85 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
           />
         </Field>
 
@@ -82,7 +82,7 @@ export function ActivityAuthorPanel() {
               updateDraft({ time_limit_s: e.target.value ? Number(e.target.value) * 60 : null })
             }
             placeholder="—"
-            className="w-28 rounded-md border border-fg/15 bg-recess/60 px-2.5 py-1.5 text-sm text-fg/90 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
+            className="w-28 rounded-md border border-fg/15 bg-recess/20 px-2.5 py-1.5 text-sm text-fg/90 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
           />
         </Field>
 

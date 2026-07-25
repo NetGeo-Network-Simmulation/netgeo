@@ -72,8 +72,14 @@ body {
   }
 }
 
-/* Visible keyboard focus everywhere (accessibility). */
-:focus-visible {
+/* Visible keyboard focus everywhere (accessibility, WCAG 2.4.7).
+   Tailwind emits `.focus\:outline-none:focus` at specificity (0,2,0) AND after
+   this file in the bundle, so a plain `:focus-visible` (0,1,0) loses to it and
+   17 controls render no focus indicator at all. Repeating the pseudo-class
+   raises this to (0,3,0) so the ring always wins.
+   ponytail: one selector instead of deleting `focus:outline-none` at 17 call
+   sites. Focus is not opt-out. */
+:focus-visible:focus-visible:focus-visible {
   outline: 2px solid var(--ng-primary, #d97757);
   outline-offset: 1px;
 }
@@ -99,14 +105,25 @@ body {
    Active-connection states (connecting/valid) reveal the coral accent so the
    user clearly sees valid snap targets. WCAG AA: fg-muted is 4.8:1 on dark
    panel (#1F1E1D) and 5.2:1 on light panel (#FAF9F5). Ring stays theme-aware.
-   Hit area is 12px (h-3/w-3 in DeviceNode); the visual ring matches.
+   Single source of truth for dot size — DeviceNode sets no !h-/!w- override.
    During an active connection drag React Flow adds .react-flow__handle-connecting
    to the canvas root — reveal all handles so the user can see snap targets. */
 .react-flow__handle {
-  width: 12px;
-  height: 12px;
+  width: 8px;
+  height: 8px;
   border: 1.5px solid rgb(var(--ng-recess-rgb) / 0.55);
   background: var(--ng-fg-muted);
+}
+/* React Flow v12 centres the handle ON the card border, so overhang is always
+   size/2: a 12px dot hangs 6px over the canvas and reads as *floating beside*
+   the card. 8px halves that to 4px so the dot reads as attached, while this
+   invisible ::after keeps the grab target at 12px (pointer-events is inherited,
+   and React Flow flips the handle to `all` via .connectionindicator). */
+.react-flow__handle::after {
+  content: '';
+  position: absolute;
+  inset: -2px;
+  border-radius: 100%;
 }
 /* Show coral accent only while dragging a new connection (n8n snap feel). */
 .react-flow__handle-connecting .react-flow__handle,
@@ -212,6 +229,42 @@ html[data-theme='dark'] .leaflet-container {
 }
 .leaflet-control-attribution a {
   color: var(--ng-fg-muted, rgba(255, 255, 255, 0.5)) !important;
+}
+
+/* ---- Native form controls -------------------------------------------------- */
+/* The <select> popup is painted by the browser on an opaque light base, so the
+   translucent backgrounds every closed control uses (bg-transparent, bg-fg/5,
+   bg-recess/20 …) composite to near-white there — the "white dropdown in a dark
+   app" bug. Pin an opaque themed pair on the rows once, here, instead of at 45
+   call sites. Both vars flip per theme (tokens.ts THEMES), so this is
+   theme-aware in both directions.
+   ponytail: element selectors are (0,0,1) and lose to any Tailwind class on the
+   <option>, so the stale bg-[#141A2E] / bg-neutral-900 classNames are deleted
+   rather than fought with !important. */
+option,
+optgroup {
+  background-color: var(--ng-panel);
+  color: var(--ng-fg);
+}
+
+/* Fallback for the row `color` above: Chromium on Linux/GTK has historically
+   ignored author `color` on <option>, which would leave dark text on the new
+   dark row. Naming the scheme on the control itself forces the browser's own
+   dark popup path instead. Also covers the pre-hydration frame, where
+   index.html's `dark light` meta lets an OS light preference win before
+   tokens.ts writes color-scheme onto <html>. */
+select {
+  color-scheme: dark;
+}
+html[data-theme='light'] select {
+  color-scheme: light;
+}
+
+/* Native checkbox / radio / range tick the brand accent in both themes.
+   accent-color inherits, so every current and future native control is covered
+   without a per-file utility. */
+:root {
+  accent-color: rgb(var(--ng-accent-rgb));
 }
 
 /* ---- Rack cable-flow animation -------------------------------------------- */

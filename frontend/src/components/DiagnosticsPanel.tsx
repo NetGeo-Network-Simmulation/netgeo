@@ -117,7 +117,7 @@ function SrcDstRow({
       >
         <option value="">source device…</option>
         {options.map((o) => (
-          <option key={o.id} value={o.id} className="bg-neutral-900">
+          <option key={o.id} value={o.id}>
             {o.name} ({o.kind})
           </option>
         ))}
@@ -287,7 +287,7 @@ function CaptureTool() {
         >
           <option value="">all links</option>
           {linkOptions.map((l) => (
-            <option key={l.id} value={l.id} className="bg-neutral-900">
+            <option key={l.id} value={l.id}>
               {l.id.slice(0, 8)} ({l.type})
             </option>
           ))}
@@ -495,7 +495,7 @@ function TablesTool() {
       >
         <option value="">select device…</option>
         {options.map((o) => (
-          <option key={o.id} value={o.id} className="bg-neutral-900">
+          <option key={o.id} value={o.id}>
             {o.name} ({o.kind})
           </option>
         ))}

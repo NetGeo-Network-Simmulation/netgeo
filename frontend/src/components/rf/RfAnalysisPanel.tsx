@@ -137,7 +137,7 @@ function CatalogPicker({
         const r = radios.find((x) => x.id === e.target.value);
         if (r) onSelect(r);
       }}
-      className="w-full rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-[11px] text-fg/70 focus:border-accent/50 focus:outline-none"
+      className="w-full rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-[11px] text-fg/70 focus:border-accent/50 focus:outline-none"
     >
       <option value="">{label}…</option>
       {radios.map((r) => (
@@ -346,7 +346,7 @@ function StudySaveLoad({
         aria-label="Open saved study"
         value=""
         onChange={(e) => e.target.value && void openStudy(e.target.value)}
-        className="w-full rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
+        className="w-full rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
       >
         <option value="">{studies.length ? 'Open a saved study…' : 'No saved studies yet'}</option>
         {studies.map((s) => (

@@ -41,6 +41,33 @@ function edgePosition(node: InternalNode<Node>, p: { x: number; y: number }): Po
   return Position.Bottom;
 }
 
+/**
+ * Centre of `node`'s port dot on `side`, in flow coords. React Flow measures
+ * handle bounds via getBoundingClientRect / zoom, so `x`/`y` already include the
+ * v12 `translate(±50%,±50%)` that centres the dot on the border — the centre of
+ * that box is the exact point the user sees.
+ * Falls back to the border midpoint on the frame before handles are measured,
+ * which is where the dot renders anyway.
+ */
+function handlePoint(node: InternalNode<Node>, side: Position): { x: number; y: number } {
+  const { x: ox, y: oy } = node.internals.positionAbsolute;
+  const w = node.measured.width ?? 0;
+  const h = node.measured.height ?? 0;
+  const b = node.internals.handleBounds;
+  const hit = [...(b?.source ?? []), ...(b?.target ?? [])].find((k) => k.position === side);
+  if (hit) return { x: ox + hit.x + hit.width / 2, y: oy + hit.y + hit.height / 2 };
+  switch (side) {
+    case Position.Left:
+      return { x: ox, y: oy + h / 2 };
+    case Position.Right:
+      return { x: ox + w, y: oy + h / 2 };
+    case Position.Top:
+      return { x: ox + w / 2, y: oy };
+    default:
+      return { x: ox + w / 2, y: oy + h };
+  }
+}
+
 export interface FloatingEdgeParams {
   sx: number;
   sy: number;
@@ -55,14 +82,14 @@ export function getFloatingEdgeParams(
   source: InternalNode<Node>,
   target: InternalNode<Node>,
 ): FloatingEdgeParams {
-  const s = nodeIntersection(source, target);
-  const t = nodeIntersection(target, source);
-  return {
-    sx: s.x,
-    sy: s.y,
-    tx: t.x,
-    ty: t.y,
-    sourcePos: edgePosition(source, s),
-    targetPos: edgePosition(target, t),
-  };
+  // The *side* still comes from the centre-to-centre ray, so cables re-route as
+  // nodes move. The *anchor* is then snapped to that side's actual port dot:
+  // the raw border point drifts along the side (4.6px per 16px grid step on a
+  // 184x54 card) and lands in the rounded-lg corner arc, which is the visible
+  // gap between the curve tip and the card.
+  const sourcePos = edgePosition(source, nodeIntersection(source, target));
+  const targetPos = edgePosition(target, nodeIntersection(target, source));
+  const s = handlePoint(source, sourcePos);
+  const t = handlePoint(target, targetPos);
+  return { sx: s.x, sy: s.y, tx: t.x, ty: t.y, sourcePos, targetPos };
 }

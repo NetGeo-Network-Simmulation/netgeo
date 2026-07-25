@@ -435,7 +435,7 @@ function ManualForm({ onDone }: { onDone: () => void }) {
           className="w-full rounded-md border border-fg/10 bg-recess/20 px-2 py-1.5 text-sm text-fg/90 outline-none focus:border-accent"
         >
           {CATEGORIES.map((c) => (
-            <option key={c} value={c} className="bg-[#141A2E]">
+            <option key={c} value={c}>
               {c}
             </option>
           ))}

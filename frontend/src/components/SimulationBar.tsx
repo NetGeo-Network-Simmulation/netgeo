@@ -56,7 +56,7 @@ export function SimulationBar() {
         className="ml-1 rounded bg-transparent px-1 text-xs text-fg/80 outline-none"
       >
         {SPEEDS.map((s) => (
-          <option key={s} value={s} className="bg-panel text-fg">
+          <option key={s} value={s}>
             {s}×
           </option>
         ))}

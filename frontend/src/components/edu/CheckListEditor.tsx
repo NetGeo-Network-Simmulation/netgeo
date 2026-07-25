@@ -68,7 +68,7 @@ function CheckRow({ index, check }: { index: number; check: GradeCheck }) {
           aria-label={`Check ${index + 1} kind`}
           value={check.kind}
           onChange={(e) => updateCheck(index, { kind: e.target.value as GradeCheckKind })}
-          className="flex-1 rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
+          className="flex-1 rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
         >
           {CHECK_KINDS.map((k) => (
             <option key={k} value={k}>
@@ -118,7 +118,7 @@ function CheckRow({ index, check }: { index: number; check: GradeCheck }) {
                     [f]: meta.type === 'number' ? (v === '' ? null : Number(v)) : v || null,
                   } as Partial<GradeCheck>);
                 }}
-                className="rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
+                className="rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
               />
             </label>
           );
@@ -132,7 +132,7 @@ function CheckRow({ index, check }: { index: number; check: GradeCheck }) {
             placeholder="Shown to the student as the objective"
             value={check.label ?? ''}
             onChange={(e) => updateCheck(index, { label: e.target.value || null })}
-            className="rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
+            className="rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
           />
         </label>
       </div>

@@ -66,7 +66,7 @@ export function FiberToolbar() {
           aria-label="Fiber path"
           value={selectedId ?? ''}
           onChange={(e) => select(e.target.value || null)}
-          className="max-w-[150px] rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
+          className="max-w-[150px] rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
         >
           {visible.length === 0 && <option value="">No paths</option>}
           {visible.map((p) => (
@@ -87,7 +87,7 @@ export function FiberToolbar() {
             onBlur={() => setNewName(null)}
             aria-label="New fiber path name"
             placeholder="Path name — Enter to create"
-            className="w-32 rounded-md border border-accent/50 bg-recess/60 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/35 focus:outline-none"
+            className="w-32 rounded-md border border-accent/50 bg-recess/20 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/35 focus:outline-none"
           />
         ) : (
           <button
@@ -105,7 +105,7 @@ export function FiberToolbar() {
           value={selected?.gpon_class ?? 'c_plus'}
           onChange={(e) => void setGpon(e.target.value as GponClass)}
           disabled={disabled}
-          className="rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none disabled:opacity-40"
+          className="rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none disabled:opacity-40"
         >
           {GPON_OPTIONS.map((o) => (
             <option key={o.id} value={o.id}>

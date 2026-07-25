@@ -87,7 +87,9 @@ function DeviceNodeImpl({ data, selected }: NodeProps) {
         aria-hidden
       />
 
-      {/* Connection ports: larger hit area (12px) with 8px visual dot (n8n-style).
+      {/* Connection ports (n8n-style): 8px visual dot with a 12px grab target.
+          Size lives only in globals.css `.react-flow__handle` — do not re-declare
+          it here, the two copies drifted apart and made the dots hang off-card.
           Fully revealed on hover; faint at rest so they don't crowd the canvas. */}
       {SIDES.map(([side, position]) => (
         <Handle
@@ -95,7 +97,7 @@ function DeviceNodeImpl({ data, selected }: NodeProps) {
           type="source"
           position={position}
           id={side}
-          className="!h-3 !w-3 !opacity-40 transition-opacity duration-fast group-hover:!opacity-100"
+          className="!opacity-40 transition-opacity duration-fast group-hover:!opacity-100"
         />
       ))}
 

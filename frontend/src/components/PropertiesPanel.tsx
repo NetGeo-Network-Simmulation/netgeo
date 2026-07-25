@@ -134,11 +134,11 @@ export function PropertiesPanel() {
           >
             {nosOptions.map((n) =>
               'disabled' in n && n.disabled ? (
-                <option key={n.value} value={n.value} disabled className="bg-[#141A2E] text-fg/40">
+                <option key={n.value} value={n.value} disabled className="text-fg/40">
                   {n.label}
                 </option>
               ) : (
-                <option key={n.value} value={n.value} className="bg-[#141A2E]">
+                <option key={n.value} value={n.value}>
                   {n.label}
                 </option>
               ),

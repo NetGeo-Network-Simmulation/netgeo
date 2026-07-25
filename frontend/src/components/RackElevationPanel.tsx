@@ -616,7 +616,7 @@ function RackColumn({
                     linkStatusByIface={linkStatusByIface}
                   />
                   {/* name label: small overlay so it doesn't hide the faceplate */}
-                  <span className="absolute left-0.5 top-0.5 truncate rounded bg-recess/60 px-1 text-[9px] leading-tight text-fg/80 pointer-events-none">
+                  <span className="absolute left-0.5 top-0.5 truncate rounded bg-recess/20 px-1 text-[9px] leading-tight text-fg/80 pointer-events-none">
                     {d.name}
                   </span>
                 </div>

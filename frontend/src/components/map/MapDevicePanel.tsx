@@ -106,11 +106,11 @@ export function MapDevicePanel() {
                   onChange={(e) => patch({ frequency: Number(e.target.value) })}
                   className="w-full rounded-md border border-fg/10 bg-recess/20 px-2 py-1.5 text-sm text-fg/90 outline-none focus:border-accent"
                 >
-                  <option value={2.4}  className="bg-[#141A2E]">2.4 GHz</option>
-                  <option value={5}    className="bg-[#141A2E]">5 GHz</option>
-                  <option value={5.8}  className="bg-[#141A2E]">5.8 GHz</option>
-                  <option value={24}   className="bg-[#141A2E]">24 GHz (fixed wireless)</option>
-                  <option value={60}   className="bg-[#141A2E]">60 GHz (mmWave)</option>
+                  <option value={2.4}>2.4 GHz</option>
+                  <option value={5}>5 GHz</option>
+                  <option value={5.8}>5.8 GHz</option>
+                  <option value={24}>24 GHz (fixed wireless)</option>
+                  <option value={60}>60 GHz (mmWave)</option>
                 </select>
               </Field>
 

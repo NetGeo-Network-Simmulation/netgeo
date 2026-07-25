@@ -224,7 +224,7 @@ export function ActivityStudentPanel() {
             value={student}
             onChange={(e) => setStudent(e.target.value)}
             placeholder="student"
-            className="w-24 shrink-0 rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
+            className="w-24 shrink-0 rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/30 focus:border-accent/50 focus:outline-none"
           />
 
           {!started ? (

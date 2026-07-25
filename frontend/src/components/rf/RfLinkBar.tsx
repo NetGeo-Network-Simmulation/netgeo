@@ -35,7 +35,7 @@ export function EndpointSelect({
       aria-label={label}
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value || null)}
-      className="max-w-[130px] rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
+      className="max-w-[130px] rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
     >
       <option value="">{label}</option>
       {options.map((o) => (

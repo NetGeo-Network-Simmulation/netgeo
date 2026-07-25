@@ -104,7 +104,7 @@ export function CloudUplink({
           >
             {!selected && <option value="">Select adapter…</option>}
             {ifaces.map((i) => (
-              <option key={i.name} value={i.name} className="bg-[#141A2E]">
+              <option key={i.name} value={i.name}>
                 {i.name}
                 {i.is_primary ? ' ★' : ''}
                 {i.is_virtual ? ' (virtual)' : ''}
