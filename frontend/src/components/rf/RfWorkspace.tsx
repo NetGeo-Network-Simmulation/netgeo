@@ -11,15 +11,18 @@ import { useEffect } from 'react';
 import { MapView } from '@/components/map/MapView';
 import { useMapStore } from '@/store/mapStore';
 import { useRfStore } from '@/store/rfStore';
+import { useUiStore } from '@/store/uiStore';
 import { zc } from '@/theme/z';
 import { RfAnalysisPanel } from './RfAnalysisPanel';
 import { RfLinkBar } from './RfLinkBar';
 
 export function RfWorkspace() {
   const loadModels = useRfStore((s) => s.loadModels);
+  const loadStudies = useRfStore((s) => s.loadStudies);
   const pickEndpoint = useRfStore((s) => s.pickEndpoint);
   const selectedId = useMapStore((s) => s.selectedDeviceId);
   const towersVisible = useMapStore((s) => s.gisLayers['util-tower']?.visible ?? false);
+  const projectId = useUiStore((s) => s.projectId);
 
   // Load the propagation-model registry once. The tool is NOT forced to select
   // here (design 12-UI §3.1) — the link bar's "Place AP/tower" actions drive it,
@@ -27,6 +30,12 @@ export function RfWorkspace() {
   useEffect(() => {
     void loadModels();
   }, [loadModels]);
+
+  // Load saved PtMP/product-select studies for the mode selects (NG-RF cross-
+  // cutting persistence) once a project is open.
+  useEffect(() => {
+    if (projectId) void loadStudies();
+  }, [projectId, loadStudies]);
 
   // A map click that selects an AP/Tower assigns it to the next endpoint slot.
   useEffect(() => {

@@ -648,11 +648,129 @@ export interface PtpResult {
   link_ok: boolean;
   profile: ElevationProfile | null;
 }
+/**
+ * PtMP sector planning (NG-RF-04) and auto product-select (NG-RF-05) — both
+ * stateless POSTs over the same propagation registry as PtP. `RfStudy` is the
+ * save-on-demand persistence record shared by all RF study kinds (NG-RF cross-
+ * cutting): the client snapshots request + already-computed result, and reopening
+ * returns that result verbatim (no recompute).
+ */
+export interface PtmpCpe {
+  id: string;
+  lat?: number | null;
+  lon?: number | null;
+  distance_m?: number | null;
+  bearing_deg?: number | null;
+  height_m?: number;
+  rx_gain_dbi?: number;
+  misc_loss_db?: number;
+}
+export interface PtmpRequest {
+  lat: number;
+  lon: number;
+  height_m?: number;
+  azimuth_deg: number;
+  beamwidth_deg: number;
+  downtilt_deg?: number;
+  freq_mhz: number;
+  bandwidth_mhz?: number;
+  tx_power_dbm?: number;
+  tx_gain_dbi?: number;
+  rx_sensitivity_dbm?: number;
+  model_id?: string;
+  params?: Record<string, unknown>;
+  cpes: PtmpCpe[];
+}
+export interface PtmpCpeResult {
+  cpe_id: string;
+  distance_m: number;
+  bearing_deg: number;
+  in_beam: boolean;
+  path_loss_db: number;
+  rssi_dbm: number;
+  mcs: number | null;
+  modulation: string | null;
+  throughput_mbps: number;
+  served: boolean;
+}
+export interface PtmpResult {
+  model_id: string;
+  azimuth_deg: number;
+  beamwidth_deg: number;
+  freq_mhz: number;
+  bandwidth_mhz: number;
+  cpes: PtmpCpeResult[];
+  served_count: number;
+  sum_phy_mbps: number;
+  airtime_fair_mbps: number;
+}
+export interface RadioCandidate {
+  name: string;
+  tx_power_dbm: number;
+  antenna_gain_dbi: number;
+  rx_sensitivity_dbm: number;
+  cost: number;
+  bandwidth_mhz?: number;
+}
+export interface ProductSelectRequest {
+  distance_m: number;
+  freq_mhz: number;
+  target_throughput_mbps: number;
+  model_id?: string;
+  params?: Record<string, unknown>;
+  tx_height_m?: number;
+  rx_height_m?: number;
+  misc_loss_db?: number;
+  candidates: RadioCandidate[];
+}
+export interface ProductSelectItem {
+  name: string;
+  rssi_dbm: number;
+  margin_db: number;
+  predicted_throughput_mbps: number;
+  cost: number;
+  margin_per_cost: number;
+  link_closes: boolean;
+  meets_target: boolean;
+}
+export interface ProductSelectResult {
+  distance_m: number;
+  freq_mhz: number;
+  target_throughput_mbps: number;
+  ranked: ProductSelectItem[];
+}
+export type RfStudyKind = 'coverage' | 'ptp' | 'ptmp' | 'product_select';
+export interface RfStudy {
+  id: string;
+  project_id: string;
+  kind: RfStudyKind;
+  name: string;
+  request: Record<string, unknown>;
+  result: Record<string, unknown>;
+  created_at: string;
+}
+export interface RfStudyCreate {
+  project_id: string;
+  kind: RfStudyKind;
+  name?: string;
+  request: Record<string, unknown>;
+  result: Record<string, unknown>;
+}
 export const rfApi = {
   coverage: (body: CoverageRasterRequest) =>
     http.post<CoverageRasterResult>('/rf/coverage', body).then((r) => r.data),
   models: () => http.get<PropagationModelInfo[]>('/rf/models').then((r) => r.data),
   ptp: (body: PtpRequest) => http.post<PtpResult>('/rf/ptp', body).then((r) => r.data),
+  ptmp: (body: PtmpRequest) => http.post<PtmpResult>('/rf/ptmp', body).then((r) => r.data),
+  productSelect: (body: ProductSelectRequest) =>
+    http.post<ProductSelectResult>('/rf/product-select', body).then((r) => r.data),
+  studies: {
+    list: (projectId: string) =>
+      http.get<RfStudy[]>('/rf/studies', { params: { project_id: projectId } }).then((r) => r.data),
+    create: (body: RfStudyCreate) => http.post<RfStudy>('/rf/studies', body).then((r) => r.data),
+    get: (id: string) => http.get<RfStudy>(`/rf/studies/${id}`).then((r) => r.data),
+    remove: (id: string) => http.delete<{ deleted: string }>(`/rf/studies/${id}`).then((r) => r.data),
+  },
 };
 
 /* ------------------------------ Fiber / FTTH ----------------------------- */

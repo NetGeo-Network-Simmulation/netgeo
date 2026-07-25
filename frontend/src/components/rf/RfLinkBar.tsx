@@ -17,7 +17,9 @@ function useRfEndpoints() {
     .map((d) => ({ id: d.id, name: d.name }));
 }
 
-function EndpointSelect({
+/** Exported for reuse by RfAnalysisPanel's PtMP sector-AP / CPE pickers — same
+ *  compact device-select control, same tokens. */
+export function EndpointSelect({
   value,
   onChange,
   options,

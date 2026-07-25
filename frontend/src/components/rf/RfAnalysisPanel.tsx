@@ -1,12 +1,19 @@
 /**
- * RfAnalysisPanel — the right dock of the RF workspace (~380px). Summary / Link
- * Budget / Terrain / Fresnel tabs over the last `/api/rf/ptp` result. All figures
- * come straight from the backend response; only the status band, reliability, and
- * capacity are derived client-side (see rfLogic).
+ * RfAnalysisPanel — the right dock of the RF workspace (~380px). Three modes
+ * (PtP / PtMP / Auto-Select) share this one panel — a segmented control below
+ * the header switches between them, reusing the same tab-button, StatCard, and
+ * VerdictBadge visual language throughout (design decision: no new surface for
+ * NG-RF-04/05, see docs/design/14-R4-RF-PLAN.md). PtP keeps its existing
+ * Summary/Link Budget/Terrain/Fresnel sub-tabs over `/api/rf/ptp`; PtMP and
+ * Auto-Select are single-scroll form+result sections over `/api/rf/ptmp` and
+ * `/api/rf/product-select`. All physics/ranking figures come straight from the
+ * backend responses; only the status band, reliability, and capacity are
+ * derived client-side (see rfLogic).
  */
-import { RadioTower, X, Loader2, AlertTriangle, Radio } from 'lucide-react';
+import { useState } from 'react';
+import { RadioTower, X, Loader2, AlertTriangle, Radio, Plus } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
-import { useRfStore, RF_ANT_GAIN_DBI, type RfTab } from '@/store/rfStore';
+import { useRfStore, RF_ANT_GAIN_DBI, type RfTab, type RfMode, type PtmpCpeInput } from '@/store/rfStore';
 import { zc } from '@/theme/z';
 import { ProfileChart, type ChartPoint } from '@/components/map/ProfileChart';
 import {
@@ -17,13 +24,20 @@ import {
   STATUS_LABEL,
   fmtKm,
 } from './rfLogic';
-import type { PtpResult } from '@/api/client';
+import { EndpointSelect } from './RfLinkBar';
+import type { PtpResult, PtmpResult, ProductSelectResult, RadioCandidate, RfStudyKind } from '@/api/client';
 
 const TABS: { id: RfTab; label: string }[] = [
   { id: 'summary', label: 'Summary' },
   { id: 'budget', label: 'Link Budget' },
   { id: 'terrain', label: 'Terrain' },
   { id: 'fresnel', label: 'Fresnel' },
+];
+
+const MODES: { id: RfMode; label: string }[] = [
+  { id: 'ptp', label: 'PtP' },
+  { id: 'ptmp', label: 'PtMP' },
+  { id: 'product_select', label: 'Auto-Select' },
 ];
 
 function chartPoints(res: PtpResult): ChartPoint[] {
@@ -53,6 +67,43 @@ function BudgetRow({ label, value, strong }: { label: string; value: string; str
       <span className={'text-xs ' + (strong ? 'font-medium text-fg/80' : 'text-fg/55')}>{label}</span>
       <span className={'font-mono text-xs ' + (strong ? 'text-fg/90' : 'text-fg/75')}>{value}</span>
     </div>
+  );
+}
+
+/** An editable StatCard — same surface/label tokens, a number input in place of
+ *  the static value. Shared by the PtMP and Auto-Select forms. */
+function FieldInput({
+  label,
+  value,
+  onChange,
+  suffix,
+  step = 1,
+  min,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  suffix?: string;
+  step?: number;
+  min?: number;
+}) {
+  return (
+    <label className="block rounded-lg border border-fg/10 bg-recess/40 px-2.5 py-2">
+      <span className="text-[10px] uppercase tracking-wide text-fg/40">{label}</span>
+      <div className="mt-0.5 flex items-center gap-1">
+        <input
+          type="number"
+          inputMode="decimal"
+          step={step}
+          min={min}
+          value={value}
+          onChange={(e) => onChange(Number(e.target.value))}
+          aria-label={label}
+          className="w-full min-w-0 bg-transparent font-mono text-sm text-fg/85 focus:outline-none"
+        />
+        {suffix && <span className="shrink-0 text-[10px] text-fg/40">{suffix}</span>}
+      </div>
+    </label>
   );
 }
 
@@ -230,9 +281,426 @@ function FresnelLegend() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Study save/load — shared by PtMP and Auto-Select (NG-RF cross-cutting)     */
+/* -------------------------------------------------------------------------- */
+function StudySaveLoad({
+  kind,
+  request,
+  result,
+}: {
+  kind: RfStudyKind;
+  request: Record<string, unknown> | null;
+  result: Record<string, unknown> | null;
+}) {
+  const allStudies = useRfStore((s) => s.studies);
+  const studyBusy = useRfStore((s) => s.studyBusy);
+  const saveStudy = useRfStore((s) => s.saveStudy);
+  const openStudy = useRfStore((s) => s.openStudy);
+  const [name, setName] = useState('');
+  const studies = allStudies.filter((s) => s.kind === kind);
+
+  return (
+    <div className="rounded-lg border border-fg/10 bg-recess/30 p-2.5">
+      <p className="mb-1.5 text-[10px] uppercase tracking-wide text-fg/40">Saved Studies</p>
+      <select
+        aria-label="Open saved study"
+        value=""
+        onChange={(e) => e.target.value && void openStudy(e.target.value)}
+        className="w-full rounded-md border border-fg/15 bg-recess/60 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
+      >
+        <option value="">{studies.length ? 'Open a saved study…' : 'No saved studies yet'}</option>
+        {studies.map((s) => (
+          <option key={s.id} value={s.id}>
+            {s.name || s.id.slice(0, 8)}
+          </option>
+        ))}
+      </select>
+      <div className="mt-1.5 flex items-center gap-1.5">
+        <input
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder="Study name (optional)"
+          aria-label="Study name"
+          className="min-w-0 flex-1 rounded-md border border-fg/15 bg-recess/50 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/35 focus:border-accent/50 focus:outline-none"
+        />
+        <button
+          onClick={() => {
+            if (!request || !result) return;
+            void saveStudy(kind, name.trim() || undefined, request, result);
+            setName('');
+          }}
+          disabled={!result || studyBusy}
+          className="shrink-0 rounded-md bg-accent px-2.5 py-1 text-[11px] font-semibold text-accent-fg hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Save
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* PtMP sector planner (NG-RF-04)                                              */
+/* -------------------------------------------------------------------------- */
+function CpeRow({ cpe, onRemove }: { cpe: PtmpCpeInput; onRemove: () => void }) {
+  return (
+    <div className="flex items-center justify-between gap-2 rounded-md border border-fg/10 bg-recess/30 px-2 py-1 text-xs">
+      <span className="truncate text-fg/75">{cpe.name}</span>
+      <button
+        onClick={onRemove}
+        aria-label={`Remove ${cpe.name}`}
+        className="shrink-0 text-fg/40 hover:text-warning"
+      >
+        <X className="h-3 w-3" />
+      </button>
+    </div>
+  );
+}
+
+function PtmpResultView({ res }: { res: PtmpResult }) {
+  return (
+    <div className="space-y-3">
+      <div>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg/50">Sector Roll-up</p>
+        <div className="grid grid-cols-3 gap-2">
+          <StatCard label="Served" value={`${res.served_count}/${res.cpes.length}`} highlight />
+          <StatCard label="Sum PHY" value={`${res.sum_phy_mbps.toFixed(0)} Mbps`} />
+          <StatCard label="Airtime-fair" value={`${res.airtime_fair_mbps.toFixed(0)} Mbps`} />
+        </div>
+      </div>
+      <div>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg/50">Per-CPE</p>
+        <div className="space-y-1.5">
+          {res.cpes.map((c) => (
+            <div key={c.cpe_id} className="rounded-lg border border-fg/10 bg-recess/40 px-2.5 py-1.5">
+              <div className="flex items-center justify-between gap-2">
+                <span className="truncate text-xs font-medium text-fg/80">{c.cpe_id}</span>
+                <VerdictBadge ok={c.served} okLabel="Served" badLabel={c.in_beam ? 'No link' : 'Out of beam'} />
+              </div>
+              <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] text-fg/55">
+                <span>{c.rssi_dbm.toFixed(1)} dBm</span>
+                <span>{c.mcs !== null ? `MCS ${c.mcs}` : 'no MCS'}</span>
+                <span>{c.throughput_mbps.toFixed(0)} Mbps</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PtmpBody() {
+  const {
+    ptmpApId, ptmpAzimuthDeg, ptmpBeamwidthDeg, ptmpDowntiltDeg, ptmpFreqMhz, ptmpBandwidthMhz,
+    ptmpTxPowerDbm, ptmpTxGainDbi, ptmpRxSensitivityDbm, ptmpModelId, ptmpCpes, ptmpResult,
+    ptmpLastRequest, ptmpLoading, ptmpError, models,
+    setPtmpApId, setPtmpAzimuth, setPtmpBeamwidth, setPtmpDowntilt, setPtmpFreqMhz, setPtmpBandwidthMhz,
+    setPtmpTxPower, setPtmpTxGain, setPtmpRxSens, setPtmpModel, addCpeFromDevice, addManualCpe, removeCpe,
+    calculatePtmp,
+  } = useRfStore();
+  const devices = useMapStore((s) => s.deviceList());
+  const apOptions = devices.filter((d) => d.kind === 'ap' || d.kind === 'tower').map((d) => ({ id: d.id, name: d.name }));
+  const cpeOptions = devices.filter((d) => d.kind === 'cpe').map((d) => ({ id: d.id, name: d.name }));
+  const [manualLat, setManualLat] = useState('');
+  const [manualLon, setManualLon] = useState('');
+
+  const canCalc = !!ptmpApId && ptmpCpes.length > 0 && !ptmpLoading;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg/50">Sector</p>
+        <EndpointSelect value={ptmpApId} onChange={setPtmpApId} options={apOptions} label="AP / Tower site" />
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          <FieldInput label="Azimuth" value={ptmpAzimuthDeg} onChange={setPtmpAzimuth} suffix="deg" step={5} min={0} />
+          <FieldInput label="Beamwidth" value={ptmpBeamwidthDeg} onChange={setPtmpBeamwidth} suffix="deg" step={5} min={1} />
+          <FieldInput label="Downtilt" value={ptmpDowntiltDeg} onChange={setPtmpDowntilt} suffix="deg" step={1} />
+          <FieldInput label="Frequency" value={ptmpFreqMhz} onChange={setPtmpFreqMhz} suffix="MHz" step={100} min={1} />
+          <FieldInput label="Bandwidth" value={ptmpBandwidthMhz} onChange={setPtmpBandwidthMhz} suffix="MHz" step={5} min={1} />
+          <FieldInput label="TX Power" value={ptmpTxPowerDbm} onChange={setPtmpTxPower} suffix="dBm" step={1} />
+          <FieldInput label="TX Gain" value={ptmpTxGainDbi} onChange={setPtmpTxGain} suffix="dBi" step={1} />
+          <FieldInput label="RX Sens." value={ptmpRxSensitivityDbm} onChange={setPtmpRxSens} suffix="dBm" step={1} />
+        </div>
+        <label className="mt-2 block rounded-lg border border-fg/10 bg-recess/40 px-2.5 py-2">
+          <span className="text-[10px] uppercase tracking-wide text-fg/40">Model</span>
+          <select
+            value={ptmpModelId}
+            onChange={(e) => setPtmpModel(e.target.value)}
+            aria-label="Propagation model"
+            className="mt-0.5 w-full bg-transparent font-mono text-sm uppercase text-fg/85 focus:outline-none"
+          >
+            {models.length === 0 && <option value={ptmpModelId}>{ptmpModelId}</option>}
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>{m.id}</option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <div>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg/50">
+          CPEs ({ptmpCpes.length})
+        </p>
+        <div className="space-y-1.5">
+          {ptmpCpes.map((c) => (
+            <CpeRow key={c.id} cpe={c} onRemove={() => removeCpe(c.id)} />
+          ))}
+          {ptmpCpes.length === 0 && <p className="text-xs text-fg/40">No CPEs added yet.</p>}
+        </div>
+        <div className="mt-2">
+          <EndpointSelect
+            value={null}
+            onChange={(id) => id && addCpeFromDevice(id)}
+            options={cpeOptions}
+            label="Add placed CPE"
+          />
+        </div>
+        <div className="mt-1.5 flex items-center gap-1.5">
+          <input
+            value={manualLat}
+            onChange={(e) => setManualLat(e.target.value)}
+            placeholder="lat"
+            aria-label="Manual CPE latitude"
+            inputMode="decimal"
+            className="w-0 flex-1 rounded-md border border-fg/15 bg-recess/50 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/35 focus:border-accent/50 focus:outline-none"
+          />
+          <input
+            value={manualLon}
+            onChange={(e) => setManualLon(e.target.value)}
+            placeholder="lon"
+            aria-label="Manual CPE longitude"
+            inputMode="decimal"
+            className="w-0 flex-1 rounded-md border border-fg/15 bg-recess/50 px-2 py-1 text-xs text-fg/85 placeholder:text-fg/35 focus:border-accent/50 focus:outline-none"
+          />
+          <button
+            onClick={() => {
+              const lat = Number(manualLat);
+              const lon = Number(manualLon);
+              if (manualLat && manualLon && Number.isFinite(lat) && Number.isFinite(lon)) {
+                addManualCpe(lat, lon);
+                setManualLat('');
+                setManualLon('');
+              }
+            }}
+            disabled={!manualLat || !manualLon}
+            aria-label="Add manual CPE"
+            className="shrink-0 grid h-7 w-7 place-items-center rounded-md border border-fg/15 text-fg/60 hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="h-3.5 w-3.5" />
+          </button>
+        </div>
+      </div>
+
+      <button
+        onClick={() => void calculatePtmp()}
+        disabled={!canCalc}
+        className="w-full rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {ptmpLoading ? 'Computing…' : 'Calculate sector'}
+      </button>
+
+      {ptmpError && (
+        <div className="grid place-items-center gap-2 py-2 text-center text-xs text-fg/60">
+          <AlertTriangle className="h-4 w-4 text-warning" />
+          <p>{ptmpError}</p>
+        </div>
+      )}
+
+      {ptmpResult && <PtmpResultView res={ptmpResult} />}
+
+      <StudySaveLoad
+        kind="ptmp"
+        request={ptmpLastRequest as unknown as Record<string, unknown> | null}
+        result={ptmpResult as unknown as Record<string, unknown> | null}
+      />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Auto product-select (NG-RF-05)                                             */
+/* -------------------------------------------------------------------------- */
+function CandidateRow({
+  candidate,
+  onChange,
+  onRemove,
+}: {
+  candidate: RadioCandidate;
+  onChange: (patch: Partial<RadioCandidate>) => void;
+  onRemove: () => void;
+}) {
+  return (
+    <div className="rounded-lg border border-fg/10 bg-recess/40 px-2.5 py-2">
+      <div className="flex items-center gap-2">
+        <input
+          value={candidate.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+          aria-label="Candidate name"
+          className="min-w-0 flex-1 bg-transparent text-xs font-medium text-fg/85 focus:outline-none"
+        />
+        <button
+          onClick={onRemove}
+          aria-label={`Remove ${candidate.name}`}
+          className="shrink-0 text-fg/40 hover:text-warning"
+        >
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+      <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+        <MiniField label="TX dBm" value={candidate.tx_power_dbm} onChange={(v) => onChange({ tx_power_dbm: v })} />
+        <MiniField label="Gain dBi" value={candidate.antenna_gain_dbi} onChange={(v) => onChange({ antenna_gain_dbi: v })} />
+        <MiniField label="Sens dBm" value={candidate.rx_sensitivity_dbm} onChange={(v) => onChange({ rx_sensitivity_dbm: v })} />
+        <MiniField label="Cost" value={candidate.cost} onChange={(v) => onChange({ cost: v })} />
+        <MiniField label="BW MHz" value={candidate.bandwidth_mhz ?? 20} onChange={(v) => onChange({ bandwidth_mhz: v })} />
+      </div>
+    </div>
+  );
+}
+
+function MiniField({ label, value, onChange }: { label: string; value: number; onChange: (v: number) => void }) {
+  return (
+    <label className="flex items-center justify-between gap-1 rounded border border-fg/10 bg-recess/50 px-1.5 py-0.5">
+      <span className="text-[9px] uppercase text-fg/40">{label}</span>
+      <input
+        type="number"
+        inputMode="decimal"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+        aria-label={label}
+        className="w-12 min-w-0 bg-transparent text-right font-mono text-[11px] text-fg/85 focus:outline-none"
+      />
+    </label>
+  );
+}
+
+function ProductSelectResultView({ res }: { res: ProductSelectResult }) {
+  return (
+    <div>
+      <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg/50">
+        Ranked (best margin/cost first)
+      </p>
+      <div className="space-y-1.5">
+        {res.ranked.map((r) => (
+          <div key={r.name} className="rounded-lg border border-fg/10 bg-recess/40 px-2.5 py-1.5">
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-xs font-medium text-fg/80">{r.name}</span>
+              <VerdictBadge ok={r.meets_target} okLabel="Meets target" badLabel={r.link_closes ? 'Below target' : 'No link'} />
+            </div>
+            <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 font-mono text-[11px] text-fg/55">
+              <span>{r.rssi_dbm.toFixed(1)} dBm</span>
+              <span>margin {r.margin_db.toFixed(1)} dB</span>
+              <span>{r.predicted_throughput_mbps.toFixed(0)} Mbps</span>
+              <span>cost {r.cost}</span>
+              <span>{r.margin_per_cost.toFixed(3)}/cost</span>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProductSelectBody() {
+  const {
+    psDistanceM, psFreqMhz, psTargetMbps, psTxHeightM, psRxHeightM, psMiscLossDb, psModelId,
+    psCandidates, psResult, psLastRequest, psLoading, psError, models, result: ptpResult,
+    setPsDistance, setPsFreq, setPsTarget, setPsTxHeight, setPsRxHeight, setPsMiscLoss, setPsModel,
+    addCandidate, updateCandidate, removeCandidate, fillFromPtp, calculateProductSelect,
+  } = useRfStore();
+
+  const canCalc = psCandidates.length > 0 && psDistanceM > 0 && psFreqMhz > 0 && !psLoading;
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg/50">Link Requirement</p>
+        <div className="grid grid-cols-2 gap-2">
+          <FieldInput label="Distance" value={psDistanceM} onChange={setPsDistance} suffix="m" step={10} min={1} />
+          <FieldInput label="Frequency" value={psFreqMhz} onChange={setPsFreq} suffix="MHz" step={100} min={1} />
+          <FieldInput label="Target" value={psTargetMbps} onChange={setPsTarget} suffix="Mbps" step={10} min={0} />
+          <FieldInput label="Misc Loss" value={psMiscLossDb} onChange={setPsMiscLoss} suffix="dB" step={0.5} />
+          <FieldInput label="TX Height" value={psTxHeightM} onChange={setPsTxHeight} suffix="m" step={1} min={0.1} />
+          <FieldInput label="RX Height" value={psRxHeightM} onChange={setPsRxHeight} suffix="m" step={1} min={0.1} />
+        </div>
+        <label className="mt-2 block rounded-lg border border-fg/10 bg-recess/40 px-2.5 py-2">
+          <span className="text-[10px] uppercase tracking-wide text-fg/40">Model</span>
+          <select
+            value={psModelId}
+            onChange={(e) => setPsModel(e.target.value)}
+            aria-label="Propagation model"
+            className="mt-0.5 w-full bg-transparent font-mono text-sm uppercase text-fg/85 focus:outline-none"
+          >
+            {models.length === 0 && <option value={psModelId}>{psModelId}</option>}
+            {models.map((m) => (
+              <option key={m.id} value={m.id}>{m.id}</option>
+            ))}
+          </select>
+        </label>
+        {ptpResult && (
+          <button
+            onClick={fillFromPtp}
+            className="mt-2 text-[11px] font-medium text-accent hover:underline"
+          >
+            Use last PtP link's distance + frequency
+          </button>
+        )}
+      </div>
+
+      <div>
+        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-fg/50">
+          Candidates ({psCandidates.length})
+        </p>
+        <div className="space-y-1.5">
+          {psCandidates.map((c, i) => (
+            <CandidateRow
+              key={i}
+              candidate={c}
+              onChange={(patch) => updateCandidate(i, patch)}
+              onRemove={() => removeCandidate(i)}
+            />
+          ))}
+        </div>
+        <button
+          onClick={addCandidate}
+          className="mt-1.5 inline-flex items-center gap-1 rounded-md border border-fg/15 bg-recess/50 px-2.5 py-1 text-xs font-medium text-fg/80 hover:border-accent/50 hover:text-fg"
+        >
+          <Plus className="h-3 w-3" /> Add candidate
+        </button>
+      </div>
+
+      <button
+        onClick={() => void calculateProductSelect()}
+        disabled={!canCalc}
+        className="w-full rounded-lg bg-accent px-3 py-1.5 text-xs font-semibold text-accent-fg hover:bg-accent-soft disabled:cursor-not-allowed disabled:opacity-40"
+      >
+        {psLoading ? 'Ranking…' : 'Rank candidates'}
+      </button>
+
+      {psError && (
+        <div className="grid place-items-center gap-2 py-2 text-center text-xs text-fg/60">
+          <AlertTriangle className="h-4 w-4 text-warning" />
+          <p>{psError}</p>
+        </div>
+      )}
+
+      {psResult && <ProductSelectResultView res={psResult} />}
+
+      <StudySaveLoad
+        kind="product_select"
+        request={psLastRequest as unknown as Record<string, unknown> | null}
+        result={psResult as unknown as Record<string, unknown> | null}
+      />
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
 /* Panel shell                                                                 */
 /* -------------------------------------------------------------------------- */
 export function RfAnalysisPanel() {
+  const mode = useRfStore((s) => s.mode);
+  const setMode = useRfStore((s) => s.setMode);
   const tab = useRfStore((s) => s.tab);
   const setTab = useRfStore((s) => s.setTab);
   const result = useRfStore((s) => s.result);
@@ -246,43 +714,69 @@ export function RfAnalysisPanel() {
   return (
     <aside
       role="region"
-      aria-label="Link Analysis"
+      aria-label="RF Planning"
       className={`glass-strong pointer-events-auto absolute right-0 top-0 ${zc.workspace} flex h-full w-[380px] max-w-[85vw] flex-col border-l border-fg/12 shadow-glass-lg`}
     >
       {/* Header */}
       <div className="flex items-center gap-2 border-b border-fg/10 px-4 py-3">
         <RadioTower className="h-4 w-4 text-accent" />
-        <h2 className="text-sm font-semibold text-fg/85">Link Analysis</h2>
-        <button
-          onClick={clear}
-          aria-label="Clear analysis"
-          className="ml-auto grid h-6 w-6 place-items-center rounded text-fg/50 hover:bg-fg/10 hover:text-fg"
-        >
-          <X className="h-4 w-4" />
-        </button>
+        <h2 className="text-sm font-semibold text-fg/85">RF Planning</h2>
+        {mode === 'ptp' && (
+          <button
+            onClick={clear}
+            aria-label="Clear analysis"
+            className="ml-auto grid h-6 w-6 place-items-center rounded text-fg/50 hover:bg-fg/10 hover:text-fg"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        )}
       </div>
 
-      {/* Tabs */}
-      <div role="tablist" aria-label="Link analysis views" className="flex gap-1 border-b border-fg/10 px-2 py-1.5">
-        {TABS.map((t) => (
+      {/* Mode selector */}
+      <div role="tablist" aria-label="RF planning mode" className="flex gap-1 border-b border-fg/10 px-2 py-1.5">
+        {MODES.map((m) => (
           <button
-            key={t.id}
+            key={m.id}
             role="tab"
-            aria-selected={tab === t.id}
-            onClick={() => setTab(t.id)}
+            aria-selected={mode === m.id}
+            onClick={() => setMode(m.id)}
             className={
-              'rounded-md px-2.5 py-1 text-xs transition-colors ' +
-              (tab === t.id ? 'bg-accent/20 text-accent' : 'text-fg/55 hover:bg-fg/8 hover:text-fg/85')
+              'rounded-md px-2.5 py-1 text-xs font-medium transition-colors ' +
+              (mode === m.id ? 'bg-accent/20 text-accent' : 'text-fg/55 hover:bg-fg/8 hover:text-fg/85')
             }
           >
-            {t.label}
+            {m.label}
           </button>
         ))}
       </div>
 
+      {/* PtP sub-tabs (Summary / Link Budget / Terrain / Fresnel) */}
+      {mode === 'ptp' && (
+        <div role="tablist" aria-label="Link analysis views" className="flex gap-1 border-b border-fg/10 px-2 py-1.5">
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              onClick={() => setTab(t.id)}
+              className={
+                'rounded-md px-2.5 py-1 text-xs transition-colors ' +
+                (tab === t.id ? 'bg-accent/20 text-accent' : 'text-fg/55 hover:bg-fg/8 hover:text-fg/85')
+              }
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Body */}
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {error ? (
+        {mode === 'ptmp' ? (
+          <PtmpBody />
+        ) : mode === 'product_select' ? (
+          <ProductSelectBody />
+        ) : error ? (
           <div className="grid place-items-center gap-2 py-10 text-center text-xs text-fg/60">
             <AlertTriangle className="h-5 w-5 text-warning" />
             <p className="max-w-[16rem]">{error}</p>
