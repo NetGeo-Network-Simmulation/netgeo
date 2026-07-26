@@ -17,7 +17,6 @@ import { NavigationRail } from './NavigationRail';
 import { StatusBar } from './StatusBar';
 import { BottomDrawer } from './BottomDrawer';
 import { ModalLayer } from './ModalLayer';
-import { MapView } from '@/components/map/MapView';
 import { TopologyCanvas } from '@/components/canvas/TopologyCanvas';
 import { TopologyToolbar } from '@/components/topology/TopologyToolbar';
 import { ContextInspector } from '@/components/topology/ContextInspector';
@@ -25,7 +24,6 @@ import { DevicePicker } from '@/components/topology/DevicePicker';
 import { CommandPalette } from '@/components/CommandPalette';
 import { SimulationDock } from '@/components/SimulationDock';
 import { TwinWorkspace } from '@/components/twin/TwinWorkspace';
-import { RfWorkspace } from '@/components/rf/RfWorkspace';
 import { FiberWorkspace } from '@/components/fiber/FiberWorkspace';
 import { PlantWorkspace } from '@/components/plant/PlantWorkspace';
 
@@ -33,6 +31,18 @@ import { PlantWorkspace } from '@/components/plant/PlantWorkspace';
 // lazy so its bundle stays out of the initial load until the module is opened.
 const EduWorkspace = lazy(() =>
   import('@/components/edu/EduWorkspace').then((m) => ({ default: m.EduWorkspace })),
+);
+
+// Map + RF workspaces both pull in maplibre-gl (WebGL globe engine, ~200kB+
+// gzipped) — lazy so that cost is only paid when a map view actually opens,
+// not on every route including login (gate: entry chunk must not carry it).
+// RfWorkspace statically imports MapView itself; splitting both here means
+// Rollup puts maplibre-gl in their shared async chunk, never the entry one.
+const MapView = lazy(() =>
+  import('@/components/map/MapView').then((m) => ({ default: m.MapView })),
+);
+const RfWorkspace = lazy(() =>
+  import('@/components/rf/RfWorkspace').then((m) => ({ default: m.RfWorkspace })),
 );
 
 // Projects Portal — card grid of every project. Lazy: it's an entry surface,
@@ -89,11 +99,27 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
               <ProjectsWorkspace />
             </Suspense>
           ) : viewMode === 'map' ? (
-            <MapView />
+            <Suspense
+              fallback={
+                <div className="grid h-full w-full place-items-center bg-surface text-fg/50">
+                  <Loader2 className="h-6 w-6 animate-spin text-accent" />
+                </div>
+              }
+            >
+              <MapView />
+            </Suspense>
           ) : viewMode === 'twin' ? (
             <TwinWorkspace />
           ) : viewMode === 'rf' ? (
-            <RfWorkspace />
+            <Suspense
+              fallback={
+                <div className="grid h-full w-full place-items-center bg-surface text-fg/50">
+                  <Loader2 className="h-6 w-6 animate-spin text-accent" />
+                </div>
+              }
+            >
+              <RfWorkspace />
+            </Suspense>
           ) : viewMode === 'fiber' ? (
             <FiberWorkspace />
           ) : viewMode === 'plant' ? (
