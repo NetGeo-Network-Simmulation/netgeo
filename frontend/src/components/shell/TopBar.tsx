@@ -19,6 +19,7 @@ import { SimulationBar } from '@/components/SimulationBar';
 import { ModeSwitch } from '@/components/ModeSwitch';
 import { UpdatesButton } from '@/components/shell/UpdatesButton';
 import { PresenceBar } from '@/components/shell/PresenceBar';
+import { GROUPS, isGroupActive, activateMember, type RailMember } from '@/components/shell/NavigationRail';
 import { cn } from '@/lib/cn';
 
 interface TopBarProps {
@@ -48,16 +49,73 @@ function NetGeoMark() {
   );
 }
 
+/**
+ * SubNavStrip — reaches the non-primary members of the active rail group
+ * (design decision NG-SHELL-01: the rail collapsed 13 items into 5 groups;
+ * this is the cheapest surface to keep every one of them reachable — a
+ * small segmented control in the one header that's already mounted for
+ * every workspace, vs. a new anchored-popover primitive on the rail).
+ * Hidden entirely when the active group has only one member (Projects).
+ */
+function SubNavStrip() {
+  const viewMode = useUiStore((s) => s.viewMode);
+  const activeModal = useUiStore((s) => s.activeModal);
+  const drawerOpen = useUiStore((s) => s.drawerOpen);
+  const drawerTab = useUiStore((s) => s.drawerTab);
+
+  const group = GROUPS.find((g) => isGroupActive(g, viewMode));
+  if (!group || group.members.length < 2) return null;
+
+  const isMemberActive = (m: RailMember): boolean => {
+    if ('view' in m) return viewMode === m.view;
+    if (m.action === 'scenarios') return activeModal === 'scenarios';
+    return drawerOpen && drawerTab === 'diagnostics';
+  };
+
+  return (
+    <div
+      role="tablist"
+      aria-label={`${group.label} sections`}
+      className="flex items-center gap-0.5 rounded-lg border border-fg/10 bg-fg/5 p-0.5"
+    >
+      {group.members.map((m) => {
+        const active = isMemberActive(m);
+        const Icon = m.icon;
+        return (
+          <button
+            key={m.key}
+            role="tab"
+            aria-selected={active}
+            onClick={() => activateMember(m)}
+            title={m.label}
+            className={cn(
+              'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+              active ? 'bg-accent/20 text-accent' : 'text-fg/55 hover:bg-fg/8 hover:text-fg/90',
+            )}
+          >
+            <Icon className="h-3.5 w-3.5" />
+            <span className="hidden sm:inline">{m.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function TopBar({ projectName, conn }: TopBarProps) {
   const theme = useUiStore((s) => s.theme);
   const toggleTheme = useUiStore((s) => s.toggleTheme);
   const openModal = useUiStore((s) => s.openModal);
+  const closeModal = useUiStore((s) => s.closeModal);
+  // Shared with the command palette and UpdatesButton (uiStore.activeModal) so
+  // opening one closes the others, and Escape-to-close is the global handler
+  // in useShortcuts — no per-popover Escape listener needed.
+  const userMenuOpen = useUiStore((s) => s.activeModal === 'userMenu');
   const projectId = useUiStore((s) => s.projectId);
   const dirty = useTopologyStore((s) => s.dirty);
   const username = useAuthStore((s) => s.username);
   const logout = useAuthStore((s) => s.logout);
   const [clock, setClock] = useState(() => new Date());
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -66,12 +124,13 @@ export function TopBar({ projectName, conn }: TopBarProps) {
   }, []);
 
   useEffect(() => {
+    if (!userMenuOpen) return;
     const handler = (e: MouseEvent) => {
-      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) setUserMenuOpen(false);
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) closeModal();
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
-  }, []);
+  }, [userMenuOpen, closeModal]);
 
   const online = conn === 'open';
 
@@ -94,6 +153,8 @@ export function TopBar({ projectName, conn }: TopBarProps) {
         {dirty ? <span className="h-1.5 w-1.5 rounded-full bg-warning" /> : <Check className="h-3.5 w-3.5" />}
         {dirty ? 'Unsaved' : 'Saved'}
       </span>
+
+      <SubNavStrip />
 
       {/* Command bar (center) */}
       <div className="mx-2 flex flex-1 justify-center">
@@ -160,7 +221,7 @@ export function TopBar({ projectName, conn }: TopBarProps) {
 
         <div className="relative" ref={userMenuRef}>
           <button
-            onClick={() => setUserMenuOpen((v) => !v)}
+            onClick={() => (userMenuOpen ? closeModal() : openModal('userMenu'))}
             aria-label="User menu"
             className="grid h-8 w-8 place-items-center rounded-full bg-accent/25 text-xs font-semibold text-accent transition-colors hover:bg-accent/40"
           >
@@ -174,16 +235,16 @@ export function TopBar({ projectName, conn }: TopBarProps) {
                 <p className="text-[10px] text-fg/40">Local account</p>
               </div>
               <button
-                onClick={() => {
-                  setUserMenuOpen(false);
-                  openModal('settings');
-                }}
+                onClick={() => openModal('settings')}
                 className="flex w-full items-center gap-2 px-3 py-2 text-xs text-fg/70 hover:bg-fg/8 hover:text-fg"
               >
                 <Settings2 className="h-3.5 w-3.5" /> Settings
               </button>
               <button
-                onClick={logout}
+                onClick={() => {
+                  closeModal();
+                  logout();
+                }}
                 className="flex w-full items-center gap-2 px-3 py-2 text-xs text-danger/80 hover:bg-danger/10 hover:text-danger"
               >
                 <LogOut className="h-3.5 w-3.5" /> Sign out

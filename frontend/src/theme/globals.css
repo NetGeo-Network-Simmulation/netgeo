@@ -51,6 +51,34 @@ body {
     background: var(--ng-panel, #1f1e1d);
     border-color: var(--ng-border, rgba(250, 249, 245, 0.12));
   }
+
+  /* Device-rail chassis chrome (NavigationRail) — approved design:
+     docs/design/stitch-html/clay/shell-device-rail/. Token-driven so it
+     re-skins with the theme like every other surface here: chassis body
+     reuses --ng-panel (identical to .panel), sockets sit one layer down at
+     --ng-bg-0 (the app's recessed "ground" tone — exact match to the Stitch
+     light chassis's #EFEDE6, close warm-charcoal match to its dark #141413).
+     The bevel/depth shadows are structural (black-alpha), matching the
+     existing boxShadow.glass/.glass-lg tokens' own convention. */
+  .rail-chassis {
+    background: var(--ng-panel, #1f1e1d);
+    border-color: var(--ng-border, rgba(250, 249, 245, 0.12));
+    box-shadow:
+      0 20px 60px rgba(0, 0, 0, 0.28),
+      inset 0 1px 1px rgba(255, 255, 255, 0.08),
+      inset 0 -2px 4px rgba(0, 0, 0, 0.35);
+  }
+  .rail-socket {
+    background: var(--ng-bg-0, #0f0f0e);
+    box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.4), 0 1px 1px rgba(255, 255, 255, 0.05);
+  }
+  /* Procedural metal-grain noise (SVG feTurbulence data-uri) — cheap, no
+     raster asset. */
+  .rail-grain {
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.06'/%3E%3C/svg%3E");
+    mix-blend-mode: overlay;
+    opacity: 0.5;
+  }
 }
 
 /* ---- Scrollbars (thin, theme-friendly) ------------------------------------ */

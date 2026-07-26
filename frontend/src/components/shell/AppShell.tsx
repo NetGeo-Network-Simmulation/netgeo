@@ -69,10 +69,15 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
     <div className="flex h-screen w-screen flex-col overflow-hidden">
       <TopBar projectName={projectName} conn={conn} />
 
-      <div className="flex min-h-0 flex-1">
+      {/* relative: anchors the floating device-rail (design 12-UI shell-device-
+          rail). The rail is `absolute` so it no longer reserves flex width —
+          canvas workspaces (topology/map) let it float over content, same as
+          the existing TopologyToolbar/ContextInspector overlays; flow-layout
+          workspaces get pl-[120px] on <main> below so their content clears it. */}
+      <div className="relative flex min-h-0 flex-1">
         <NavigationRail />
 
-        <main className="relative min-w-0 flex-1 overflow-hidden" aria-label="Workspace">
+        <main className="relative min-w-0 flex-1 overflow-hidden pl-[120px]" aria-label="Workspace">
           {viewMode === 'projects' ? (
             <Suspense
               fallback={

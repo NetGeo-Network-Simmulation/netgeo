@@ -14,7 +14,11 @@ export type ViewMode = 'projects' | 'topology' | 'map' | 'twin' | 'rf' | 'fiber'
 /** Bottom-drawer tabs (design 12-UI §2.1) — each body is an existing panel. */
 export type DrawerTab = 'console' | 'diagnostics' | 'ledger' | 'config';
 
-/** The single modal slot (design 12-UI §2.3). Exactly one open at a time. */
+/** The single modal slot (design 12-UI §2.3). Exactly one open at a time.
+ *  'updates' and 'userMenu' are TopBar corner popovers, not ModalScrim dialogs —
+ *  they render inline in their own component, but share this slot so they,
+ *  the command palette, and every other modal stay mutually exclusive for free
+ *  (single-slot eviction + the existing global Escape handler in useShortcuts). */
 export type ModalId =
   | 'command'
   | 'settings'
@@ -26,7 +30,9 @@ export type ModalId =
   | 'onboarding'
   | 'mapOnboarding'
   | 'addressingWizard'
-  | 'iconLibrary';
+  | 'iconLibrary'
+  | 'updates'
+  | 'userMenu';
 
 /** The workspace views that own a URL path (all of them). ViewMode === path slug,
  *  so the map is the identity — but listing them keeps the parse total + typed. */

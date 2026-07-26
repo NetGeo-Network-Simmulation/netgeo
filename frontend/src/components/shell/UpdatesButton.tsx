@@ -15,6 +15,7 @@ import {
   type UpdateCheck,
   type UpdateStatus,
 } from '@/api/client';
+import { useUiStore } from '@/store/uiStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
 
@@ -66,7 +67,13 @@ function plainNotes(md: string): string {
 }
 
 export function UpdatesButton() {
-  const [open, setOpen] = useState(false);
+  // Shared with the command palette and TopBar's user menu (uiStore.activeModal)
+  // so opening one closes the others, and Escape-to-close comes for free from
+  // the global handler in useShortcuts.
+  const open = useUiStore((s) => s.activeModal === 'updates');
+  const openModal = useUiStore((s) => s.openModal);
+  const closeModal = useUiStore((s) => s.closeModal);
+  const rootRef = useRef<HTMLDivElement>(null);
   // `info` holds the last *successful* check so the version stays visible even
   // if a later refresh fails. `error` is tracked separately from `info` so a
   // transient failure does not wipe out a known-good version, and so we never
@@ -102,6 +109,16 @@ export function UpdatesButton() {
   }, [check]);
 
   useEffect(() => () => clearInterval(pollRef.current), []);
+
+  // Close on click outside (same pattern as TopBar's user menu).
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) closeModal();
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [open, closeModal]);
 
   const apply = useCallback(async () => {
     // The admin session authorises the update; only prompt for the extra
@@ -144,9 +161,9 @@ export function UpdatesButton() {
   const upToDate = !!info && !error && !available;
 
   return (
-    <div className="relative">
+    <div className="relative" ref={rootRef}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => (open ? closeModal() : openModal('updates'))}
         aria-label="Updates"
         title={available ? `Update available: ${info?.latest}` : 'Check for updates'}
         className={cn(
