@@ -16,7 +16,7 @@ import { fetchElevations, samplePath } from './elevation';
 /* Constants                                                                   */
 /* -------------------------------------------------------------------------- */
 const SPEED_OF_LIGHT = 3e8; // m/s
-const EARTH_RADIUS = 6_371_000; // m
+const EARTH_RADIUS = 6_378_137; // m — WGS84 semi-major axis (a), spherical model, matches UISP
 
 /* -------------------------------------------------------------------------- */
 /* 1. Free Space Path Loss (already in mapStore, duplicated here for ref)      */

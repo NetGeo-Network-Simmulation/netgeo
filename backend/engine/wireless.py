@@ -29,7 +29,7 @@ from enum import Enum
 
 # 20*log10(4*pi/c), c = speed of light in m/s. Pre-computed for the hot path.
 _FSPL_CONST = 20.0 * math.log10(4.0 * math.pi / 299_792_458.0)  # ≈ -147.55
-EARTH_RADIUS_M = 6_371_000.0
+EARTH_RADIUS_M = 6_378_137.0  # WGS84 semi-major axis (a), spherical model — matches UISP
 
 
 class LinkQuality(str, Enum):

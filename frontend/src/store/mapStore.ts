@@ -88,7 +88,7 @@ export function calcRssi(txPower: number, distanceM: number, freqGhz: number): n
 
 /** Haversine distance in metres between two lat/lng points. */
 export function haversineM(lat1: number, lng1: number, lat2: number, lng2: number): number {
-  const R = 6_371_000;
+  const R = 6_378_137; // WGS84 semi-major axis (a), spherical model — matches UISP
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
   const dLng = ((lng2 - lng1) * Math.PI) / 180;
   const a =
