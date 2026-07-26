@@ -15,6 +15,9 @@ import { zc } from '@/theme/z';
 import { useFiberStore } from '@/store/fiberStore';
 import { GPON_OPTIONS, SPLIT_RATIOS } from './fiberLogic';
 import type { GponClass } from '@/api/client';
+import { Select } from '@/components/ui/Select';
+
+const SPLIT_RATIO_OPTIONS = SPLIT_RATIOS.map((r) => ({ value: String(r), label: String(r) }));
 
 function AppendButton({ label, onClick, disabled }: { label: string; onClick: () => void; disabled?: boolean }) {
   return (
@@ -62,19 +65,14 @@ export function FiberToolbar() {
     <div className={cn('pointer-events-auto absolute bottom-8', zc.workspace)} style={{ left: 'calc(50% - 190px)' }}>
       <div className="glass-strong flex flex-wrap items-center gap-2 rounded-xl border border-fg/15 px-3 py-2 shadow-glass-lg">
         {/* Path selection */}
-        <select
+        <Select
           aria-label="Fiber path"
           value={selectedId ?? ''}
-          onChange={(e) => select(e.target.value || null)}
-          className="max-w-[150px] rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
-        >
-          {visible.length === 0 && <option value="">No paths</option>}
-          {visible.map((p) => (
-            <option key={p.id} value={p.id}>
-              {p.name}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => select(v || null)}
+          placeholder="No paths"
+          options={visible.map((p) => ({ value: p.id, label: p.name }))}
+          className="max-w-[150px]"
+        />
         {newName !== null ? (
           <input
             autoFocus
@@ -100,19 +98,13 @@ export function FiberToolbar() {
             <Plus className="h-4 w-4" />
           </button>
         )}
-        <select
+        <Select
           aria-label="GPON class"
           value={selected?.gpon_class ?? 'c_plus'}
-          onChange={(e) => void setGpon(e.target.value as GponClass)}
+          onChange={(v) => void setGpon(v as GponClass)}
           disabled={disabled}
-          className="rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none disabled:opacity-40"
-        >
-          {GPON_OPTIONS.map((o) => (
-            <option key={o.id} value={o.id}>
-              {o.label}
-            </option>
-          ))}
-        </select>
+          options={GPON_OPTIONS.map((o) => ({ value: o.id, label: o.label }))}
+        />
         <button
           onClick={() => selected && void deletePath(selected.id)}
           disabled={disabled}
@@ -146,19 +138,14 @@ export function FiberToolbar() {
         </div>
         <div className="flex items-center gap-1 rounded-md border border-fg/15 bg-recess/40 px-1.5 py-0.5">
           <span className="text-[9px] text-fg/40">1:</span>
-          <select
+          <Select
             aria-label="Splitter ratio"
-            value={ratio}
-            onChange={(e) => setRatio(Number(e.target.value))}
+            value={String(ratio)}
+            onChange={(v) => setRatio(Number(v))}
             disabled={disabled}
-            className="bg-transparent font-mono text-xs text-fg/85 focus:outline-none disabled:opacity-40"
-          >
-            {SPLIT_RATIOS.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
+            options={SPLIT_RATIO_OPTIONS}
+            className="w-16"
+          />
           <AppendButton
             label="Splitter"
             disabled={disabled}

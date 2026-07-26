@@ -23,6 +23,7 @@ import {
   type ApiError,
 } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
+import { Select } from '@/components/ui/Select';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
 
@@ -429,17 +430,13 @@ function ManualForm({ onDone }: { onDone: () => void }) {
       </Field>
 
       <Field label="Category">
-        <select
+        <Select
+          aria-label="Category"
           value={category}
-          onChange={(e) => setCategory(e.target.value)}
-          className="w-full rounded-md border border-fg/10 bg-recess/20 px-2 py-1.5 text-sm text-fg/90 outline-none focus:border-accent"
-        >
-          {CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+          onChange={setCategory}
+          options={CATEGORIES.map((c) => ({ value: c, label: c }))}
+          className="w-full"
+        />
       </Field>
 
       <Field label="Description (optional)">

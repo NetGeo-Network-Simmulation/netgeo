@@ -260,32 +260,21 @@ html[data-theme='dark'] .leaflet-container {
 }
 
 /* ---- Native form controls -------------------------------------------------- */
-/* The <select> popup is painted by the browser on an opaque light base, so the
-   translucent backgrounds every closed control uses (bg-transparent, bg-fg/5,
-   bg-recess/20 …) composite to near-white there — the "white dropdown in a dark
-   app" bug. Pin an opaque themed pair on the rows once, here, instead of at 45
-   call sites. Both vars flip per theme (tokens.ts THEMES), so this is
-   theme-aware in both directions.
-   ponytail: element selectors are (0,0,1) and lose to any Tailwind class on the
-   <option>, so the stale bg-[#141A2E] / bg-neutral-900 classNames are deleted
-   rather than fought with !important. */
+/* v1.2.048: every <select> in the app was replaced by components/ui/Select.tsx
+   (themed trigger + our own listbox) — the OS paints a <select> popup's
+   highlighted/selected row in the platform accent colour, which no CSS here
+   can override (confirmed Chromium + Firefox × light + dark). This rule now
+   only reaches the <option>s still native and legitimate: <datalist>
+   autocomplete suggestions (DiagnosticsPanel, twin/ReachabilityBar) render
+   through the browser's own popup the same way <select> did, so they get the
+   same opaque themed pair instead of an OS-painted white box.
+   ponytail: element selectors are (0,0,1), lower than any Tailwind class, but
+   nothing on these <option>s carries a competing className, so no !important
+   needed. */
 option,
 optgroup {
   background-color: var(--ng-panel);
   color: var(--ng-fg);
-}
-
-/* Fallback for the row `color` above: Chromium on Linux/GTK has historically
-   ignored author `color` on <option>, which would leave dark text on the new
-   dark row. Naming the scheme on the control itself forces the browser's own
-   dark popup path instead. Also covers the pre-hydration frame, where
-   index.html's `dark light` meta lets an OS light preference win before
-   tokens.ts writes color-scheme onto <html>. */
-select {
-  color-scheme: dark;
-}
-html[data-theme='light'] select {
-  color-scheme: light;
 }
 
 /* Native checkbox / radio / range tick the brand accent in both themes.

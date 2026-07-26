@@ -7,6 +7,15 @@ import { Radio, Smartphone, RadioTower, MapPin, Signal, X, Mountain } from 'luci
 import { useMapStore, calcRssi, rssiColor, type MapDeviceKind } from '@/store/mapStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { Select } from '@/components/ui/Select';
+
+const FREQ_OPTIONS = [
+  { value: '2.4', label: '2.4 GHz' },
+  { value: '5', label: '5 GHz' },
+  { value: '5.8', label: '5.8 GHz' },
+  { value: '24', label: '24 GHz (fixed wireless)' },
+  { value: '60', label: '60 GHz (mmWave)' },
+];
 
 const KIND_META: Record<MapDeviceKind, { label: string; icon: typeof Radio; color: string }> = {
   ap:    { label: 'Access Point',  icon: Radio,       color: '#5856D6' },
@@ -101,17 +110,13 @@ export function MapDevicePanel() {
               </Field>
 
               <Field label="Frequency (GHz)">
-                <select
-                  value={device.frequency}
-                  onChange={(e) => patch({ frequency: Number(e.target.value) })}
-                  className="w-full rounded-md border border-fg/10 bg-recess/20 px-2 py-1.5 text-sm text-fg/90 outline-none focus:border-accent"
-                >
-                  <option value={2.4}>2.4 GHz</option>
-                  <option value={5}>5 GHz</option>
-                  <option value={5.8}>5.8 GHz</option>
-                  <option value={24}>24 GHz (fixed wireless)</option>
-                  <option value={60}>60 GHz (mmWave)</option>
-                </select>
+                <Select
+                  aria-label="Frequency (GHz)"
+                  value={String(device.frequency)}
+                  onChange={(v) => patch({ frequency: Number(v) })}
+                  options={FREQ_OPTIONS}
+                  className="w-full"
+                />
               </Field>
 
               <Field label="Coverage Radius (m)">

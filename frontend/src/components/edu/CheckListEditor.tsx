@@ -8,6 +8,9 @@ import { Plus, Trash2 } from 'lucide-react';
 import type { GradeCheck, GradeCheckKind } from '@/api/types';
 import { useEduStore } from '@/store/eduStore';
 import { CHECK_KINDS, CHECK_KIND_LABEL, CHECK_KIND_FIELDS } from './eduLogic';
+import { Select } from '@/components/ui/Select';
+
+const CHECK_KIND_OPTIONS = CHECK_KINDS.map((k) => ({ value: k, label: CHECK_KIND_LABEL[k] }));
 
 const FIELD_META: Record<
   string,
@@ -64,18 +67,13 @@ function CheckRow({ index, check }: { index: number; check: GradeCheck }) {
   return (
     <li className="rounded-xl border border-fg/10 bg-recess/30 p-2.5">
       <div className="flex items-center gap-2">
-        <select
+        <Select
           aria-label={`Check ${index + 1} kind`}
           value={check.kind}
-          onChange={(e) => updateCheck(index, { kind: e.target.value as GradeCheckKind })}
-          className="flex-1 rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
-        >
-          {CHECK_KINDS.map((k) => (
-            <option key={k} value={k}>
-              {CHECK_KIND_LABEL[k]}
-            </option>
-          ))}
-        </select>
+          onChange={(v) => updateCheck(index, { kind: v as GradeCheckKind })}
+          options={CHECK_KIND_OPTIONS}
+          className="flex-1"
+        />
         <label className="flex items-center gap-1 rounded-md border border-fg/15 bg-recess/50 px-2 py-1">
           <span className="text-[9px] font-semibold uppercase tracking-wider text-fg/40">Wt</span>
           <input

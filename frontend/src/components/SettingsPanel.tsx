@@ -17,7 +17,6 @@ import {
   Trash2,
   Monitor,
   Package,
-  ChevronDown,
   Radio,
   Boxes,
 } from 'lucide-react';
@@ -26,6 +25,9 @@ import { useAuthStore } from '@/store/authStore';
 import { useNosStore, type CustomNosEntry } from '@/store/nosStore';
 import { devicePacksApi, type DevicePack } from '@/api/client';
 import { cn } from '@/lib/cn';
+import { Select } from '@/components/ui/Select';
+
+const SPEED_OPTIONS = [0.5, 1, 2, 4, 8].map((s) => ({ value: String(s), label: `${s}×` }));
 
 type Section = 'general' | 'nos' | 'devices' | 'packs' | 'account';
 
@@ -127,20 +129,13 @@ function GeneralSection() {
       <SectionHeading>Simulation</SectionHeading>
 
       <Row label="Default speed" description="Simulation speed multiplier applied on play.">
-        <div className="relative">
-          <select
-            value={simSpeed}
-            onChange={(e) => setSimSpeed(Number(e.target.value))}
-            className="appearance-none rounded-md border border-fg/10 bg-recess/25 py-1.5 pl-3 pr-8 text-sm text-fg/90 outline-none focus:border-accent"
-          >
-            {[0.5, 1, 2, 4, 8].map((s) => (
-              <option key={s} value={s}>
-                {s}×
-              </option>
-            ))}
-          </select>
-          <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-fg/40" />
-        </div>
+        <Select
+          aria-label="Default simulation speed"
+          value={String(simSpeed)}
+          onChange={(v) => setSimSpeed(Number(v))}
+          options={SPEED_OPTIONS}
+          className="w-24"
+        />
       </Row>
 
       <SectionHeading>About</SectionHeading>

@@ -11,6 +11,7 @@ import { useUiStore } from '@/store/uiStore';
 import type { NodeModel } from '@/api/types';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { Select } from '@/components/ui/Select';
 
 export function ReachabilityBar({ nodes }: { nodes: NodeModel[] }) {
   const projectId = useUiStore((s) => s.projectId);
@@ -32,19 +33,14 @@ export function ReachabilityBar({ nodes }: { nodes: NodeModel[] }) {
     <div className={cn('pointer-events-none absolute bottom-4 left-0 right-[360px] flex justify-center px-4', zc.workspace)}>
       <div className="glass pointer-events-auto flex items-center gap-2 rounded-full border border-fg/10 px-3 py-2 shadow-glass">
         <span className="pl-1 text-xs text-fg/50">Can</span>
-        <select
+        <Select
           value={src}
-          onChange={(e) => setSrc(e.target.value)}
+          onChange={setSrc}
           aria-label="Source device"
-          className="max-w-[130px] rounded-md border border-fg/10 bg-fg/5 px-2 py-1 text-xs text-fg/85 outline-none focus:border-accent/60"
-        >
-          <option value="">source…</option>
-          {nodes.map((n) => (
-            <option key={n.id} value={n.name}>
-              {n.name}
-            </option>
-          ))}
-        </select>
+          placeholder="source…"
+          options={nodes.map((n) => ({ value: n.name, label: n.name }))}
+          className="max-w-[130px]"
+        />
         <span className="text-xs text-fg/50">reach</span>
         <input
           value={dst}

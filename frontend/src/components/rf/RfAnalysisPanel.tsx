@@ -25,6 +25,7 @@ import {
   fmtKm,
 } from './rfLogic';
 import { EndpointSelect } from './RfLinkBar';
+import { Select } from '@/components/ui/Select';
 import type {
   PtpResult,
   PtmpResult,
@@ -130,20 +131,17 @@ function CatalogPicker({
 }) {
   if (radios.length === 0) return null;
   return (
-    <select
+    <Select
       aria-label={label}
       value=""
-      onChange={(e) => {
-        const r = radios.find((x) => x.id === e.target.value);
+      onChange={(v) => {
+        const r = radios.find((x) => x.id === v);
         if (r) onSelect(r);
       }}
-      className="w-full rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-[11px] text-fg/70 focus:border-accent/50 focus:outline-none"
-    >
-      <option value="">{label}…</option>
-      {radios.map((r) => (
-        <option key={r.id} value={r.id}>{r.name}</option>
-      ))}
-    </select>
+      placeholder={`${label}…`}
+      options={radios.map((r) => ({ value: r.id, label: r.name }))}
+      className="w-full"
+    />
   );
 }
 
@@ -342,19 +340,14 @@ function StudySaveLoad({
   return (
     <div className="rounded-lg border border-fg/10 bg-recess/30 p-2.5">
       <p className="mb-1.5 text-[10px] uppercase tracking-wide text-fg/40">Saved Studies</p>
-      <select
+      <Select
         aria-label="Open saved study"
         value=""
-        onChange={(e) => e.target.value && void openStudy(e.target.value)}
-        className="w-full rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
-      >
-        <option value="">{studies.length ? 'Open a saved study…' : 'No saved studies yet'}</option>
-        {studies.map((s) => (
-          <option key={s.id} value={s.id}>
-            {s.name || s.id.slice(0, 8)}
-          </option>
-        ))}
-      </select>
+        onChange={(v) => v && void openStudy(v)}
+        placeholder={studies.length ? 'Open a saved study…' : 'No saved studies yet'}
+        options={studies.map((s) => ({ value: s.id, label: s.name || s.id.slice(0, 8) }))}
+        className="w-full"
+      />
       <div className="mt-1.5 flex items-center gap-1.5">
         <input
           value={name}
@@ -476,17 +469,17 @@ function PtmpBody() {
         </div>
         <label className="mt-2 block rounded-lg border border-fg/10 bg-recess/40 px-2.5 py-2">
           <span className="text-[10px] uppercase tracking-wide text-fg/40">Model</span>
-          <select
+          <Select
             value={ptmpModelId}
-            onChange={(e) => setPtmpModel(e.target.value)}
+            onChange={setPtmpModel}
             aria-label="Propagation model"
-            className="mt-0.5 w-full bg-transparent font-mono text-sm uppercase text-fg/85 focus:outline-none"
-          >
-            {models.length === 0 && <option value={ptmpModelId}>{ptmpModelId}</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>{m.id}</option>
-            ))}
-          </select>
+            options={
+              models.length === 0
+                ? [{ value: ptmpModelId, label: ptmpModelId }]
+                : models.map((m) => ({ value: m.id, label: m.id }))
+            }
+            className="mt-0.5 w-full"
+          />
         </label>
       </div>
 
@@ -695,17 +688,17 @@ function ProductSelectBody() {
         </div>
         <label className="mt-2 block rounded-lg border border-fg/10 bg-recess/40 px-2.5 py-2">
           <span className="text-[10px] uppercase tracking-wide text-fg/40">Model</span>
-          <select
+          <Select
             value={psModelId}
-            onChange={(e) => setPsModel(e.target.value)}
+            onChange={setPsModel}
             aria-label="Propagation model"
-            className="mt-0.5 w-full bg-transparent font-mono text-sm uppercase text-fg/85 focus:outline-none"
-          >
-            {models.length === 0 && <option value={psModelId}>{psModelId}</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>{m.id}</option>
-            ))}
-          </select>
+            options={
+              models.length === 0
+                ? [{ value: psModelId, label: psModelId }]
+                : models.map((m) => ({ value: m.id, label: m.id }))
+            }
+            className="mt-0.5 w-full"
+          />
         </label>
         {ptpResult && (
           <button

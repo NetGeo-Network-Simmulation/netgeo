@@ -20,6 +20,7 @@ import {
 import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
 import { cn } from '@/lib/cn';
+import { Select } from '@/components/ui/Select';
 
 type Tab = 'ping' | 'trace' | 'capture' | 'tables';
 
@@ -109,19 +110,14 @@ function SrcDstRow({
   const options = useNodeOptions();
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <select
+      <Select
         value={src}
-        onChange={(e) => setSrc(e.target.value)}
+        onChange={setSrc}
         aria-label="Source device"
-        className="min-w-[130px] rounded-md border border-fg/10 bg-fg/5 px-2 py-1.5 text-xs outline-none focus:border-accent"
-      >
-        <option value="">source device…</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.name} ({o.kind})
-          </option>
-        ))}
-      </select>
+        placeholder="source device…"
+        options={options.map((o) => ({ value: o.id, label: `${o.name} (${o.kind})` }))}
+        className="min-w-[130px]"
+      />
       <ArrowRight className="h-3.5 w-3.5 shrink-0 text-fg/35" />
       <input
         value={dst}
@@ -279,19 +275,14 @@ function CaptureTool() {
   return (
     <div className="flex h-full flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        <select
+        <Select
           value={linkId}
-          onChange={(e) => setLinkId(e.target.value)}
+          onChange={setLinkId}
           aria-label="Capture link filter"
-          className="rounded-md border border-fg/10 bg-fg/5 px-2 py-1.5 text-xs outline-none focus:border-accent"
-        >
-          <option value="">all links</option>
-          {linkOptions.map((l) => (
-            <option key={l.id} value={l.id}>
-              {l.id.slice(0, 8)} ({l.type})
-            </option>
-          ))}
-        </select>
+          placeholder="all links"
+          options={linkOptions.map((l) => ({ value: l.id, label: `${l.id.slice(0, 8)} (${l.type})` }))}
+          className="w-40"
+        />
         {/* Display filter mini-language (NG-CAP-02) */}
         <input
           value={filterDraft}
@@ -487,19 +478,14 @@ function TablesTool() {
   const t = q.data;
   return (
     <div className="flex flex-col gap-3">
-      <select
+      <Select
         value={nodeRef}
-        onChange={(e) => setNodeRef(e.target.value)}
+        onChange={setNodeRef}
         aria-label="Device tables"
-        className="w-fit min-w-[180px] rounded-md border border-fg/10 bg-fg/5 px-2 py-1.5 text-xs outline-none focus:border-accent"
-      >
-        <option value="">select device…</option>
-        {options.map((o) => (
-          <option key={o.id} value={o.id}>
-            {o.name} ({o.kind})
-          </option>
-        ))}
-      </select>
+        placeholder="select device…"
+        options={options.map((o) => ({ value: o.id, label: `${o.name} (${o.kind})` }))}
+        className="w-fit min-w-[180px]"
+      />
 
       {t && (
         <div className="flex flex-col gap-3 font-mono text-[11px] leading-relaxed">

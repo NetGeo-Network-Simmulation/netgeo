@@ -8,6 +8,7 @@ import { useRfStore } from '@/store/rfStore';
 import { useMapStore } from '@/store/mapStore';
 import { zc } from '@/theme/z';
 import { cn } from '@/lib/cn';
+import { Select } from '@/components/ui/Select';
 
 /** Placed AP/Tower sites are the selectable PtP endpoints. */
 function useRfEndpoints() {
@@ -31,19 +32,14 @@ export function EndpointSelect({
   label: string;
 }) {
   return (
-    <select
+    <Select
       aria-label={label}
       value={value ?? ''}
-      onChange={(e) => onChange(e.target.value || null)}
-      className="max-w-[130px] rounded-md border border-fg/15 bg-recess/20 px-2 py-1 text-xs text-fg/85 focus:border-accent/50 focus:outline-none"
-    >
-      <option value="">{label}</option>
-      {options.map((o) => (
-        <option key={o.id} value={o.id}>
-          {o.name}
-        </option>
-      ))}
-    </select>
+      onChange={(v) => onChange(v || null)}
+      placeholder={label}
+      options={options.map((o) => ({ value: o.id, label: o.name }))}
+      className="max-w-[130px]"
+    />
   );
 }
 
@@ -165,19 +161,16 @@ export function RfLinkBar() {
         </ParamChip>
 
         <ParamChip label="Mdl">
-          <select
+          <Select
             aria-label="Propagation model"
             value={modelId}
-            onChange={(e) => setModel(e.target.value)}
-            className="bg-transparent font-mono text-xs uppercase text-fg/85 focus:outline-none"
-          >
-            {models.length === 0 && <option value={modelId}>{modelId}</option>}
-            {models.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.id}
-              </option>
-            ))}
-          </select>
+            onChange={setModel}
+            options={
+              models.length === 0
+                ? [{ value: modelId, label: modelId }]
+                : models.map((m) => ({ value: m.id, label: m.id }))
+            }
+          />
         </ParamChip>
 
         <button

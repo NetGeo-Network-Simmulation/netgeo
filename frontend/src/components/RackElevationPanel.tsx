@@ -20,6 +20,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, Plus, Server, Zap } from 'lucide-react';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi } from '@/api/client';
+import { Select } from '@/components/ui/Select';
 import type { DeviceType } from '@/api/client';
 import type { LinkModel, LinkStatus, NodeKind, NodeModel, Rack, Site } from '@/api/types';
 import { useUiStore } from '@/store/uiStore';
@@ -333,30 +334,21 @@ export function RackElevationPanel() {
           placeholder="New rack name"
           className="w-32 rounded bg-fg/10 px-2 py-1 outline-none placeholder:text-fg/30"
         />
-        <select
+        <Select
+          aria-label="New rack site"
           value={newRackSite}
-          onChange={(e) => setNewRackSite(e.target.value)}
-          className="rounded bg-fg/10 px-2 py-1 outline-none"
-        >
-          <option value="">(no site)</option>
-          {sites.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
-        <select
-          value={newRackU}
-          onChange={(e) => setNewRackU(Number(e.target.value))}
-          className="rounded bg-fg/10 px-2 py-1 outline-none"
-          title="Rack height"
-        >
-          {RACK_SIZES.map((u) => (
-            <option key={u} value={u}>
-              {u}U
-            </option>
-          ))}
-        </select>
+          onChange={setNewRackSite}
+          placeholder="(no site)"
+          options={sites.map((s) => ({ value: s.id, label: s.name }))}
+          className="w-32"
+        />
+        <Select
+          aria-label="Rack height"
+          value={String(newRackU)}
+          onChange={(v) => setNewRackU(Number(v))}
+          options={RACK_SIZES.map((u) => ({ value: String(u), label: `${u}U` }))}
+          className="w-20"
+        />
         <button
           onClick={() =>
             newRackName.trim() &&

@@ -12,6 +12,7 @@ import { useIconStore } from '@/store/iconStore';
 import { useUiStore } from '@/store/uiStore';
 import { nodesApi, configsApi } from '@/api/client';
 import { CloudUplink } from '@/components/CloudUplink';
+import { Select } from '@/components/ui/Select';
 import { semantic } from '@/theme/tokens';
 import type { NodeMode, Nos } from '@/api/types';
 
@@ -127,23 +128,13 @@ export function PropertiesPanel() {
 
       <div className="grid grid-cols-2 gap-2">
         <Field label="NOS">
-          <select
+          <Select
+            aria-label="Network OS"
             value={node.nos}
-            onChange={(e) => patch({ nos: e.target.value as Nos })}
-            className="w-full rounded-md border border-fg/10 bg-recess/20 px-2 py-1.5 text-sm text-fg/90 outline-none transition-colors focus:border-accent"
-          >
-            {nosOptions.map((n) =>
-              'disabled' in n && n.disabled ? (
-                <option key={n.value} value={n.value} disabled className="text-fg/40">
-                  {n.label}
-                </option>
-              ) : (
-                <option key={n.value} value={n.value}>
-                  {n.label}
-                </option>
-              ),
-            )}
-          </select>
+            onChange={(v) => patch({ nos: v as Nos })}
+            options={nosOptions}
+            className="w-full"
+          />
         </Field>
         <Field label="Mode">
           <div className="flex rounded-md border border-fg/10 bg-recess/20 p-0.5">

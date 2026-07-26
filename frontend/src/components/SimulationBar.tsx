@@ -8,8 +8,10 @@ import { Pause, Play, Square, StepForward } from 'lucide-react';
 import { simApi } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import { cn } from '@/lib/cn';
+import { Select } from '@/components/ui/Select';
 
 const SPEEDS = [0.5, 1, 2, 4, 8];
+const SPEED_OPTIONS = SPEEDS.map((s) => ({ value: String(s), label: `${s}×` }));
 
 export function SimulationBar() {
   const { simState, simSpeed, setSimState, setSimSpeed, projectId } = useUiStore();
@@ -49,18 +51,13 @@ export function SimulationBar() {
         <Square className="h-4 w-4" />
       </CtrlButton>
 
-      <select
+      <Select
         aria-label="Simulation speed"
-        value={simSpeed}
-        onChange={(e) => setSimSpeed(Number(e.target.value))}
-        className="ml-1 rounded bg-transparent px-1 text-xs text-fg/80 outline-none"
-      >
-        {SPEEDS.map((s) => (
-          <option key={s} value={s}>
-            {s}×
-          </option>
-        ))}
-      </select>
+        value={String(simSpeed)}
+        onChange={(v) => setSimSpeed(Number(v))}
+        options={SPEED_OPTIONS}
+        className="ml-1 w-16"
+      />
     </div>
   );
 }

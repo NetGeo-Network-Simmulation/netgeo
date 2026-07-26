@@ -27,6 +27,7 @@ import { projectsApi, configsApi } from '@/api/client';
 import type { NodeModel, Nos, NodeKind } from '@/api/types';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
+import { Select } from '@/components/ui/Select';
 import { cn } from '@/lib/cn';
 
 type Tab = 'running' | 'diff' | 'export';
@@ -201,18 +202,13 @@ export function ConfigWorkspace() {
               </span>
             )}
             {tab === 'export' && (
-              <select
+              <Select
                 value={vendor}
-                onChange={(e) => setVendor(e.target.value)}
+                onChange={setVendor}
                 aria-label="Export target vendor"
-                className="rounded border border-fg/10 bg-recess/30 px-3 py-1.5 font-mono text-[12px] text-fg/80 focus:border-accent focus:outline-none"
-              >
-                {EXPORT_VENDORS.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    {v.label}
-                  </option>
-                ))}
-              </select>
+                options={EXPORT_VENDORS.map((v) => ({ value: v.id, label: v.label }))}
+                className="w-48"
+              />
             )}
             <button
               onClick={copy}

@@ -14,8 +14,10 @@ import { useLabStore } from '@/store/labStore';
 import { useUiStore } from '@/store/uiStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { Select } from '@/components/ui/Select';
 
 const SPEEDS = [0.25, 0.5, 1, 2, 4];
+const SPEED_OPTIONS = SPEEDS.map((s) => ({ value: String(s), label: `${s}×` }));
 
 /** Sim virtual clock → hh:mm:ss.mmm (matches the design dock read-out). */
 function fmtClock(t: number): string {
@@ -134,18 +136,13 @@ export function SimulationDock() {
           <SkipForward className="h-4 w-4" />
         </DockBtn>
 
-        <select
+        <Select
           aria-label="Simulation speed"
-          value={speed}
-          onChange={(e) => setSpeed(Number(e.target.value))}
-          className="ml-1 rounded bg-transparent px-1 text-xs text-fg/80 outline-none"
-        >
-          {SPEEDS.map((s) => (
-            <option key={s} value={s}>
-              {s}×
-            </option>
-          ))}
-        </select>
+          value={String(speed)}
+          onChange={(v) => setSpeed(Number(v))}
+          options={SPEED_OPTIONS}
+          className="ml-1 w-16"
+        />
 
         <span className="mx-1 h-5 w-px bg-fg/15" aria-hidden />
         <span className="tabular-nums font-mono text-xs text-fg/85" aria-label="Simulation time">

@@ -16,11 +16,13 @@ import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
 import { configsApi, type ConfigDiff } from '@/api/client';
 import { cn } from '@/lib/cn';
+import { Select } from '@/components/ui/Select';
 
 // Vendors the backend can render/diff to (mirrors configgen._TEMPLATE_MAP; the
 // server is authoritative and 422s on anything it lacks a template for).
 // "native" → each node's own NOS. ponytail: static list, resync if templates change.
 const VENDORS = ['native', 'ios', 'junos', 'eos', 'routeros', 'vyos', 'frr', 'forgeos', 'sros', 'vrp'];
+const VENDOR_OPTIONS = VENDORS.map((v) => ({ value: v, label: v }));
 
 export function ConsolePanel() {
   const nodeId = useTopologyStore((s) => s.selectedNodeId);
@@ -146,18 +148,14 @@ export function ConsolePanel() {
           <label htmlFor="cfg-vendor" className="sr-only">
             Target vendor for diff/export
           </label>
-          <select
+          <Select
             id="cfg-vendor"
+            aria-label="Target vendor for diff/export"
             value={vendor}
-            onChange={(e) => setVendor(e.target.value)}
-            className="rounded bg-fg/5 px-1.5 py-1 text-[11px] text-fg/70 outline-none focus:ring-1 focus:ring-accent"
-          >
-            {VENDORS.map((v) => (
-              <option key={v} value={v}>
-                {v}
-              </option>
-            ))}
-          </select>
+            onChange={setVendor}
+            options={VENDOR_OPTIONS}
+            className="w-24"
+          />
           <button
             type="button"
             onClick={showDiff}

@@ -8,6 +8,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { Globe, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { systemApi } from '@/api/client';
 import type { HostInterface, InternetStatus, NodeModel, Uplink, UplinkMode } from '@/api/types';
+import { Select } from '@/components/ui/Select';
 
 export function CloudUplink({
   node,
@@ -95,24 +96,22 @@ export function CloudUplink({
         ) : ifaces.length === 0 ? (
           <p className="text-xs text-warning">No adapters detected.</p>
         ) : (
-          <select
+          <Select
+            aria-label="Host adapter"
             value={selected ?? ''}
-            onChange={(e) =>
-              setUplink({ adapter: e.target.value, mode: uplink?.mode ?? 'nat' })
-            }
-            className="w-full rounded-md border border-fg/10 bg-recess/20 px-2 py-1.5 text-sm text-fg/90 outline-none focus:border-accent"
-          >
-            {!selected && <option value="">Select adapter…</option>}
-            {ifaces.map((i) => (
-              <option key={i.name} value={i.name}>
-                {i.name}
-                {i.is_primary ? ' ★' : ''}
-                {i.is_virtual ? ' (virtual)' : ''}
-                {i.ipv4[0] ? ` · ${i.ipv4[0]}` : ''}
-                {i.is_up ? '' : ' · down'}
-              </option>
-            ))}
-          </select>
+            onChange={(v) => setUplink({ adapter: v, mode: uplink?.mode ?? 'nat' })}
+            placeholder="Select adapter…"
+            options={ifaces.map((i) => ({
+              value: i.name,
+              label:
+                i.name +
+                (i.is_primary ? ' ★' : '') +
+                (i.is_virtual ? ' (virtual)' : '') +
+                (i.ipv4[0] ? ` · ${i.ipv4[0]}` : '') +
+                (i.is_up ? '' : ' · down'),
+            }))}
+            className="w-full"
+          />
         )}
       </label>
 
