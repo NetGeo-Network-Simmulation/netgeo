@@ -22,7 +22,7 @@ from app.api import device_types as dt
 _REAL_PACKS = {
     "olt": 3,
     "routers": 7,
-    "switches": 7,
+    "switches": 9,
     "firewalls": 3,
     "onu": 3,
     "wireless-ap": 4,

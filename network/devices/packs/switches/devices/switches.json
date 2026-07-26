@@ -381,6 +381,119 @@
         "form_factor": "1U-fixed"
       },
       "datasheet_note": "Aggregation budget ISP; L3 hardware offload terbatas vs carrier."
+    },
+    {
+      "id": "juniper-qfx5120-48y",
+      "display_name": "Juniper QFX5120-48Y (Junos)",
+      "vendor": "Juniper",
+      "vendor_options": [
+        "Juniper"
+      ],
+      "kind": "switch",
+      "subcategory": "leaf",
+      "tags": [
+        "datacenter",
+        "leaf",
+        "tor",
+        "evpn-vxlan",
+        "25g",
+        "campus-distribution"
+      ],
+      "icon": {
+        "name": "switch-leaf",
+        "emoji": "🍃"
+      },
+      "nos": [
+        "junos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "et-0/0/{n}",
+          "count": 48,
+          "type": "sfp28",
+          "speed_mbps": 25000
+        },
+        {
+          "pattern": "et-0/0/{n}",
+          "count": 8,
+          "type": "qsfp",
+          "speed_mbps": 100000
+        }
+      ],
+      "power": {
+        "typical_w": 185,
+        "max_w": 283,
+        "psu": "redundant",
+        "feed": "AC/DC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "48x SFP28 (1/10/25GbE) downlink + 8x QSFP28 (40/100GbE) uplink; dual redundant 1+1 hot-swap 650W PSU; 4+1 fan. Power dari datasheet resmi Juniper (typical 185W/max 283W, AC, 25C/40C ambient)."
+    },
+    {
+      "id": "ubiquiti-usw-pro-48",
+      "display_name": "Ubiquiti UniFi Switch Pro 48",
+      "vendor": "Ubiquiti",
+      "vendor_options": [
+        "Ubiquiti"
+      ],
+      "kind": "switch",
+      "subcategory": "access-l2",
+      "tags": [
+        "campus",
+        "access",
+        "l2",
+        "budget",
+        "unifi",
+        "isp"
+      ],
+      "icon": {
+        "name": "switch-access",
+        "emoji": "🔀"
+      },
+      "nos": [
+        "unifi",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 48,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "sfp+{n}",
+          "count": 4,
+          "type": "sfp",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "max_w": 60,
+        "psu": "single",
+        "feed": "AC/DC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "48x RJ45 GbE + 4x SFP+ 10G; PSU internal 60W tetap (non-PoE, non-modular), switching capacity 176Gbps/88Gbps non-blocking. Vendor (techspecs.ui.com) hanya mempublikasikan 'Max. Power Consumption 60W' — tidak ada angka typical terpisah, jadi typical_w sengaja tidak diisi (bukan ditebak)."
     }
   ],
   "_notes": "Migrated from network/devices/library/switches.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'switches:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none."

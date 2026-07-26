@@ -5,7 +5,7 @@
   "categories": [
     "switches"
   ],
-  "device_count": 7,
+  "device_count": 9,
   "enabled_by_default": true,
   "source_note": "Migrated from network/devices/library/switches.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
 }
