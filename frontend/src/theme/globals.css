@@ -189,27 +189,9 @@ body {
   stroke-width: 1.5;
 }
 
-/* ---- Leaflet map overrides ------------------------------------------------ */
-/* Mute raw basemap tiles so they sit under the UI instead of shouting over it:
-   raster tiles (OSM/Esri) are far more saturated than the app chrome. Scoped
-   to base tiles only — image overlays (RF coverage) are .leaflet-image-layer
-   and stay untouched. High-contrast theme gets no filter. */
-html[data-theme='light'] .leaflet-tile {
-  filter: saturate(0.72) contrast(0.9) brightness(1.03);
-}
-html[data-theme='dark'] .leaflet-tile {
-  filter: saturate(0.85) brightness(0.88);
-}
-
-/* Container background matches the surface so unloaded tiles (before the
-   first tile arrives, or on slow connections) don't show jarring black boxes. */
-html[data-theme='light'] .leaflet-container {
-  background: #e8e8e4;
-}
-html[data-theme='dark'] .leaflet-container {
-  background: #0d1117;
-}
-
+/* ---- MapLibre GL map overrides --------------------------------------------- */
+/* "Permanent tooltip" label markers (components/map/MapView.tsx useLabelMarkers) —
+   plain DOM elements pinned to the map via maplibregl.Marker, not canvas text. */
 .ng-map-label {
   background: var(--ng-surface, rgba(22, 27, 42, 0.85)) !important;
   border: 1px solid var(--ng-border-strong, rgba(255, 255, 255, 0.15)) !important;
@@ -218,45 +200,76 @@ html[data-theme='dark'] .leaflet-container {
   backdrop-filter: blur(8px) !important;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4) !important;
   white-space: nowrap !important;
-  color: var(--ng-fg) !important;
 }
-.ng-map-label::before {
-  border-top-color: var(--ng-border-strong, rgba(255, 255, 255, 0.15)) !important;
-}
-.leaflet-popup-content-wrapper {
+
+/* Click popups (device/link/topology/OSM tower — MapView's openPopup()). */
+.maplibregl-popup-content {
   background: var(--ng-surface, rgba(22, 27, 42, 0.9)) !important;
   border: 1px solid var(--ng-border-strong, rgba(255, 255, 255, 0.15)) !important;
   border-radius: 10px !important;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4) !important;
   backdrop-filter: blur(16px) !important;
   color: var(--ng-fg, #f3f4f6) !important;
+  padding: 10px 12px !important;
 }
-.leaflet-popup-tip {
-  background: var(--ng-surface, rgba(22, 27, 42, 0.9)) !important;
+.maplibregl-popup-tip {
+  border-top-color: var(--ng-surface, rgba(22, 27, 42, 0.9)) !important;
+  border-bottom-color: var(--ng-surface, rgba(22, 27, 42, 0.9)) !important;
 }
-.leaflet-popup-close-button {
+.maplibregl-popup-close-button {
   color: var(--ng-fg-muted, rgba(255, 255, 255, 0.5)) !important;
 }
-.leaflet-popup-close-button:hover {
+.maplibregl-popup-close-button:hover {
+  background: transparent !important;
   color: var(--ng-fg, #fff) !important;
 }
-.leaflet-control-zoom a {
-  background: var(--ng-surface, rgba(22, 27, 42, 0.85)) !important;
-  border-color: var(--ng-border-strong, rgba(255, 255, 255, 0.15)) !important;
-  color: var(--ng-fg, rgba(255, 255, 255, 0.8)) !important;
-  backdrop-filter: blur(8px) !important;
+
+/* Popup body typography — plain CSS, not Tailwind: popup HTML is injected via
+   setHTML() at runtime, outside the React tree Tailwind's JIT scans. */
+.ng-popup-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 160px;
 }
-.leaflet-control-zoom a:hover {
-  background: rgb(var(--ng-accent-rgb) / 0.3) !important;
-  color: var(--ng-fg) !important;
+.ng-popup-title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
 }
-.leaflet-control-attribution {
-  background: var(--ng-surface, rgba(22, 27, 42, 0.7)) !important;
-  color: var(--ng-fg-subtle, rgba(255, 255, 255, 0.4)) !important;
-  font-size: 9px !important;
+.ng-popup-sub {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ng-fg-muted, rgba(255, 255, 255, 0.6));
 }
-.leaflet-control-attribution a {
-  color: var(--ng-fg-muted, rgba(255, 255, 255, 0.5)) !important;
+.ng-popup-sub2 {
+  margin: 0;
+  font-size: 11px;
+  color: var(--ng-fg-subtle, rgba(255, 255, 255, 0.45));
+}
+.ng-popup-coord {
+  margin: 0;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 10px;
+  color: var(--ng-fg-subtle, rgba(255, 255, 255, 0.4));
+}
+.ng-popup-ip {
+  margin: 0;
+  font-family: 'JetBrains Mono Variable', ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  color: #5aa9ff;
+}
+.ng-popup-los {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 500;
+}
+.ng-popup-attrib {
+  margin: 0;
+  font-size: 9px;
+  font-style: italic;
+  color: var(--ng-fg-subtle, rgba(255, 255, 255, 0.4));
 }
 
 /* ---- Native form controls -------------------------------------------------- */

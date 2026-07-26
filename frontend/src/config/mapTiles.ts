@@ -4,9 +4,9 @@
  * All providers listed here are free and require no API key for standard
  * usage. Attribution strings must be preserved per each provider's ToS.
  *
- * Usage with react-leaflet:
+ * Usage (MapLibre GL, see components/map/MapView.tsx `rasterSource`):
  *   import { MAP_TILES } from '@/config/mapTiles';
- *   <TileLayer url={MAP_TILES.satellite.url} attribution={MAP_TILES.satellite.attribution} />
+ *   map.addSource('base', { type: 'raster', tiles: [...], tileSize: 256 });
  */
 
 export interface TileLayerConfig {
