@@ -93,12 +93,20 @@ function rasterSource(cfg: {
   url: string;
   subdomains?: string;
   maxZoom?: number;
+  attribution?: string;
 }) {
   return {
     type: 'raster' as const,
     tiles: tileUrls(cfg.url, cfg.subdomains),
     tileSize: 256,
     maxzoom: cfg.maxZoom ?? 19,
+    // Compliance (gate #3): MapLibre's built-in AttributionControl reads this
+    // field off every currently-used source and merges the strings — Esri/OSM/
+    // CARTO/OpenTopo credit was silently dropped since Stage 1 because this
+    // field was never forwarded. GlobeBasemap never passes
+    // `attributionControl: false`, so the default control (bottom-right,
+    // compact) is already mounted and just needed sources to read from.
+    attribution: cfg.attribution,
   };
 }
 
@@ -146,11 +154,14 @@ function syncRasterLayers(
   const beforeId = map.getStyle().layers?.[0]?.id;
 
   const cfg: TileLayerConfig = MAP_TILES[mapLayer];
-  map.addSource(BASE_SOURCE_ID, rasterSource(cfg));
+  map.addSource(BASE_SOURCE_ID, rasterSource({ ...cfg, attribution: cfg.attribution }));
   map.addLayer({ id: BASE_SOURCE_ID, type: 'raster', source: BASE_SOURCE_ID }, beforeId);
 
   if (cfg.overlay) {
-    map.addSource(BASE_OVERLAY_SOURCE_ID, rasterSource({ url: cfg.overlay.url, maxZoom: cfg.maxZoom }));
+    map.addSource(
+      BASE_OVERLAY_SOURCE_ID,
+      rasterSource({ url: cfg.overlay.url, maxZoom: cfg.maxZoom, attribution: cfg.overlay.attribution }),
+    );
     map.addLayer(
       {
         id: BASE_OVERLAY_SOURCE_ID,
@@ -167,7 +178,10 @@ function syncRasterLayers(
     const state = gisLayers[layer.id];
     if (!state?.visible) continue;
     const id = GIS_SOURCE_PREFIX + layer.id;
-    map.addSource(id, rasterSource({ url: layer.tileUrl, subdomains: layer.subdomains, maxZoom: layer.maxZoom }));
+    map.addSource(
+      id,
+      rasterSource({ url: layer.tileUrl, subdomains: layer.subdomains, maxZoom: layer.maxZoom, attribution: layer.attribution }),
+    );
     map.addLayer({ id, type: 'raster', source: id, paint: { 'raster-opacity': state.opacity } }, beforeId);
   }
 }
