@@ -6,7 +6,7 @@ qualitative signal-quality rating.
 
 Formulas
 --------
-Haversine (earth radius = 6371 km):
+Haversine (R = 6378.137 km — WGS84 semi-major axis (a), spherical; matches UISP's distance calc):
   a  = sin²(Δlat/2) + cos(lat1)·cos(lat2)·sin²(Δlon/2)
   d  = 2·R·asin(√a)
 
@@ -37,7 +37,7 @@ router = APIRouter(tags=["signal"])
 # Pydantic schemas (local — not exported through app.models to keep the
 # models package clean of domain-specific calculation types)
 # ---------------------------------------------------------------------------
-_EARTH_RADIUS_KM = 6371.0
+_EARTH_RADIUS_KM = 6378.137  # WGS84 semi-major axis (a), spherical model
 _C = 3e8  # speed of light, m/s
 
 
