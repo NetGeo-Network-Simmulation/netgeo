@@ -16,13 +16,13 @@
  * `KIND_WATTS` below is the fallback for kinds with no catalog match (e.g.
  * `host`) or if the catalog fetch hasn't landed yet.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, Plus, Server, Zap } from 'lucide-react';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi } from '@/api/client';
 import { Select } from '@/components/ui/Select';
 import type { DeviceType } from '@/api/client';
-import type { LinkModel, LinkStatus, NodeKind, NodeModel, Rack, Site } from '@/api/types';
+import type { LinkStatus, NodeKind, NodeModel, Rack, Site } from '@/api/types';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { DeviceFaceplate, frontPortFractions, type Face } from '@/components/rack/DeviceFaceplate';
@@ -31,6 +31,8 @@ import { cn } from '@/lib/cn';
 
 const RU_PX = 24; // on-screen height of one rack-unit
 const DEFAULT_RU_HEIGHT = 42;
+const RACK_BODY_W = 160; // matches the rack body's `w-40`
+const BLOCK_INSET = 4; // matches `inset-x-1` on the faceplate block (0.25rem @ 16px root)
 
 /** Selectable rack heights (10U–48U). */
 const RACK_SIZES = [10, 12, 18, 24, 36, 42, 48];
@@ -81,6 +83,30 @@ interface PendingPort {
   ifaceId: string;
 }
 
+/**
+ * A port's anchor point in a rack body's OWN local pixel space (top-left
+ * origin, RU 1 at the bottom — matches the on-screen `bodyRef` box). Shared
+ * by the cross-rack cable overlay below, which adds each rack's measured
+ * offset within the shared wrapper on top of this.
+ */
+function localPortAnchor(
+  dev: NodeModel,
+  ruStart: number,
+  ruSpan: number,
+  ifaceId: string,
+  ruHeight: number,
+  face: Face,
+): { x: number; y: number } {
+  const bodyH = ruHeight * RU_PX;
+  const yCenter = bodyH - (ruStart - 1 + ruSpan / 2) * RU_PX;
+  const frac = face === 'front' ? frontPortFractions(dev, ruSpan).get(ifaceId) : undefined;
+  if (!frac) return { x: RACK_BODY_W, y: yCenter };
+  const blockW = RACK_BODY_W - BLOCK_INSET * 2;
+  const blockH = ruSpan * RU_PX - 2;
+  const blockTop = bodyH - (ruStart - 1) * RU_PX - blockH;
+  return { x: BLOCK_INSET + frac.x * blockW, y: blockTop + frac.y * blockH };
+}
+
 export function RackElevationPanel() {
   const projectId = useUiStore((s) => s.projectId);
   const queryClient = useQueryClient();
@@ -97,6 +123,43 @@ export function RackElevationPanel() {
   const [rejectMsg, setRejectMsg] = useState<string | null>(null);
   const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
   const rejectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Cross-rack cable overlay: one SVG spans every rack column, so a link
+  // whose two ends sit in different racks needs each rack body's on-screen
+  // offset *within that shared overlay*, not just its own local box. Racks
+  // register their body element on mount; a ResizeObserver on the wrapper
+  // re-measures whenever the flex-wrap layout changes (rack added/removed,
+  // panel resized) — the native platform's own reflow signal instead of a
+  // hand-rolled layout system.
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const rackBodyRefs = useRef(new Map<string, HTMLDivElement>());
+  const [rackOffsets, setRackOffsets] = useState<Map<string, { x: number; y: number }>>(new Map());
+
+  const registerRackBody = useCallback((rackId: string, el: HTMLDivElement | null) => {
+    if (el) rackBodyRefs.current.set(rackId, el);
+    else rackBodyRefs.current.delete(rackId);
+  }, []);
+
+  const recomputeRackOffsets = useCallback(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const next = new Map<string, { x: number; y: number }>();
+    for (const [rackId, el] of rackBodyRefs.current) {
+      const r = el.getBoundingClientRect();
+      next.set(rackId, { x: r.left - wrapperRect.left, y: r.top - wrapperRect.top });
+    }
+    setRackOffsets(next);
+  }, []);
+
+  useEffect(() => {
+    const wrapper = wrapperRef.current;
+    if (!wrapper) return;
+    const ro = new ResizeObserver(recomputeRackOffsets);
+    ro.observe(wrapper);
+    recomputeRackOffsets();
+    return () => ro.disconnect();
+  }, [recomputeRackOffsets]);
 
   const topoQ = useQuery({
     queryKey: ['topology', projectId],
@@ -244,6 +307,75 @@ export function RackElevationPanel() {
     }
     return m;
   }, [nodes]);
+
+  const nodesById = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+  const racksById = useMemo(() => new Map(racks.map((r) => [r.id, r])), [racks]);
+
+  // Cross-rack cable overlay: a link's two ends may sit in different rack
+  // columns, so cable geometry lives here (one shared SVG) instead of inside
+  // each RackColumn. This replaces the old per-column overlay, which silently
+  // dropped any link whose other end wasn't in the SAME rack's local device
+  // map — the actual bug (link creation itself was always correct cross-rack;
+  // only the drawing was rack-scoped).
+  const { cableLines, unplacedEndpointCount } = useMemo(() => {
+    const lines: { x1: number; y1: number; x2: number; y2: number; color: string }[] = [];
+    let unplacedEndpointCount = 0;
+    for (const lnk of links) {
+      const aNodeId = nodeByEndpoint.get(lnk.a_iface);
+      const bNodeId = nodeByEndpoint.get(lnk.b_iface);
+      if (!aNodeId || !bNodeId || aNodeId === bNodeId) continue;
+      const aNode = nodesById.get(aNodeId);
+      const bNode = nodesById.get(bNodeId);
+      if (!aNode || !bNode) continue;
+      // A link end whose device isn't placed in any rack has nowhere to
+      // anchor — explicitly counted (surfaced as a banner) rather than
+      // dropped without a trace.
+      if (!aNode.rack_id || aNode.ru_start == null || !bNode.rack_id || bNode.ru_start == null) {
+        unplacedEndpointCount++;
+        continue;
+      }
+      const aOffset = rackOffsets.get(aNode.rack_id);
+      const bOffset = rackOffsets.get(bNode.rack_id);
+      const aRack = racksById.get(aNode.rack_id);
+      const bRack = racksById.get(bNode.rack_id);
+      if (!aOffset || !bOffset || !aRack || !bRack) continue; // not measured yet (first paint)
+      const aLocal = localPortAnchor(
+        aNode, aNode.ru_start, aNode.ru_span ?? 1, lnk.a_iface, aRack.ru_height || DEFAULT_RU_HEIGHT, face,
+      );
+      const bLocal = localPortAnchor(
+        bNode, bNode.ru_start, bNode.ru_span ?? 1, lnk.b_iface, bRack.ru_height || DEFAULT_RU_HEIGHT, face,
+      );
+      lines.push({
+        x1: aOffset.x + aLocal.x,
+        y1: aOffset.y + aLocal.y,
+        x2: bOffset.x + bLocal.x,
+        y2: bOffset.y + bLocal.y,
+        color: linkStatusColors[lnk.status ?? 'unknown'],
+      });
+    }
+    return { cableLines: lines, unplacedEndpointCount };
+  }, [links, nodeByEndpoint, nodesById, racksById, rackOffsets, face]);
+
+  // E1: rubber-band from the locked port to the live cursor — measured live
+  // (not memoized) since mousePos changes on every pointer move.
+  let pendingLine: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  if (cableMode && pendingPort && mousePos && wrapperRef.current) {
+    const dev = nodesById.get(pendingPort.nodeId);
+    const rack = dev?.rack_id ? racksById.get(dev.rack_id) : undefined;
+    const offset = dev?.rack_id ? rackOffsets.get(dev.rack_id) : undefined;
+    if (dev && dev.ru_start != null && rack && offset) {
+      const local = localPortAnchor(
+        dev, dev.ru_start, dev.ru_span ?? 1, pendingPort.ifaceId, rack.ru_height || DEFAULT_RU_HEIGHT, face,
+      );
+      const wrapperRect = wrapperRef.current.getBoundingClientRect();
+      pendingLine = {
+        x1: offset.x + local.x,
+        y1: offset.y + local.y,
+        x2: mousePos.x - wrapperRect.left,
+        y2: mousePos.y - wrapperRect.top,
+      };
+    }
+  }
 
   const unplaced = useMemo(() => nodes.filter((n) => !n.rack_id), [nodes]);
 
@@ -429,6 +561,16 @@ export function RackElevationPanel() {
         </div>
       )}
 
+      {unplacedEndpointCount > 0 && (
+        <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
+          <div className="flex items-center gap-1">
+            <AlertTriangle size={13} />
+            {unplacedEndpointCount} link{unplacedEndpointCount === 1 ? '' : 's'} not shown here — the other end
+            isn't placed in any rack.
+          </div>
+        </div>
+      )}
+
       <div className="flex min-h-0 flex-1">
         {/* tray of unplaced devices */}
         <div className="w-44 shrink-0 overflow-y-auto border-r border-fg/10 p-2">
@@ -472,52 +614,96 @@ export function RackElevationPanel() {
               hint="Create a site, then a rack, using the toolbar above — placed devices render as RU-accurate blocks."
             />
           )}
-          {bucketBySite.map((bucket) => {
-            const siteNodes = bucket.racks.flatMap((r) => nodesByRack.get(r.id) ?? []);
-            const watts = siteNodes.reduce((sum, n) => sum + nodeWatts(n, wattsByIcon), 0);
-            return (
-              <div key={bucket.site?.id ?? '_unassigned'} className="mb-6">
-                <div className="mb-2 flex items-center gap-2 text-sm">
-                  <span className="font-medium">{bucket.site?.name ?? 'No site'}</span>
-                  {bucket.site?.region && (
-                    <span className="text-fg/40">· {bucket.site.region}</span>
-                  )}
-                  <span className="ml-2 flex items-center gap-1 text-xs text-amber-300/80">
-                    <Zap size={12} /> {watts} W · {wattsToBtu(watts)} BTU/hr
-                  </span>
-                </div>
-                <div className="flex flex-wrap gap-5">
-                  {bucket.racks.map((rack) => (
-                    <RackColumn
-                      key={rack.id}
-                      rack={rack}
-                      devices={nodesByRack.get(rack.id) ?? []}
-                      face={face}
-                      links={links}
-                      nodeByEndpoint={nodeByEndpoint}
-                      linkStatusByIface={linkStatusByIface}
-                      onPlace={(nodeId, ruStart, ruSpan) =>
-                        place.mutate({ nodeId, rackId: rack.id, ruStart, ruSpan })
-                      }
-                      onUnplace={(nodeId) => unplace.mutate(nodeId)}
-                      onAdd={(kind, ruStart, ruSpan) =>
-                        addDevice.mutate({ rackId: rack.id, kind, ruStart, ruSpan })
-                      }
-                      onError={setError}
-                      wattsByIcon={wattsByIcon}
-                      cableMode={cableMode}
-                      pendingPort={pendingPort}
-                      mousePos={mousePos}
-                      onPortClick={handlePortClick}
+          {bucketBySite.length > 0 && (
+            <div ref={wrapperRef} className="relative">
+              {bucketBySite.map((bucket) => {
+                const siteNodes = bucket.racks.flatMap((r) => nodesByRack.get(r.id) ?? []);
+                const watts = siteNodes.reduce((sum, n) => sum + nodeWatts(n, wattsByIcon), 0);
+                return (
+                  <div key={bucket.site?.id ?? '_unassigned'} className="mb-6">
+                    <div className="mb-2 flex items-center gap-2 text-sm">
+                      <span className="font-medium">{bucket.site?.name ?? 'No site'}</span>
+                      {bucket.site?.region && (
+                        <span className="text-fg/40">· {bucket.site.region}</span>
+                      )}
+                      <span className="ml-2 flex items-center gap-1 text-xs text-amber-300/80">
+                        <Zap size={12} /> {watts} W · {wattsToBtu(watts)} BTU/hr
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-5">
+                      {bucket.racks.map((rack) => (
+                        <RackColumn
+                          key={rack.id}
+                          rack={rack}
+                          devices={nodesByRack.get(rack.id) ?? []}
+                          face={face}
+                          linkStatusByIface={linkStatusByIface}
+                          onPlace={(nodeId, ruStart, ruSpan) =>
+                            place.mutate({ nodeId, rackId: rack.id, ruStart, ruSpan })
+                          }
+                          onUnplace={(nodeId) => unplace.mutate(nodeId)}
+                          onAdd={(kind, ruStart, ruSpan) =>
+                            addDevice.mutate({ rackId: rack.id, kind, ruStart, ruSpan })
+                          }
+                          onError={setError}
+                          wattsByIcon={wattsByIcon}
+                          cableMode={cableMode}
+                          pendingPort={pendingPort}
+                          onPortClick={handlePortClick}
+                          registerBodyRef={registerRackBody}
+                        />
+                      ))}
+                      {bucket.racks.length === 0 && (
+                        <div className="text-xs text-fg/30">This site has no racks yet.</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {/* Cross-rack cable overlay — one SVG spanning every rack column in
+                  this site list, sized to the wrapper's own content box (which
+                  includes racks scrolled out of view) via `absolute inset-0`. */}
+              {(cableLines.length > 0 || pendingLine) && (
+                <svg className="pointer-events-none absolute inset-0" style={{ overflow: 'visible' }}>
+                  {cableLines.map((c, i) => {
+                    const mx = (c.x1 + c.x2) / 2;
+                    const my = (c.y1 + c.y2) / 2;
+                    const dx = c.x2 - c.x1;
+                    const dy = c.y2 - c.y1;
+                    const len = Math.hypot(dx, dy) || 1;
+                    const bow = Math.min(24, len * 0.15);
+                    const cx = mx + (-dy / len) * bow;
+                    const cy = my + (dx / len) * bow;
+                    return (
+                      <path
+                        key={i}
+                        d={`M ${c.x1} ${c.y1} Q ${cx} ${cy} ${c.x2} ${c.y2}`}
+                        fill="none"
+                        stroke={c.color}
+                        strokeWidth="1.5"
+                        strokeOpacity="0.7"
+                        className="ng-cable-flow"
+                      />
+                    );
+                  })}
+                  {/* E1: rubber-band from the locked port to the live cursor */}
+                  {pendingLine && (
+                    <line
+                      x1={pendingLine.x1}
+                      y1={pendingLine.y1}
+                      x2={pendingLine.x2}
+                      y2={pendingLine.y2}
+                      stroke="rgb(var(--ng-accent-rgb))"
+                      strokeWidth="1.5"
+                      strokeDasharray="4 3"
+                      strokeOpacity="0.85"
                     />
-                  ))}
-                  {bucket.racks.length === 0 && (
-                    <div className="text-xs text-fg/30">This site has no racks yet.</div>
                   )}
-                </div>
-              </div>
-            );
-          })}
+                </svg>
+              )}
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -528,8 +714,6 @@ interface RackColumnProps {
   rack: Rack;
   devices: NodeModel[];
   face: Face;
-  links: LinkModel[];
-  nodeByEndpoint: Map<string, string>;
   linkStatusByIface: Map<string, LinkStatus>;
   onPlace: (nodeId: string, ruStart: number, ruSpan: number) => void;
   onUnplace: (nodeId: string) => void;
@@ -538,16 +722,16 @@ interface RackColumnProps {
   wattsByIcon: Map<string, DeviceType>;
   cableMode: boolean;
   pendingPort: PendingPort | null;
-  mousePos: { x: number; y: number } | null;
   onPortClick: (nodeId: string, ifaceId: string) => void;
+  /** Reports this rack's body DOM node up to the panel, which measures its
+   * offset within the shared cross-rack cable overlay (see RackElevationPanel). */
+  registerBodyRef: (rackId: string, el: HTMLDivElement | null) => void;
 }
 
 function RackColumn({
   rack,
   devices,
   face,
-  links,
-  nodeByEndpoint,
   linkStatusByIface,
   onPlace,
   onUnplace,
@@ -556,13 +740,18 @@ function RackColumn({
   wattsByIcon,
   cableMode,
   pendingPort,
-  mousePos,
   onPortClick,
+  registerBodyRef,
 }: RackColumnProps) {
   const ruHeight = rack.ru_height || DEFAULT_RU_HEIGHT;
   const bodyRef = useRef<HTMLDivElement>(null);
   // null = picker closed; number = picker is open at that RU start
   const [pickerRu, setPickerRu] = useState<number | null>(null);
+
+  useEffect(() => {
+    registerBodyRef(rack.id, bodyRef.current);
+    return () => registerBodyRef(rack.id, null);
+  }, [rack.id, registerBodyRef]);
 
   /** RUs occupied by every device except `exceptId`. */
   const occupied = (exceptId?: string): Set<number> => {
@@ -619,70 +808,7 @@ function RackColumn({
     onPlace(load.nodeId, ruStart, span);
   };
 
-  // ── Cable overlay ─────────────────────────────────────────────────────────
-  // Build a node-id → ru_start map for placed devices in THIS rack.
-  const placedRu = new Map<string, { ruStart: number; ruSpan: number }>();
-  const devicesById = new Map<string, NodeModel>();
-  for (const d of devices) {
-    if (d.ru_start != null) placedRu.set(d.id, { ruStart: d.ru_start, ruSpan: d.ru_span ?? 1 });
-    devicesById.set(d.id, d);
-  }
-
   const bodyH = ruHeight * RU_PX;
-  const bodyW = 160; // w-40
-  const BLOCK_INSET = 4; // matches `inset-x-1` on the faceplate block (0.25rem @ 16px root)
-
-  // Real port anchor for one link endpoint: faceplate fraction (from
-  // frontPortFractions) mapped onto this device block's on-screen box.
-  // No match (back face, drive bay, or non-iface map-deploy endpoint) ->
-  // fall back to the old vertical-center-of-block anchor.
-  const portAnchor = (
-    dev: NodeModel | undefined,
-    ru: { ruStart: number; ruSpan: number },
-    ifaceId: string,
-    fallbackY: number,
-  ): { x: number; y: number } => {
-    const frac = face === 'front' && dev ? frontPortFractions(dev, ru.ruSpan).get(ifaceId) : undefined;
-    if (!frac) return { x: bodyW, y: fallbackY };
-    const blockW = bodyW - BLOCK_INSET * 2;
-    const blockH = ru.ruSpan * RU_PX - 2;
-    const blockTop = bodyH - (ru.ruStart - 1) * RU_PX - blockH;
-    return { x: BLOCK_INSET + frac.x * blockW, y: blockTop + frac.y * blockH };
-  };
-
-  const cableLines: { x1: number; y1: number; x2: number; y2: number; color: string }[] = [];
-  for (const lnk of links) {
-    const aNode = nodeByEndpoint.get(lnk.a_iface);
-    const bNode = nodeByEndpoint.get(lnk.b_iface);
-    if (!aNode || !bNode || aNode === bNode) continue;
-    const a = placedRu.get(aNode);
-    const b = placedRu.get(bNode);
-    if (!a || !b) continue;
-    // vertical center of each device block (RU 1 = bottom, so flip to top-down px)
-    // — the fallback anchor when the real port position can't be resolved.
-    const yCenterA = bodyH - (a.ruStart - 1 + a.ruSpan / 2) * RU_PX;
-    const yCenterB = bodyH - (b.ruStart - 1 + b.ruSpan / 2) * RU_PX;
-    const anchorA = portAnchor(devicesById.get(aNode), a, lnk.a_iface, yCenterA);
-    const anchorB = portAnchor(devicesById.get(bNode), b, lnk.b_iface, yCenterB);
-    const color = linkStatusColors[lnk.status ?? 'unknown'];
-    cableLines.push({ x1: anchorA.x, y1: anchorA.y, x2: anchorB.x, y2: anchorB.y, color });
-  }
-
-  // E1: rubber-band line from the locked port to the live cursor, drawn only
-  // in the rack column that actually holds the pending device (cross-rack
-  // pending is a known gap — see NG-PH cable overlay bug at the `!a || !b`
-  // guard above, deliberately left untouched per slice scope).
-  let pendingLine: { x1: number; y1: number; x2: number; y2: number } | null = null;
-  if (cableMode && pendingPort && mousePos && devicesById.has(pendingPort.nodeId)) {
-    const ru = placedRu.get(pendingPort.nodeId);
-    const dev = devicesById.get(pendingPort.nodeId);
-    const rect = bodyRef.current?.getBoundingClientRect();
-    if (ru && dev && rect) {
-      const yCenter = bodyH - (ru.ruStart - 1 + ru.ruSpan / 2) * RU_PX;
-      const origin = portAnchor(dev, ru, pendingPort.ifaceId, yCenter);
-      pendingLine = { x1: origin.x, y1: origin.y, x2: mousePos.x - rect.left, y2: mousePos.y - rect.top };
-    }
-  }
 
   // ── Add-device affordance ─────────────────────────────────────────────────
   // Find the lowest free RU (default span 1 for the affordance slot).
@@ -802,45 +928,6 @@ function RackColumn({
                 </div>
               )}
             </div>
-          )}
-
-          {/* Cable overlay — best-effort/decorative, pointer-events-none */}
-          {(cableLines.length > 0 || pendingLine) && (
-            <svg
-              className="pointer-events-none absolute inset-0"
-              width={bodyW}
-              height={bodyH}
-              style={{ overflow: 'visible' }}
-            >
-              {cableLines.map((c, i) => {
-                const mx = bodyW + 10; // bow out to the right
-                const my = (c.y1 + c.y2) / 2;
-                return (
-                  <path
-                    key={i}
-                    d={`M ${c.x1} ${c.y1} Q ${mx} ${my} ${c.x2} ${c.y2}`}
-                    fill="none"
-                    stroke={c.color}
-                    strokeWidth="1.5"
-                    strokeOpacity="0.7"
-                    className="ng-cable-flow"
-                  />
-                );
-              })}
-              {/* E1: rubber-band from the locked port to the live cursor */}
-              {pendingLine && (
-                <line
-                  x1={pendingLine.x1}
-                  y1={pendingLine.y1}
-                  x2={pendingLine.x2}
-                  y2={pendingLine.y2}
-                  stroke="rgb(var(--ng-accent-rgb))"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 3"
-                  strokeOpacity="0.85"
-                />
-              )}
-            </svg>
           )}
         </div>
       </div>
