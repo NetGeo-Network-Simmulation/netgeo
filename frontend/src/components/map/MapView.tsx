@@ -1,31 +1,51 @@
 /**
- * MapView — network design view (UISP Design Center style), now on a MapLibre
- * GL globe basemap (docs/design/21-GLOBE-MAP-MIGRATION.md, Stage 1).
+ * MapView — network design view (UISP Design Center style), on a MapLibre GL
+ * globe basemap (docs/design/21-GLOBE-MAP-MIGRATION.md, Stage 1 + Stage 2).
  *
- * Stage 1 swaps only the render engine for the basemap + GIS raster overlays.
- * Everything vector (device markers, coverage rings, links, RF beam, OSM
- * towers/buildings, RF coverage raster, click-to-place, measure/profile tools,
- * search fly-to) was Leaflet-shaped (`react-leaflet` markers/popups/events) and
- * has been removed rather than shimmed — it comes back in Stage 2 as MapLibre
- * GeoJSON sources + style layers. See the bottom of this file for the exact
- * debt list.
+ * Stage 1 swapped the render engine for the basemap + GIS raster overlays.
+ * Stage 2 (this file) brings the vector overlays back — device markers +
+ * coverage rings, link polylines, topology node/link markers, device/tower
+ * popups, OSM towers/buildings, geocode fly-to — rewritten as MapLibre GeoJSON
+ * sources + style layers per the migration doc's explicit rejection of a
+ * drop-in Leaflet shim (no more one-React-component-per-marker).
  *
- * What still works:
- *  - Satellite/Street/Hybrid/Dark/Topo tile picker (MapLayerSwitcher)
- *  - GIS overlay tiles (Roads, Hillshade, Contour — the `kind: 'tile'` layers)
- *  - Globe projection, pan/zoom, zoom control
- *  - Every absolute-positioned chrome panel that doesn't touch the map
- *    surface itself (toolbar, device panel, search box, GIS layer panel,
- *    legends, onboarding/device-library modals)
+ * Still deferred to Stage 3 (see the debt block at the bottom of this file):
+ * click-to-place tools (device/measure/profile/deploy) and the RF coverage
+ * raster. Both are pixel/canvas-anchored features that need the
+ * `e.point`/`unproject` rewrite the design doc calls out as the real
+ * precision-risk area — out of scope here on purpose.
  */
-import { useEffect, useRef } from 'react';
-import { MapLibreMap, NavigationControl } from 'maplibre-gl';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import {
+  MapLibreMap,
+  NavigationControl,
+  Marker as MglMarker,
+  Popup,
+  type GeoJSONSource,
+  type MapLayerMouseEvent,
+  type LngLat,
+} from 'maplibre-gl';
 import {
   useMapStore,
   rainRateLabel,
+  linkColor,
   type GisLayerState,
+  type MapDevice,
+  type MapLink,
+  type MapDeviceKind,
 } from '@/store/mapStore';
+import { useTopologyStore } from '@/store/topologyStore';
+import type { NodeModel, LinkModel } from '@/api/types';
+import {
+  fetchOsmTowers,
+  towerLabel,
+  towerKind,
+  fetchOsmBuildings,
+  densityColors,
+  type OsmTower,
+  type OsmBuilding,
+} from '@/services/osmService';
 import { MAP_TILES, type TileLayerConfig, type MapTileKey } from '@/config/mapTiles';
 import { GIS_LAYERS } from '@/config/gisLayers';
 import { MapToolbar } from './MapToolbar';
@@ -40,6 +60,16 @@ import { Layers as LayersIcon, AlertTriangle } from 'lucide-react';
 import { useUiStore } from '@/store/uiStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+
+/* -------------------------------------------------------------------------- */
+/* Map instance context — lets the vector-layer components below reach the    */
+/* single MapLibre instance GlobeBasemap owns, without a Leaflet-style        */
+/* per-marker React tree (design doc §4: no drop-in shim).                    */
+/* -------------------------------------------------------------------------- */
+const MapCtx = createContext<MapLibreMap | null>(null);
+function useGlobeMap(): MapLibreMap | null {
+  return useContext(MapCtx);
+}
 
 /* -------------------------------------------------------------------------- */
 /* Basemap — MapLibre GL globe projection, layer-aware raster sources          */
@@ -72,6 +102,25 @@ function rasterSource(cfg: {
   };
 }
 
+/** First non-raster (vector) layer currently in the style, if any. Used as the
+ *  `beforeId` anchor so conditionally-mounted vector layers (OSM towers/
+ *  buildings) always re-insert at the floor of the vector stack no matter
+ *  when they're toggled on, instead of landing on top of whatever else has
+ *  been added since their last mount. */
+function firstVectorLayerId(map: MapLibreMap): string | undefined {
+  for (const layer of map.getStyle().layers ?? []) {
+    if (
+      layer.id === BASE_SOURCE_ID ||
+      layer.id === BASE_OVERLAY_SOURCE_ID ||
+      layer.id.startsWith(GIS_SOURCE_PREFIX)
+    ) {
+      continue;
+    }
+    return layer.id;
+  }
+  return undefined;
+}
+
 function syncRasterLayers(
   map: MapLibreMap,
   mapLayer: MapTileKey,
@@ -89,18 +138,28 @@ function syncRasterLayers(
     }
   }
 
+  // Re-inserted raster layers must land below any surviving vector overlay
+  // (device/link/topology/OSM layers) so a basemap/GIS toggle never paints
+  // over them. Computed once, after the old raster layers are gone, so this
+  // is genuinely "the current vector floor" — undefined until Stage 2's
+  // layers exist, matching the original append-on-top behavior.
+  const beforeId = map.getStyle().layers?.[0]?.id;
+
   const cfg: TileLayerConfig = MAP_TILES[mapLayer];
   map.addSource(BASE_SOURCE_ID, rasterSource(cfg));
-  map.addLayer({ id: BASE_SOURCE_ID, type: 'raster', source: BASE_SOURCE_ID });
+  map.addLayer({ id: BASE_SOURCE_ID, type: 'raster', source: BASE_SOURCE_ID }, beforeId);
 
   if (cfg.overlay) {
     map.addSource(BASE_OVERLAY_SOURCE_ID, rasterSource({ url: cfg.overlay.url, maxZoom: cfg.maxZoom }));
-    map.addLayer({
-      id: BASE_OVERLAY_SOURCE_ID,
-      type: 'raster',
-      source: BASE_OVERLAY_SOURCE_ID,
-      paint: { 'raster-opacity': cfg.overlay.opacity ?? 1 },
-    });
+    map.addLayer(
+      {
+        id: BASE_OVERLAY_SOURCE_ID,
+        type: 'raster',
+        source: BASE_OVERLAY_SOURCE_ID,
+        paint: { 'raster-opacity': cfg.overlay.opacity ?? 1 },
+      },
+      beforeId,
+    );
   }
 
   for (const layer of GIS_LAYERS) {
@@ -109,19 +168,18 @@ function syncRasterLayers(
     if (!state?.visible) continue;
     const id = GIS_SOURCE_PREFIX + layer.id;
     map.addSource(id, rasterSource({ url: layer.tileUrl, subdomains: layer.subdomains, maxZoom: layer.maxZoom }));
-    map.addLayer({ id, type: 'raster', source: id, paint: { 'raster-opacity': state.opacity } });
+    map.addLayer({ id, type: 'raster', source: id, paint: { 'raster-opacity': state.opacity } }, beforeId);
   }
 }
 
-function GlobeBasemap() {
+function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
   const mapLayer = useMapStore((s) => s.mapLayer);
   const gisLayers = useMapStore((s) => s.gisLayers);
 
-  // Mount once — initial center/zoom only; nothing currently drives a live
-  // recenter after mount (the old search fly-to lived in the removed
-  // SearchResultLayer, see debt list at the bottom of this file).
+  // Mount once — initial center/zoom only; the geocode search fly-to
+  // (SearchResultLayer below) is the only thing that recenters after mount.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -137,6 +195,7 @@ function GlobeBasemap() {
       map.setProjection({ type: 'globe' });
       const s = useMapStore.getState();
       syncRasterLayers(map, s.mapLayer, s.gisLayers);
+      onMapChange(map);
     });
     mapRef.current = map;
 
@@ -153,9 +212,11 @@ function GlobeBasemap() {
     return () => {
       ro.disconnect();
       if (timer) clearTimeout(timer);
+      onMapChange(null);
       map.remove();
       mapRef.current = null;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -170,6 +231,985 @@ function GlobeBasemap() {
       style={{ background: 'var(--ng-surface, #0d1117)' }}
     />
   );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Shared vector-layer plumbing — every Stage 2 overlay below is one GeoJSON  */
+/* source + a handful of style layers, added/removed through this tiny        */
+/* helper set instead of Leaflet-shaped per-marker React components.          */
+/* -------------------------------------------------------------------------- */
+const EMPTY_FC: GeoJSON.FeatureCollection = { type: 'FeatureCollection', features: [] };
+
+interface LayerDef {
+  id: string;
+  type: 'fill' | 'line' | 'circle';
+  source: string;
+  paint: Record<string, unknown>;
+  filter?: unknown[];
+}
+
+function ensureSource(map: MapLibreMap, id: string) {
+  if (!map.getSource(id)) map.addSource(id, { type: 'geojson', data: EMPTY_FC });
+}
+
+// ponytail: MapLibre's style-spec types brand paint expressions very strictly
+// (exact tuple literals); a runtime-valid `['get', 'color']` expression often
+// doesn't structurally satisfy them without fighting generics. One localized
+// cast here beats `as unknown as AddLayerObject` repeated at every call site.
+function ensureLayer(map: MapLibreMap, layer: LayerDef, beforeId?: string) {
+  if (!map.getLayer(layer.id)) {
+    map.addLayer(
+      {
+        id: layer.id,
+        type: layer.type,
+        source: layer.source,
+        paint: layer.paint,
+        ...(layer.filter ? { filter: layer.filter } : {}),
+      } as Parameters<MapLibreMap['addLayer']>[0],
+      beforeId,
+    );
+  }
+}
+
+function teardown(map: MapLibreMap, sourceId: string, layerIds: string[]) {
+  for (const id of layerIds) if (map.getLayer(id)) map.removeLayer(id);
+  if (map.getSource(sourceId)) map.removeSource(sourceId);
+}
+
+function setSourceData(map: MapLibreMap, sourceId: string, fc: GeoJSON.FeatureCollection) {
+  (map.getSource(sourceId) as GeoJSONSource | undefined)?.setData(fc);
+}
+
+function setCursor(map: MapLibreMap, cursor: string) {
+  map.getCanvas().style.cursor = cursor;
+}
+
+function openPopup(map: MapLibreMap, lngLat: LngLat, html: string) {
+  new Popup({ closeButton: true, maxWidth: '260px' }).setLngLat(lngLat).setHTML(html).addTo(map);
+}
+
+function escapeHtml(s: string): string {
+  const map: Record<string, string> = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+  return s.replace(/[&<>"']/g, (c) => map[c]!);
+}
+
+/** Geodesic destination point (spherical, same R as mapStore's haversineM so
+ *  ring geometry and distance math agree). */
+function destPoint(lat: number, lng: number, bearingDeg: number, distM: number): [number, number] {
+  const R = 6_378_137;
+  const brng = (bearingDeg * Math.PI) / 180;
+  const lat1 = (lat * Math.PI) / 180;
+  const lng1 = (lng * Math.PI) / 180;
+  const dR = distM / R;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(dR) + Math.cos(lat1) * Math.sin(dR) * Math.cos(brng));
+  const lng2 =
+    lng1 +
+    Math.atan2(Math.sin(brng) * Math.sin(dR) * Math.cos(lat1), Math.cos(dR) - Math.sin(lat1) * Math.sin(lat2));
+  return [(lat2 * 180) / Math.PI, (((lng2 * 180) / Math.PI + 540) % 360) - 180];
+}
+
+/** Polygon ring approximating a geodesic circle of `radiusM` around
+ *  (lat,lng), in GeoJSON [lng, lat] coordinate order. */
+function circleRingCoords(lat: number, lng: number, radiusM: number, steps = 48): [number, number][] {
+  const ring: [number, number][] = [];
+  for (let i = 0; i <= steps; i++) {
+    const [plat, plng] = destPoint(lat, lng, (360 * i) / steps, radiusM);
+    ring.push([plng, plat]);
+  }
+  return ring;
+}
+
+interface LabelItem {
+  id: string;
+  lat: number;
+  lng: number;
+  text: string;
+  color: string;
+}
+
+/** DOM-marker label pool shared by every "permanent tooltip" in this file.
+ *  ponytail: MapLibre GL symbol layers need a self-hosted glyph/PBF server to
+ *  render text — none exists here, and standing one up would be new
+ *  self-hosted infra, out of Stage 2 scope, and works against the migration
+ *  doc's own "no API key / self-hostable / air-gap friendly" criterion (§2).
+ *  Leaflet's "permanent tooltip" was already a DOM element, not canvas text —
+ *  this is the same technique, pooled/imperative instead of one React
+ *  component per marker. */
+function useLabelMarkers(map: MapLibreMap | null, items: LabelItem[]) {
+  const poolRef = useRef<Map<string, MglMarker>>(new Map());
+
+  useEffect(() => {
+    if (!map) return;
+    const pool = poolRef.current;
+    const seen = new Set<string>();
+    for (const item of items) {
+      seen.add(item.id);
+      let marker = pool.get(item.id);
+      if (!marker) {
+        const el = document.createElement('div');
+        el.className = 'ng-map-label';
+        el.style.pointerEvents = 'none';
+        el.style.fontWeight = '700';
+        el.style.fontSize = '10px';
+        marker = new MglMarker({ element: el, anchor: 'bottom', offset: [0, -14] })
+          .setLngLat([item.lng, item.lat])
+          .addTo(map);
+        pool.set(item.id, marker);
+      } else {
+        marker.setLngLat([item.lng, item.lat]);
+      }
+      const el = marker.getElement();
+      if (el.textContent !== item.text) el.textContent = item.text;
+      el.style.color = item.color;
+    }
+    for (const [id, marker] of pool) {
+      if (!seen.has(id)) {
+        marker.remove();
+        pool.delete(id);
+      }
+    }
+  }, [map, items]);
+
+  // Cleanup only on true unmount — deliberately separate from the sync effect
+  // above so a `map` identity check never nukes and rebuilds the whole pool.
+  useEffect(
+    () => () => {
+      for (const marker of poolRef.current.values()) marker.remove();
+      poolRef.current.clear();
+    },
+    [],
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* Legacy mapStore devices — coverage rings + dots + labels + popup            */
+/* -------------------------------------------------------------------------- */
+const COVERAGE_RINGS = [
+  { pct: 0.25, color: '#34C759', opacity: 0.2 }, // strong core
+  { pct: 0.5, color: '#A3E635', opacity: 0.13 },
+  { pct: 0.75, color: '#FFCC00', opacity: 0.09 },
+  { pct: 1.0, color: '#FF453A', opacity: 0.05 }, // weak edge
+] as const;
+
+const KIND_COLOR: Record<MapDeviceKind, string> = {
+  ap: '#5856D6',
+  cpe: '#007AFF',
+  tower: '#FF9F0A',
+};
+
+const DEV_RING_SRC = 'ng-dev-rings';
+const DEV_RING_FILL = 'ng-dev-rings-fill';
+const DEV_RING_LINE = 'ng-dev-rings-line';
+const DEV_POINT_SRC = 'ng-dev-points';
+const DEV_POINT_LAYER = 'ng-dev-points-circle';
+
+function devicesRingsFC(devices: MapDevice[]): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const d of devices) {
+    if (d.kind === 'cpe') continue;
+    for (const ring of COVERAGE_RINGS) {
+      features.push({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [circleRingCoords(d.lat, d.lng, d.range * ring.pct)] },
+        properties: { color: ring.color, opacity: ring.opacity },
+      });
+    }
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function devicesPointsFC(devices: MapDevice[], selectedId: string | null): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: devices.map((d) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [d.lng, d.lat] },
+      properties: {
+        id: d.id,
+        selected: d.id === selectedId,
+        color: KIND_COLOR[d.kind],
+        name: d.name,
+        kind: d.kind,
+        txPower: d.txPower,
+        frequency: d.frequency,
+        antennaHeight: d.antennaHeight,
+        range: d.range,
+        ip: d.ip,
+        lat: d.lat,
+        lng: d.lng,
+      },
+    })),
+  };
+}
+
+function deviceInfoHtml(p: Record<string, unknown>): string {
+  const color = String(p.color);
+  const ip = p.ip ? `<p class="ng-popup-ip">${escapeHtml(String(p.ip))}</p>` : '';
+  return `<div class="ng-popup-body">
+    <p class="ng-popup-title" style="color:${color}">${escapeHtml(String(p.name))}</p>
+    <p class="ng-popup-sub">${escapeHtml(String(p.kind)).toUpperCase()} &middot; ${p.frequency} GHz &middot; ${p.txPower} dBm TX</p>
+    <p class="ng-popup-sub2">Antenna: ${p.antennaHeight} m AGL &middot; Range: ${p.range} m</p>
+    <p class="ng-popup-coord">${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)}</p>
+    ${ip}
+  </div>`;
+}
+
+function DeviceLayer() {
+  const map = useGlobeMap();
+  const devices = useMapStore((s) => s.deviceList());
+  const selectedId = useMapStore((s) => s.selectedDeviceId);
+  const selectDevice = useMapStore((s) => s.selectDevice);
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, DEV_RING_SRC);
+    ensureLayer(map, {
+      id: DEV_RING_FILL,
+      type: 'fill',
+      source: DEV_RING_SRC,
+      paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'opacity'] },
+    });
+    ensureLayer(map, {
+      id: DEV_RING_LINE,
+      type: 'line',
+      source: DEV_RING_SRC,
+      paint: { 'line-color': ['get', 'color'], 'line-opacity': ['get', 'opacity'] },
+    });
+    ensureSource(map, DEV_POINT_SRC);
+    ensureLayer(map, {
+      id: DEV_POINT_LAYER,
+      type: 'circle',
+      source: DEV_POINT_SRC,
+      paint: {
+        'circle-radius': ['case', ['get', 'selected'], 14, 10],
+        'circle-color': ['get', 'color'],
+        'circle-opacity': 0.92,
+        'circle-stroke-color': ['case', ['get', 'selected'], '#ffffff', ['get', 'color']],
+        'circle-stroke-width': ['case', ['get', 'selected'], 3, 2],
+      },
+    });
+
+    const onClick = (e: MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      selectDevice(String(f.properties.id));
+      openPopup(map, e.lngLat, deviceInfoHtml(f.properties));
+    };
+    const enter = () => setCursor(map, 'pointer');
+    const leave = () => setCursor(map, '');
+    map.on('click', DEV_POINT_LAYER, onClick);
+    map.on('mouseenter', DEV_POINT_LAYER, enter);
+    map.on('mouseleave', DEV_POINT_LAYER, leave);
+
+    return () => {
+      map.off('click', DEV_POINT_LAYER, onClick);
+      map.off('mouseenter', DEV_POINT_LAYER, enter);
+      map.off('mouseleave', DEV_POINT_LAYER, leave);
+      teardown(map, DEV_RING_SRC, [DEV_RING_FILL, DEV_RING_LINE]);
+      teardown(map, DEV_POINT_SRC, [DEV_POINT_LAYER]);
+    };
+  }, [map, selectDevice]);
+
+  useEffect(() => {
+    if (!map) return;
+    setSourceData(map, DEV_RING_SRC, devicesRingsFC(devices));
+    setSourceData(map, DEV_POINT_SRC, devicesPointsFC(devices, selectedId));
+  }, [map, devices, selectedId]);
+
+  const labels = useMemo<LabelItem[]>(
+    () => devices.map((d) => ({ id: d.id, lat: d.lat, lng: d.lng, text: d.name, color: KIND_COLOR[d.kind] })),
+    [devices],
+  );
+  useLabelMarkers(map, labels);
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Legacy mapStore links — LOS-aware polylines + popup                         */
+/* -------------------------------------------------------------------------- */
+const LINK_SRC = 'ng-links';
+const LINK_SOLID = 'ng-links-solid';
+const LINK_BLOCKED = 'ng-links-blocked';
+const LINK_PARTIAL = 'ng-links-partial';
+const LINK_LAYER_IDS = [LINK_SOLID, LINK_BLOCKED, LINK_PARTIAL];
+
+function legacyLinksFC(links: MapLink[], devById: Map<string, MapDevice>): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const link of links) {
+    const from = devById.get(link.fromId);
+    const to = devById.get(link.toId);
+    if (!from || !to) continue;
+    const dash = link.los === 'blocked' ? 'blocked' : link.los === 'partial' ? 'partial' : 'solid';
+    const losLabel =
+      link.los === 'clear'
+        ? 'Line of sight: Clear'
+        : link.los === 'partial'
+          ? 'Partial Fresnel obstruction'
+          : link.los === 'blocked'
+            ? 'LOS blocked'
+            : 'LOS unknown (checking…)';
+    const losColor =
+      link.los === 'clear' ? '#34C759' : link.los === 'partial' ? '#FFCC00' : link.los === 'blocked' ? '#FF453A' : '#8E8E93';
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [from.lng, from.lat],
+          [to.lng, to.lat],
+        ],
+      },
+      properties: {
+        color: linkColor(link),
+        dash,
+        width: link.los === 'blocked' ? 2 : 2.5,
+        opacity: link.los === 'blocked' ? 0.7 : 0.9,
+        effectiveRssi: link.rssi - link.obstructionDb,
+        distance: link.distance,
+        rssi: link.rssi,
+        rainDb: link.rainDb,
+        obstructionDb: link.obstructionDb,
+        fresnelM: link.fresnelM,
+        losLabel,
+        losColor,
+        fromName: from.name,
+        toName: to.name,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+function linkInfoHtml(p: Record<string, unknown>): string {
+  const rain = Number(p.rainDb) > 0 ? `<p>Rain fade: &minus;${Number(p.rainDb).toFixed(1)} dB</p>` : '';
+  const obstr =
+    Number(p.obstructionDb) > 0 ? `<p>Terrain loss: &minus;${Number(p.obstructionDb).toFixed(1)} dB</p>` : '';
+  return `<div class="ng-popup-body">
+    <p class="ng-popup-title" style="color:${p.color}">RSSI: ${Number(p.effectiveRssi).toFixed(1)} dBm</p>
+    <div class="ng-popup-sub">
+      <p>Distance: ${Number(p.distance).toLocaleString()} m</p>
+      <p>FSPL RSSI: ${Number(p.rssi).toFixed(1)} dBm</p>
+      ${rain}${obstr}
+      <p>Fresnel r&#8321;: ${p.fresnelM} m</p>
+    </div>
+    <p class="ng-popup-los" style="color:${p.losColor}">${escapeHtml(String(p.losLabel))}</p>
+    <p class="ng-popup-coord">${escapeHtml(String(p.fromName))} &rarr; ${escapeHtml(String(p.toName))}</p>
+  </div>`;
+}
+
+function LinkLayer() {
+  const map = useGlobeMap();
+  const links = useMapStore((s) => s.linkList());
+  const devById = useMapStore((s) => s.devices);
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, LINK_SRC);
+    const basePaint = {
+      'line-color': ['get', 'color'],
+      'line-width': ['get', 'width'],
+      'line-opacity': ['get', 'opacity'],
+    };
+    ensureLayer(map, { id: LINK_SOLID, type: 'line', source: LINK_SRC, paint: basePaint, filter: ['==', ['get', 'dash'], 'solid'] });
+    ensureLayer(map, {
+      id: LINK_BLOCKED,
+      type: 'line',
+      source: LINK_SRC,
+      paint: { ...basePaint, 'line-dasharray': [1.4, 1] },
+      filter: ['==', ['get', 'dash'], 'blocked'],
+    });
+    ensureLayer(map, {
+      id: LINK_PARTIAL,
+      type: 'line',
+      source: LINK_SRC,
+      paint: { ...basePaint, 'line-dasharray': [2.4, 0.8] },
+      filter: ['==', ['get', 'dash'], 'partial'],
+    });
+
+    const onClick = (e: MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      openPopup(map, e.lngLat, linkInfoHtml(f.properties));
+    };
+    const enter = () => setCursor(map, 'pointer');
+    const leave = () => setCursor(map, '');
+    for (const id of LINK_LAYER_IDS) {
+      map.on('click', id, onClick);
+      map.on('mouseenter', id, enter);
+      map.on('mouseleave', id, leave);
+    }
+
+    return () => {
+      for (const id of LINK_LAYER_IDS) {
+        map.off('click', id, onClick);
+        map.off('mouseenter', id, enter);
+        map.off('mouseleave', id, leave);
+      }
+      teardown(map, LINK_SRC, LINK_LAYER_IDS);
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+    setSourceData(map, LINK_SRC, legacyLinksFC(links, devById));
+  }, [map, links, devById]);
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Topology nodes/links — real backend graph with lat/lon                      */
+/* -------------------------------------------------------------------------- */
+const NODE_KIND_COLOR: Record<string, string> = {
+  router: '#2F6BFF',
+  switch: '#27C28B',
+  host: '#8A93A6',
+  ap: '#7C5CFC',
+  cpe: '#007AFF',
+  olt: '#F5A623',
+  firewall: '#FF4D4F',
+  server: '#27B5C2',
+  cloud: '#6B7280',
+};
+
+const NODE_KIND_LABEL: Record<string, string> = {
+  router: 'RTR', switch: 'SW', host: 'HOST',
+  ap: 'AP', cpe: 'CPE', olt: 'OLT',
+  firewall: 'FW', server: 'SRV', cloud: 'CLD',
+};
+
+function nodeForEndpoint(ref: string, nodeById: Map<string, NodeModel>): NodeModel | undefined {
+  const direct = nodeById.get(ref);
+  if (direct) return direct;
+  for (const n of nodeById.values()) {
+    if (n.interfaces.some((i) => i.id === ref)) return n;
+  }
+  return undefined;
+}
+
+function topoNodesFC(nodes: NodeModel[], selectedId: string | null): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: nodes.map((n) => ({
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [n.lon as number, n.lat as number] },
+      properties: {
+        id: n.id,
+        selected: n.id === selectedId,
+        color: NODE_KIND_COLOR[n.kind] ?? '#8A93A6',
+        name: n.name,
+        kind: n.kind,
+        status: n.status,
+        lat: n.lat,
+        lon: n.lon,
+      },
+    })),
+  };
+}
+
+function topoNodeInfoHtml(p: Record<string, unknown>): string {
+  return `<div class="ng-popup-body">
+    <p class="ng-popup-title" style="color:${p.color}">${escapeHtml(String(p.name))}</p>
+    <p class="ng-popup-sub">${escapeHtml(String(p.kind)).toUpperCase()} &middot; ${escapeHtml(String(p.status))}</p>
+    <p class="ng-popup-coord">${Number(p.lat).toFixed(6)}, ${Number(p.lon).toFixed(6)}</p>
+  </div>`;
+}
+
+function topoLinksFC(links: LinkModel[], nodeById: Map<string, NodeModel>): GeoJSON.FeatureCollection {
+  const features: GeoJSON.Feature[] = [];
+  for (const link of links) {
+    const a = nodeForEndpoint(link.a_iface, nodeById);
+    const b = nodeForEndpoint(link.b_iface, nodeById);
+    if (!a || !b || a.lat == null || a.lon == null || b.lat == null || b.lon == null) continue;
+    const wireless = link.type === 'wireless';
+    features.push({
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: [
+          [a.lon, a.lat],
+          [b.lon, b.lat],
+        ],
+      },
+      properties: {
+        id: link.id,
+        wireless,
+        color: wireless ? '#7C5CFC' : '#27B5C2',
+        midLng: (a.lon + b.lon) / 2,
+        midLat: (a.lat + b.lat) / 2,
+        label: `${a.name} ↔ ${b.name} · ${link.type}`,
+      },
+    });
+  }
+  return { type: 'FeatureCollection', features };
+}
+
+const TNODE_SRC = 'ng-topo-nodes';
+const TNODE_LAYER = 'ng-topo-nodes-circle';
+
+function TopologyNodeLayer() {
+  const map = useGlobeMap();
+  const nodes = useTopologyStore((s) => s.nodeList());
+  const selectedId = useTopologyStore((s) => s.selectedNodeId);
+  const select = useTopologyStore((s) => s.select);
+  const geoNodes = useMemo(() => nodes.filter((n) => n.lat != null && n.lon != null), [nodes]);
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, TNODE_SRC);
+    ensureLayer(map, {
+      id: TNODE_LAYER,
+      type: 'circle',
+      source: TNODE_SRC,
+      paint: {
+        'circle-radius': ['case', ['get', 'selected'], 12, 8],
+        'circle-color': ['get', 'color'],
+        'circle-opacity': 0.9,
+        'circle-stroke-color': ['case', ['get', 'selected'], '#ffffff', ['get', 'color']],
+        'circle-stroke-width': ['case', ['get', 'selected'], 3, 2],
+      },
+    });
+
+    const onClick = (e: MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      select({ nodeId: String(f.properties.id) });
+      openPopup(map, e.lngLat, topoNodeInfoHtml(f.properties));
+    };
+    const enter = () => setCursor(map, 'pointer');
+    const leave = () => setCursor(map, '');
+    map.on('click', TNODE_LAYER, onClick);
+    map.on('mouseenter', TNODE_LAYER, enter);
+    map.on('mouseleave', TNODE_LAYER, leave);
+
+    return () => {
+      map.off('click', TNODE_LAYER, onClick);
+      map.off('mouseenter', TNODE_LAYER, enter);
+      map.off('mouseleave', TNODE_LAYER, leave);
+      teardown(map, TNODE_SRC, [TNODE_LAYER]);
+    };
+  }, [map, select]);
+
+  useEffect(() => {
+    if (!map) return;
+    setSourceData(map, TNODE_SRC, topoNodesFC(geoNodes, selectedId));
+  }, [map, geoNodes, selectedId]);
+
+  const labels = useMemo<LabelItem[]>(
+    () =>
+      geoNodes.map((n) => ({
+        id: n.id,
+        lat: n.lat as number,
+        lng: n.lon as number,
+        text: `[${NODE_KIND_LABEL[n.kind] ?? n.kind.toUpperCase()}] ${n.name}`,
+        color: NODE_KIND_COLOR[n.kind] ?? '#8A93A6',
+      })),
+    [geoNodes],
+  );
+  useLabelMarkers(map, labels);
+
+  return null;
+}
+
+const TLINK_SRC = 'ng-topo-links';
+const TLINK_CABLED = 'ng-topo-links-cabled';
+const TLINK_WIRELESS = 'ng-topo-links-wireless';
+
+function TopologyLinkLayer() {
+  const map = useGlobeMap();
+  const links = useTopologyStore((s) => s.linkList());
+  const nodeById = useTopologyStore((s) => s.nodes);
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, TLINK_SRC);
+    ensureLayer(map, {
+      id: TLINK_CABLED,
+      type: 'line',
+      source: TLINK_SRC,
+      paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.85 },
+      filter: ['==', ['get', 'wireless'], false],
+    });
+    ensureLayer(map, {
+      id: TLINK_WIRELESS,
+      type: 'line',
+      source: TLINK_SRC,
+      paint: { 'line-color': ['get', 'color'], 'line-width': 2, 'line-opacity': 0.85, 'line-dasharray': [1.5, 1] },
+      filter: ['==', ['get', 'wireless'], true],
+    });
+    return () => teardown(map, TLINK_SRC, [TLINK_CABLED, TLINK_WIRELESS]);
+  }, [map]);
+
+  const fc = useMemo(() => topoLinksFC(links, nodeById), [links, nodeById]);
+  useEffect(() => {
+    if (map) setSourceData(map, TLINK_SRC, fc);
+  }, [map, fc]);
+
+  const labels = useMemo<LabelItem[]>(
+    () =>
+      fc.features.map((f) => {
+        const p = f.properties as { id: string; midLat: number; midLng: number; label: string };
+        return { id: `tlink-${p.id}`, lat: p.midLat, lng: p.midLng, text: p.label, color: '#C9D1E0' };
+      }),
+    [fc],
+  );
+  useLabelMarkers(map, labels);
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* OSM towers/buildings — reference-only overlays fed by Overpass              */
+/* -------------------------------------------------------------------------- */
+const OSM_KIND_COLOR: Record<string, string> = {
+  bts: '#FF6B00',
+  mast: '#E040FB',
+  microwave: '#00E5FF',
+  broadcast: '#FFD600',
+};
+
+const OSM_KIND_LABEL: Record<string, string> = {
+  bts: 'BTS',
+  mast: 'MAST',
+  microwave: 'MW',
+  broadcast: 'TX',
+};
+
+const TOWER_SRC = 'ng-osm-towers';
+const TOWER_LAYER = 'ng-osm-towers-circle';
+
+function towersFC(towers: OsmTower[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: towers.map((t) => {
+      const kind = towerKind(t);
+      return {
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [t.lng, t.lat] },
+        properties: {
+          id: t.id,
+          color: OSM_KIND_COLOR[kind] ?? '#FF6B00',
+          label: OSM_KIND_LABEL[kind] ?? 'BTS',
+          name: towerLabel(t),
+          operator: t.tags.operator ?? '',
+          height: t.tags.height ?? '',
+          lat: t.lat,
+          lng: t.lng,
+        },
+      };
+    }),
+  };
+}
+
+function osmTowerInfoHtml(p: Record<string, unknown>): string {
+  const operator = p.operator ? `<p class="ng-popup-sub2">Operator: ${escapeHtml(String(p.operator))}</p>` : '';
+  const height = p.height ? `<p class="ng-popup-sub2">Height: ${escapeHtml(String(p.height))} m</p>` : '';
+  return `<div class="ng-popup-body">
+    <p class="ng-popup-title" style="color:${p.color}">${escapeHtml(String(p.name))}</p>
+    <p class="ng-popup-sub">OSM ID: ${p.id} &middot; Type: ${escapeHtml(String(p.label))}</p>
+    ${operator}${height}
+    <p class="ng-popup-coord">${Number(p.lat).toFixed(6)}, ${Number(p.lng).toFixed(6)}</p>
+    <p class="ng-popup-attrib">Source: OpenStreetMap contributors</p>
+  </div>`;
+}
+
+function OsmTowerLayer() {
+  const map = useGlobeMap();
+  const [towers, setTowers] = useState<OsmTower[]>([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reqSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, TOWER_SRC);
+    ensureLayer(
+      map,
+      {
+        id: TOWER_LAYER,
+        type: 'circle',
+        source: TOWER_SRC,
+        paint: {
+          'circle-radius': 6,
+          'circle-opacity': 0,
+          'circle-stroke-color': ['get', 'color'],
+          'circle-stroke-width': 1.5,
+          'circle-stroke-opacity': 0.55,
+        },
+      },
+      firstVectorLayerId(map),
+    );
+    const onClick = (e: MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      openPopup(map, e.lngLat, osmTowerInfoHtml(f.properties));
+    };
+    const enter = () => setCursor(map, 'pointer');
+    const leave = () => setCursor(map, '');
+    map.on('click', TOWER_LAYER, onClick);
+    map.on('mouseenter', TOWER_LAYER, enter);
+    map.on('mouseleave', TOWER_LAYER, leave);
+
+    return () => {
+      map.off('click', TOWER_LAYER, onClick);
+      map.off('mouseenter', TOWER_LAYER, enter);
+      map.off('mouseleave', TOWER_LAYER, leave);
+      teardown(map, TOWER_SRC, [TOWER_LAYER]);
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+    let mounted = true;
+    const clearSafety = () => {
+      if (safetyRef.current) {
+        clearTimeout(safetyRef.current);
+        safetyRef.current = null;
+      }
+    };
+    const load = () => {
+      if (map.getZoom() < 12) {
+        setTowers([]);
+        setLoading(false);
+        clearSafety();
+        return;
+      }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        const b = map.getBounds();
+        const seq = ++reqSeqRef.current;
+        setLoading(true);
+        clearSafety();
+        safetyRef.current = setTimeout(() => {
+          if (mounted) setLoading(false);
+        }, 27_000);
+
+        fetchOsmTowers(b.getSouth(), b.getWest(), b.getNorth(), b.getEast())
+          .then((result) => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            setTowers(result);
+          })
+          .catch(() => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            setTowers([]);
+          })
+          .finally(() => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            clearSafety();
+            setLoading(false);
+          });
+      }, 600);
+    };
+
+    map.on('moveend', load);
+    map.on('zoomend', load);
+    load();
+
+    return () => {
+      mounted = false;
+      map.off('moveend', load);
+      map.off('zoomend', load);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      clearSafety();
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+    setSourceData(map, TOWER_SRC, towersFC(towers));
+  }, [map, towers]);
+
+  const labels = useMemo<LabelItem[]>(
+    () =>
+      towers.map((t) => {
+        const kind = towerKind(t);
+        return {
+          id: String(t.id),
+          lat: t.lat,
+          lng: t.lng,
+          text: `[${OSM_KIND_LABEL[kind] ?? 'BTS'}] ${towerLabel(t)}`,
+          color: OSM_KIND_COLOR[kind] ?? '#FF6B00',
+        };
+      }),
+    [towers],
+  );
+  useLabelMarkers(map, labels);
+
+  return loading ? (
+    <div
+      className={cn('pointer-events-none absolute left-[60px] top-2 rounded-md px-2 py-0.5 text-[10px]', zc.workspace)}
+      style={{ background: 'rgba(0,0,0,0.65)', color: '#FF6B00' }}
+    >
+      Loading OSM towers…
+    </div>
+  ) : null;
+}
+
+const BLDG_SRC = 'ng-osm-buildings';
+const BLDG_LAYER = 'ng-osm-buildings-fill';
+
+function OsmBuildingsLayer({ densityMode }: { densityMode: boolean }) {
+  const map = useGlobeMap();
+  const [buildings, setBuildings] = useState<OsmBuilding[]>([]);
+  const [loading, setLoading] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reqSeqRef = useRef(0);
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, BLDG_SRC);
+    ensureLayer(
+      map,
+      {
+        id: BLDG_LAYER,
+        type: 'fill',
+        source: BLDG_SRC,
+        paint: { 'fill-color': ['get', 'color'], 'fill-opacity': ['get', 'fillOpacity'] },
+      },
+      firstVectorLayerId(map),
+    );
+    return () => teardown(map, BLDG_SRC, [BLDG_LAYER]);
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+    let mounted = true;
+    const clearSafety = () => {
+      if (safetyRef.current) {
+        clearTimeout(safetyRef.current);
+        safetyRef.current = null;
+      }
+    };
+    const load = () => {
+      if (map.getZoom() < 16) {
+        setBuildings([]);
+        setLoading(false);
+        clearSafety();
+        return;
+      }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        const b = map.getBounds();
+        const seq = ++reqSeqRef.current;
+        setLoading(true);
+        clearSafety();
+        safetyRef.current = setTimeout(() => {
+          if (mounted) setLoading(false);
+        }, 27_000);
+
+        fetchOsmBuildings(b.getSouth(), b.getWest(), b.getNorth(), b.getEast())
+          .then((result) => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            setBuildings(result);
+          })
+          .catch(() => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            setBuildings([]);
+          })
+          .finally(() => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            clearSafety();
+            setLoading(false);
+          });
+      }, 600);
+    };
+
+    map.on('moveend', load);
+    map.on('zoomend', load);
+    load();
+
+    return () => {
+      mounted = false;
+      map.off('moveend', load);
+      map.off('zoomend', load);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      clearSafety();
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+    const colors = densityMode ? densityColors(buildings.map((b) => b.center)) : null;
+    const fc: GeoJSON.FeatureCollection = {
+      type: 'FeatureCollection',
+      features: buildings.map((b, i) => ({
+        type: 'Feature',
+        geometry: { type: 'Polygon', coordinates: [b.ring.map(([lat, lng]) => [lng, lat])] },
+        properties: {
+          color: (colors ? colors[i] : null) ?? '#4C9AFF',
+          fillOpacity: densityMode ? 0.55 : 0.2,
+        },
+      })),
+    };
+    setSourceData(map, BLDG_SRC, fc);
+  }, [map, buildings, densityMode]);
+
+  return loading ? (
+    <div
+      className={cn('pointer-events-none absolute left-[60px] top-2 rounded-md px-2 py-0.5 text-[10px]', zc.workspace)}
+      style={{ background: 'rgba(0,0,0,0.65)', color: '#4C9AFF' }}
+    >
+      {densityMode ? 'Loading density…' : 'Loading buildings…'}
+    </div>
+  ) : null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Geocoding search result — flyTo + temporary marker                          */
+/* -------------------------------------------------------------------------- */
+const SEARCH_SRC = 'ng-search-result';
+const SEARCH_LAYER = 'ng-search-result-circle';
+
+function SearchResultLayer() {
+  const map = useGlobeMap();
+  const result = useMapStore((s) => s.searchResult);
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, SEARCH_SRC);
+    ensureLayer(map, {
+      id: SEARCH_LAYER,
+      type: 'circle',
+      source: SEARCH_SRC,
+      paint: {
+        'circle-radius': 9,
+        'circle-color': '#FF9F0A',
+        'circle-opacity': 0.35,
+        'circle-stroke-color': '#FF9F0A',
+        'circle-stroke-width': 3,
+      },
+    });
+    return () => teardown(map, SEARCH_SRC, [SEARCH_LAYER]);
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+    const fc: GeoJSON.FeatureCollection = result
+      ? {
+          type: 'FeatureCollection',
+          features: [
+            {
+              type: 'Feature',
+              geometry: { type: 'Point', coordinates: [result.lng, result.lat] },
+              properties: {},
+            },
+          ],
+        }
+      : EMPTY_FC;
+    setSourceData(map, SEARCH_SRC, fc);
+    if (result) map.flyTo({ center: [result.lng, result.lat], zoom: 16, duration: 1200 });
+  }, [map, result]);
+
+  const labels = useMemo<LabelItem[]>(
+    () => (result ? [{ id: 'search-result', lat: result.lat, lng: result.lng, text: result.label, color: '#FF9F0A' }] : []),
+    [result],
+  );
+  useLabelMarkers(map, labels);
+
+  return null;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -372,10 +1412,14 @@ function GradientLegend() {
 /* Main MapView                                                                */
 /* -------------------------------------------------------------------------- */
 export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
+  const [glMap, setGlMap] = useState<MapLibreMap | null>(null);
   const showOnboarding = useMapStore((s) => s.showOnboarding);
   const activeModal = useUiStore((s) => s.activeModal);
   const openModal = useUiStore((s) => s.openModal);
   const coverageVisible = useMapStore((s) => s.gisLayers['rf-coverage']?.visible ?? false);
+  const towersVisible = useMapStore((s) => s.gisLayers['util-tower']?.visible ?? false);
+  const buildingsVisible = useMapStore((s) => s.gisLayers['pop-buildings']?.visible ?? false);
+  const densityVisible = useMapStore((s) => s.gisLayers['pop-density']?.visible ?? false);
 
   // First visit to the standalone map claims the shared modal slot for the
   // quickstart (never in RF, which owns its own chrome). Exclusive by construction.
@@ -386,44 +1430,60 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
 
   return (
     <div className="relative h-full w-full overflow-hidden">
-      <GlobeBasemap />
+      <MapCtx.Provider value={glMap}>
+        <GlobeBasemap onMapChange={setGlMap} />
 
-      {/* Overlay UI */}
-      <MapSearch />
-      <MapToolbar />
-      {/* RF mode owns the right dock + bottom bar, so suppress the generic map
-          chrome that would collide (device panel, signal legend, tool hint,
-          center-bottom elevation panel). */}
-      {!rfMode && <MapDevicePanel />}
-      {!rfMode && <SignalLegend />}
-      {/* Signal-strength gradient only describes the RF coverage raster — show it
-          only when that layer is on, so it doesn't float over the top bar/popovers. */}
-      {coverageVisible && <GradientLegend />}
-      <GisLayerToggle />
-      <GisLayerPanel />
-      {!rfMode && <ToolHint />}
-      <MapNotice />
-      <WeatherBar />
-      <MapLayerSwitcher />
-      {!rfMode && <ElevationProfilePanel />}
+        {/* Vector overlays — GeoJSON sources + style layers (Stage 2). Mount
+            order sets z-order: OSM reference layers anchor to the vector floor
+            (firstVectorLayerId) so they always stay below real project data,
+            regardless of toggle timing; everything else stacks bottom-to-top
+            in this order, matching the pre-migration Leaflet z-order. */}
+        {towersVisible && <OsmTowerLayer />}
+        {(buildingsVisible || densityVisible) && <OsmBuildingsLayer densityMode={densityVisible} />}
+        <SearchResultLayer />
+        <TopologyLinkLayer />
+        <TopologyNodeLayer />
+        <LinkLayer />
+        <DeviceLayer />
 
-      {/* First-run + device library — share the single exclusive modal slot. */}
-      {activeModal === 'mapOnboarding' && <MapOnboardingModal />}
-      {activeModal === 'deviceLibrary' && <DeviceLibraryModal />}
+        {/* Overlay UI */}
+        <MapSearch />
+        <MapToolbar />
+        {/* RF mode owns the right dock + bottom bar, so suppress the generic map
+            chrome that would collide (device panel, signal legend, tool hint,
+            center-bottom elevation panel). */}
+        {!rfMode && <MapDevicePanel />}
+        {!rfMode && <SignalLegend />}
+        {/* Signal-strength gradient only describes the RF coverage raster — show it
+            only when that layer is on, so it doesn't float over the top bar/popovers. */}
+        {coverageVisible && <GradientLegend />}
+        <GisLayerToggle />
+        <GisLayerPanel />
+        {!rfMode && <ToolHint />}
+        <MapNotice />
+        <WeatherBar />
+        <MapLayerSwitcher />
+        {!rfMode && <ElevationProfilePanel />}
+
+        {/* First-run + device library — share the single exclusive modal slot. */}
+        {activeModal === 'mapOnboarding' && <MapOnboardingModal />}
+        {activeModal === 'deviceLibrary' && <DeviceLibraryModal />}
+      </MapCtx.Provider>
     </div>
   );
 }
 
 /* -------------------------------------------------------------------------- */
-/* Stage 2 debt — removed in this Stage 1 swap, not shimmed (design doc §4):   */
-/*  - Device markers + coverage rings, link polylines, RF PtP beam            */
-/*    (RfBeamLayer.tsx deleted), topology node/link markers                   */
+/* Stage 3 debt — deliberately not in this Stage 2 pass (design doc §4):       */
 /*  - Click-to-place tool (device/measure/profile/deploy), incl. the          */
-/*    MapDeployMenu popover trigger (deployAnchor)                            */
-/*  - OSM towers/buildings overlay (Overpass-fed feature layers)              */
-/*  - RF coverage raster (best-server RSSI canvas → L.imageOverlay)           */
-/*  - Geocode fly-to on search result select                                  */
-/* All of the above are pure-math/state in mapStore.ts/signalSim.ts/          */
-/* elevation.ts, untouched — Stage 2 rewrites just their render as GeoJSON    */
-/* sources + style layers on this same MapLibre map instance.                 */
+/*    MapDeployMenu popover trigger (deployAnchor) and the elevation-profile  */
+/*    line/endpoints tool. Needs the e.point/unproject rewrite — the doc's    */
+/*    own named precision-risk area, so it's scoped alone in Stage 3.         */
+/*  - RF coverage raster (best-server RSSI canvas → MapLibre `image` source). */
+/*  - "Any map click dismisses the search pin" — was wired through the        */
+/*    click-to-place event handler; folds into that Stage 3 rewrite.         */
+/* Everything else from the original debt list is live above: device markers  */
+/* + coverage rings, link polylines, topology node/link markers, device/OSM   */
+/* popups, OSM towers/buildings, geocode fly-to. RF PtP beam (RfBeamLayer)    */
+/* stays deleted — it wasn't in Stage 2's required feature list.              */
 /* -------------------------------------------------------------------------- */
