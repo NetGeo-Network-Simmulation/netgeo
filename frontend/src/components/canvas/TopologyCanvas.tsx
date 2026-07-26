@@ -29,11 +29,12 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Plus, X } from 'lucide-react';
+import { Search, Plus, X, Waypoints } from 'lucide-react';
 import { DeviceNode, type DeviceNodeData } from './DeviceNode';
 import { PulseEdge } from './PulseEdge';
 import { ConnectionLine } from './ConnectionLine';
 import { OverlayChips } from './OverlayChips';
+import { hierarchyLayout } from './hierarchyLayout';
 import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
 import { useLabStore } from '@/store/labStore';
@@ -207,6 +208,23 @@ export function TopologyCanvas() {
   const onNodeDragStop: OnNodeDrag<Node<DeviceNodeData>> = useCallback((_e, node) => {
     void nodesApi.move(node.id, node.position.x, node.position.y).catch(() => {});
   }, []);
+
+  /* --- Auto-layout (E3): explicit, destructive, never runs on its own ------ */
+  // Rewrites x,y for every node via the same move path drag-stop already uses
+  // (local update + persisted PATCH), so it's a one-click "tidy up" rather than
+  // a new persistence surface. No undo — a confirm is the ponytail-sized guard.
+  const onAutoLayout = useCallback(() => {
+    if (nodesMap.size === 0) return;
+    const ok = window.confirm(
+      'Auto-layout repositions every node on this canvas by hierarchy. Manual placement will be lost. Continue?',
+    );
+    if (!ok) return;
+    const positions = hierarchyLayout(Array.from(nodesMap.values()), Array.from(linksMap.values()));
+    for (const [id, pos] of positions) {
+      moveNode(id, pos.x, pos.y);
+      void nodesApi.move(id, pos.x, pos.y).catch(() => {});
+    }
+  }, [nodesMap, linksMap, moveNode]);
 
   const onSelectionNode: NodeMouseHandler<Node<DeviceNodeData>> = useCallback(
     (_e, node) => select({ nodeId: node.id }),
@@ -414,12 +432,24 @@ export function TopologyCanvas() {
         <Panel position="top-left" className="!m-3">
           <div className="flex flex-col gap-2">
             <OverlayChips />
-            <CanvasToolbar
-              nodes={rfNodes.length}
-              allNodes={nodesMap}
-              onLocate={locateNode}
-              onAddDevice={() => openPicker()}
-            />
+            <div className="flex items-start gap-2">
+              <CanvasToolbar
+                nodes={rfNodes.length}
+                allNodes={nodesMap}
+                onLocate={locateNode}
+                onAddDevice={() => openPicker()}
+              />
+              <button
+                onClick={onAutoLayout}
+                disabled={rfNodes.length === 0}
+                title="Auto-layout (hierarki) — repositions every node, cannot be undone"
+                aria-label="Auto-layout hierarchy"
+                className="glass flex shrink-0 items-center gap-1.5 rounded-lg border border-fg/10 px-2.5 py-1.5 text-xs font-medium text-fg/70 shadow-glass hover:bg-fg/10 hover:text-fg/90 disabled:pointer-events-none disabled:opacity-40"
+              >
+                <Waypoints className="h-3.5 w-3.5" />
+                Auto-layout
+              </button>
+            </div>
           </div>
         </Panel>
 
