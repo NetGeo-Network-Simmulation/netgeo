@@ -1,19 +1,22 @@
 /**
  * MapView — network design view (UISP Design Center style), on a MapLibre GL
- * globe basemap (docs/design/21-GLOBE-MAP-MIGRATION.md, Stage 1 + Stage 2).
+ * globe basemap (docs/design/21-GLOBE-MAP-MIGRATION.md, Stage 1–3).
  *
  * Stage 1 swapped the render engine for the basemap + GIS raster overlays.
- * Stage 2 (this file) brings the vector overlays back — device markers +
- * coverage rings, link polylines, topology node/link markers, device/tower
- * popups, OSM towers/buildings, geocode fly-to — rewritten as MapLibre GeoJSON
- * sources + style layers per the migration doc's explicit rejection of a
- * drop-in Leaflet shim (no more one-React-component-per-marker).
+ * Stage 2 brought the vector overlays back — device markers + coverage rings,
+ * link polylines, topology node/link markers, device/tower popups, OSM
+ * towers/buildings, geocode fly-to — as MapLibre GeoJSON sources + style
+ * layers per the migration doc's explicit rejection of a drop-in Leaflet shim.
+ * Stage 3 (this pass) finishes the pixel/canvas-anchored features the doc
+ * flags as the real precision risk (§5): click-to-place (device/measure/
+ * profile/deploy, `e.point`/`unproject` instead of Leaflet's
+ * `e.containerPoint`/`e.latlng`), the RF coverage raster (`image` source
+ * instead of `L.imageOverlay`), and the RF PtP beam (GeoJSON, ported back
+ * from the deleted RfBeamLayer.tsx).
  *
- * Still deferred to Stage 3 (see the debt block at the bottom of this file):
- * click-to-place tools (device/measure/profile/deploy) and the RF coverage
- * raster. Both are pixel/canvas-anchored features that need the
- * `e.point`/`unproject` rewrite the design doc calls out as the real
- * precision-risk area — out of scope here on purpose.
+ * Still deferred to Stage 4 (see the debt block at the bottom of this file):
+ * muting tile saturation per basemap/theme — cosmetic, not required for
+ * feature parity.
  */
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import 'maplibre-gl/dist/maplibre-gl.css';
@@ -23,20 +26,28 @@ import {
   Marker as MglMarker,
   Popup,
   type GeoJSONSource,
+  type ImageSource,
   type MapLayerMouseEvent,
+  type MapMouseEvent,
   type LngLat,
 } from 'maplibre-gl';
 import {
   useMapStore,
   rainRateLabel,
   linkColor,
+  haversineM,
+  rssiRampCss,
+  coverageGrid,
   type GisLayerState,
   type MapDevice,
   type MapLink,
   type MapDeviceKind,
 } from '@/store/mapStore';
 import { useTopologyStore } from '@/store/topologyStore';
+import { useRfStore } from '@/store/rfStore';
+import { marginStatus, STATUS_COLOR, fmtKm } from '@/components/rf/rfLogic';
 import type { NodeModel, LinkModel } from '@/api/types';
+import { rfApi, type CoverageSite } from '@/api/client';
 import {
   fetchOsmTowers,
   towerLabel,
@@ -55,6 +66,7 @@ import { MapLayerSwitcher } from './MapLayerSwitcher';
 import { MapSearch } from './MapSearch';
 import { GisLayerPanel } from './GisLayerPanel';
 import { ElevationProfilePanel } from './ElevationProfilePanel';
+import { MapDeployMenu } from './MapDeployMenu';
 import { DeviceLibraryModal } from './DeviceLibraryModal';
 import { Layers as LayersIcon, AlertTriangle } from 'lucide-react';
 import { useUiStore } from '@/store/uiStore';
@@ -1227,6 +1239,559 @@ function SearchResultLayer() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* RF coverage raster — Stage 3, best-server RSSI overlay (design doc §4)      */
+/* Ports the removed `L.imageOverlay` + custom `rfCoverage` pane straight to a */
+/* MapLibre `image` source + `raster` layer — same canvas painting, same       */
+/* debounce/stale-guard/safety-timeout as the OSM layers above, same beforeId  */
+/* anchor (firstVectorLayerId) as OSM towers/buildings so the raster always    */
+/* re-inserts above the basemap but below every vector overlay, matching the   */
+/* old pane's z-index=350 (tilePane=200 < 350 < overlayPane=400).              */
+/* -------------------------------------------------------------------------- */
+const COVERAGE_SRC = 'ng-rf-coverage';
+const COVERAGE_LAYER = 'ng-rf-coverage-raster';
+
+function RfCoverageLayer() {
+  const map = useGlobeMap();
+  const deviceMap = useMapStore((s) => s.devices);
+  const opacity = useMapStore((s) => s.gisLayers['rf-coverage']?.opacity ?? 0.55);
+  const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'empty' | 'error'>('idle');
+  const [siteCount, setSiteCount] = useState(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const safetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const reqSeqRef = useRef(0);
+
+  const sites = useMemo<CoverageSite[]>(
+    () =>
+      Array.from(deviceMap.values())
+        .filter((d) => d.kind === 'ap' || d.kind === 'tower')
+        .map((d) => ({
+          lat: d.lat,
+          lon: d.lng,
+          height_m: d.antennaHeight,
+          tx_power_dbm: d.txPower,
+          freq_mhz: d.frequency * 1000, // GHz → MHz
+        })),
+    [deviceMap],
+  );
+
+  useEffect(() => {
+    if (!map) return;
+    let mounted = true;
+    const clearSafety = () => {
+      if (safetyRef.current) {
+        clearTimeout(safetyRef.current);
+        safetyRef.current = null;
+      }
+    };
+    const removeOverlay = () => {
+      if (map.getLayer(COVERAGE_LAYER)) map.removeLayer(COVERAGE_LAYER);
+      if (map.getSource(COVERAGE_SRC)) map.removeSource(COVERAGE_SRC);
+    };
+
+    const load = () => {
+      setSiteCount(sites.length);
+      if (sites.length === 0) {
+        removeOverlay();
+        setStatus('empty');
+        clearSafety();
+        return;
+      }
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = setTimeout(() => {
+        const b = map.getBounds();
+        const south = b.getSouth();
+        const west = b.getWest();
+        const north = b.getNorth();
+        const east = b.getEast();
+        const midLat = (south + north) / 2;
+        const midLon = (west + east) / 2;
+        const widthM = haversineM(midLat, west, midLat, east);
+        const heightM = haversineM(south, midLon, north, midLon);
+        const { rows, cols } = coverageGrid(widthM / Math.max(heightM, 1e-6));
+
+        const seq = ++reqSeqRef.current;
+        setStatus('loading');
+        clearSafety();
+        safetyRef.current = setTimeout(() => {
+          if (mounted && seq === reqSeqRef.current) setStatus('error');
+        }, 12_000);
+
+        rfApi
+          .coverage({
+            sites,
+            technology: 'wifi_5ghz',
+            model_id: 'fspl',
+            rows,
+            cols,
+            min_lat: south,
+            min_lon: west,
+            max_lat: north,
+            max_lon: east,
+            rx_height_m: 1.5,
+          })
+          .then((res) => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            // Paint one pixel per cell; flip vertically (backend row 0 = south,
+            // canvas y=0 = north) so the image aligns to its bounds below.
+            const canvas = document.createElement('canvas');
+            canvas.width = res.cols;
+            canvas.height = res.rows;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return;
+            for (let y = 0; y < res.rows; y++) {
+              const srcRow = res.values[res.rows - 1 - y];
+              for (let x = 0; x < res.cols; x++) {
+                const dbm = srcRow?.[x] ?? -120;
+                if (dbm < -95) continue;
+                ctx.fillStyle = rssiRampCss(dbm);
+                ctx.fillRect(x, y, 1, 1);
+              }
+            }
+            const url = canvas.toDataURL();
+            // MapLibre image-source coordinates: TL, TR, BR, BL, clockwise,
+            // [lng, lat] each — confirmed against maplibre-gl.d.ts's own
+            // documented example. North=top of the flipped canvas above.
+            const coords: [[number, number], [number, number], [number, number], [number, number]] = [
+              [res.bounds.min_lon, res.bounds.max_lat],
+              [res.bounds.max_lon, res.bounds.max_lat],
+              [res.bounds.max_lon, res.bounds.min_lat],
+              [res.bounds.min_lon, res.bounds.min_lat],
+            ];
+            const existing = map.getSource(COVERAGE_SRC) as ImageSource | undefined;
+            if (existing) {
+              existing.updateImage({ url, coordinates: coords });
+            } else {
+              map.addSource(COVERAGE_SRC, { type: 'image', url, coordinates: coords });
+              map.addLayer(
+                { id: COVERAGE_LAYER, type: 'raster', source: COVERAGE_SRC, paint: { 'raster-opacity': opacity } },
+                firstVectorLayerId(map),
+              );
+            }
+            setStatus('ok');
+          })
+          .catch(() => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            removeOverlay();
+            setStatus('error');
+          })
+          .finally(() => {
+            if (!mounted || seq !== reqSeqRef.current) return;
+            clearSafety();
+          });
+      }, 600);
+    };
+
+    map.on('moveend', load);
+    map.on('zoomend', load);
+    load();
+
+    return () => {
+      mounted = false;
+      map.off('moveend', load);
+      map.off('zoomend', load);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      clearSafety();
+      removeOverlay();
+    };
+    // opacity intentionally excluded — handled by the setPaintProperty effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, sites]);
+
+  // Opacity is a cheap live update — never trigger a recompute for it.
+  useEffect(() => {
+    if (map?.getLayer(COVERAGE_LAYER)) map.setPaintProperty(COVERAGE_LAYER, 'raster-opacity', opacity);
+  }, [map, opacity]);
+
+  return (
+    <div className={cn('pointer-events-none absolute bottom-10 left-4', zc.workspace)}>
+      <div className="rounded-xl border border-fg/15 bg-recess/60 px-3 py-2 shadow-glass backdrop-blur">
+        <p className="mb-1.5 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-fg/40">
+          RF Coverage
+          {status === 'loading' && (
+            <span className="inline-block h-2 w-2 animate-spin rounded-full border-2 border-fg/25 border-t-fg/70" />
+          )}
+        </p>
+
+        {status === 'empty' ? (
+          <p className="max-w-[150px] text-[10px] leading-snug text-fg/45">
+            Place an AP or Tower to compute best-server coverage.
+          </p>
+        ) : status === 'error' ? (
+          <p className="max-w-[150px] text-[10px] leading-snug text-danger/80">
+            Coverage compute failed — pan or retry.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-fg/60">−95</span>
+              <span
+                className="h-2.5 w-24 rounded-full"
+                style={{
+                  background: 'linear-gradient(90deg, #FF453A 0%, #FFCC00 40%, #A3E635 70%, #34C759 100%)',
+                }}
+              />
+              <span className="text-[10px] text-fg/60">−55</span>
+            </div>
+            <p className="mt-1 text-[9px] text-fg/35">
+              dBm · best-server · {siteCount} site{siteCount === 1 ? '' : 's'}
+            </p>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* RF PtP beam — the beam line between the two chosen RF-workspace endpoints. */
+/* RfBeamLayer.tsx was deleted with the Leaflet render layer (Stage 1); this   */
+/* ports it back as a GeoJSON source pair instead of reviving the file, since  */
+/* it needs the same MapCtx this file already owns. Two line layers (solid/   */
+/* dashed) reuse the LinkLayer convention above — MapLibre's line-dasharray    */
+/* paint property isn't data-driven, so a boolean `dashed` property is a      */
+/* `filter`, not a paint expression, exactly like LINK_SOLID/LINK_BLOCKED.     */
+/* -------------------------------------------------------------------------- */
+const BEAM_LINE_SRC = 'ng-rf-beam-line';
+const BEAM_LINE_SOLID = 'ng-rf-beam-line-solid';
+const BEAM_LINE_DASHED = 'ng-rf-beam-line-dashed';
+const BEAM_LINE_IDS = [BEAM_LINE_SOLID, BEAM_LINE_DASHED];
+const BEAM_RING_SRC = 'ng-rf-beam-rings';
+const BEAM_RING_LAYER = 'ng-rf-beam-rings-circle';
+
+function RfBeamLayer() {
+  const map = useGlobeMap();
+  const aId = useRfStore((s) => s.aId);
+  const bId = useRfStore((s) => s.bId);
+  const result = useRfStore((s) => s.result);
+  const freqGhz = useRfStore((s) => s.freqGhz);
+  const devices = useMapStore((s) => s.devices);
+  const a = aId ? devices.get(aId) : undefined;
+  const b = bId ? devices.get(bId) : undefined;
+  const color = result ? STATUS_COLOR[marginStatus(result.fade_margin_db)] : '#5C8AFF';
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, BEAM_LINE_SRC);
+    const basePaint = { 'line-color': ['get', 'color'], 'line-width': 3, 'line-opacity': 0.95 };
+    ensureLayer(map, {
+      id: BEAM_LINE_SOLID,
+      type: 'line',
+      source: BEAM_LINE_SRC,
+      paint: basePaint,
+      filter: ['==', ['get', 'dashed'], false],
+    });
+    ensureLayer(map, {
+      id: BEAM_LINE_DASHED,
+      type: 'line',
+      source: BEAM_LINE_SRC,
+      paint: { ...basePaint, 'line-dasharray': [1.2, 1.6] },
+      filter: ['==', ['get', 'dashed'], true],
+    });
+    ensureSource(map, BEAM_RING_SRC);
+    ensureLayer(map, {
+      id: BEAM_RING_LAYER,
+      type: 'circle',
+      source: BEAM_RING_SRC,
+      paint: {
+        'circle-radius': 12,
+        'circle-color': ['get', 'color'],
+        'circle-opacity': 0.12,
+        'circle-stroke-color': ['get', 'color'],
+        'circle-stroke-width': 2.5,
+      },
+    });
+    return () => {
+      teardown(map, BEAM_LINE_SRC, BEAM_LINE_IDS);
+      teardown(map, BEAM_RING_SRC, [BEAM_RING_LAYER]);
+    };
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+    const rings: GeoJSON.Feature[] = [];
+    if (a && b) {
+      rings.push(
+        { type: 'Feature', geometry: { type: 'Point', coordinates: [a.lng, a.lat] }, properties: { color } },
+        { type: 'Feature', geometry: { type: 'Point', coordinates: [b.lng, b.lat] }, properties: { color } },
+      );
+    } else {
+      const one = a ?? b;
+      if (one) {
+        rings.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [one.lng, one.lat] },
+          properties: { color: '#5C8AFF' },
+        });
+      }
+    }
+    setSourceData(map, BEAM_RING_SRC, { type: 'FeatureCollection', features: rings });
+
+    const lineFc: GeoJSON.FeatureCollection =
+      a && b
+        ? {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: [
+                    [a.lng, a.lat],
+                    [b.lng, b.lat],
+                  ],
+                },
+                properties: { color, dashed: !result },
+              },
+            ],
+          }
+        : EMPTY_FC;
+    setSourceData(map, BEAM_LINE_SRC, lineFc);
+  }, [map, a, b, color, result]);
+
+  const distM = a && b ? (result?.distance_m ?? haversineM(a.lat, a.lng, b.lat, b.lng)) : 0;
+  const labels = useMemo<LabelItem[]>(() => {
+    if (!a || !b) return [];
+    return [
+      {
+        id: 'rf-beam-chip',
+        lat: (a.lat + b.lat) / 2,
+        lng: (a.lng + b.lng) / 2,
+        text: `${freqGhz} GHz · ${fmtKm(distM)}`,
+        color,
+      },
+    ];
+  }, [a, b, freqGhz, distM, color]);
+  useLabelMarkers(map, labels);
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Elevation-profile line — endpoints + connecting line while the tool is used */
+/* Pure render, driven by mapStore's profilePts (unchanged store contract);    */
+/* only the render target moved off Leaflet onto a GeoJSON source.           */
+/* -------------------------------------------------------------------------- */
+const PROFILE_SRC = 'ng-profile-line';
+const PROFILE_LAYER = 'ng-profile-line-layer';
+
+function ProfileLine() {
+  const map = useGlobeMap();
+  const pts = useMapStore((s) => s.profilePts);
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, PROFILE_SRC);
+    ensureLayer(map, {
+      id: PROFILE_LAYER,
+      type: 'line',
+      source: PROFILE_SRC,
+      paint: { 'line-color': '#A0785A', 'line-width': 2.5, 'line-opacity': 0.9, 'line-dasharray': [2, 6] },
+    });
+    return () => teardown(map, PROFILE_SRC, [PROFILE_LAYER]);
+  }, [map]);
+
+  useEffect(() => {
+    if (!map) return;
+    const fc: GeoJSON.FeatureCollection =
+      pts.length === 2
+        ? {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: pts.map(([lat, lng]) => [lng, lat]),
+                },
+                properties: {},
+              },
+            ],
+          }
+        : EMPTY_FC;
+    setSourceData(map, PROFILE_SRC, fc);
+  }, [map, pts]);
+
+  const labels = useMemo<LabelItem[]>(
+    () => pts.map(([lat, lng], i) => ({ id: `profile-${i}`, lat, lng, text: i === 0 ? 'TX' : 'RX', color: '#C79A73' })),
+    [pts],
+  );
+  useLabelMarkers(map, labels);
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Click-to-place: device placement, measure tool, deploy anchor, and the      */
+/* "any click dismisses the search pin" behavior. Rewritten from the removed  */
+/* MapEventHandler (Leaflet's useMapEvents hook) per the design doc's Stage 3 */
+/* precision-risk callout: `e.latlng` → `e.lngLat`, `e.containerPoint` →      */
+/* `e.point`. Both are read by name (`.lat`/`.lng`, `.x`/`.y`) everywhere      */
+/* below, never as a positional tuple, so there's no [lat,lng] vs [lng,lat]   */
+/* swap risk in this file — mapStore's haversineM/addDevice/addProfilePoint   */
+/* signatures (lat, lng) are unchanged and called the same way as before.     */
+/*                                                                            */
+/* Old Leaflet markers only stopped click propagation to the container for   */
+/* three layers — device dots, topology nodes, the search-result pin (see    */
+/* main:MapView.tsx DeviceMarker/TopologyNodeMarker/SearchResultLayer). Links */
+/* and OSM towers never did, so a click on either still fell through to the   */
+/* place/deselect/dismiss logic below — preserved here via an explicit       */
+/* queryRenderedFeatures guard instead of relying on MapLibre listener        */
+/* registration order (which, unlike DOM bubbling, has no stopPropagation).   */
+/* -------------------------------------------------------------------------- */
+const KIND_LABEL: Record<MapDeviceKind, string> = { ap: 'AP', cpe: 'CPE', tower: 'TWR' };
+
+const MEASURE_SRC = 'ng-measure-line';
+const MEASURE_LAYER = 'ng-measure-line-layer';
+
+function stoppedPropagationLayerIds(map: MapLibreMap): string[] {
+  return [DEV_POINT_LAYER, TNODE_LAYER, SEARCH_LAYER].filter((id) => map.getLayer(id));
+}
+
+export interface DeployAnchor {
+  px: { x: number; y: number };
+  lat: number;
+  lon: number;
+}
+
+function MapClickHandler({ onDeployClick }: { onDeployClick: (anchor: DeployAnchor) => void }) {
+  const map = useGlobeMap();
+  const tool = useMapStore((s) => s.tool);
+  const [measure, setMeasure] = useState<{ start: [number, number]; end: [number, number] | null } | null>(null);
+
+  // Leaving the measure tool clears its line.
+  useEffect(() => {
+    if (tool !== 'measure') setMeasure(null);
+  }, [tool]);
+
+  useEffect(() => {
+    if (!map) return;
+
+    const onClick = (e: MapMouseEvent) => {
+      const hitIds = stoppedPropagationLayerIds(map);
+      if (hitIds.length > 0 && map.queryRenderedFeatures(e.point, { layers: hitIds }).length > 0) return;
+
+      const lat = e.lngLat.lat;
+      const lng = e.lngLat.lng;
+      const s = useMapStore.getState();
+
+      if (s.searchResult) s.setSearchResult(null);
+
+      if (s.tool === 'select') {
+        s.selectDevice(null);
+        return;
+      }
+
+      if (s.tool === 'profile') {
+        s.addProfilePoint(lat, lng);
+        return;
+      }
+
+      if (s.tool === 'measure') {
+        setMeasure((m) => (!m || m.end ? { start: [lat, lng], end: null } : { start: m.start, end: [lat, lng] }));
+        return;
+      }
+
+      // Deploy tool: show the popover at the click pixel position.
+      if (s.tool === 'deploy') {
+        onDeployClick({ px: { x: e.point.x, y: e.point.y }, lat, lon: lng });
+        return;
+      }
+
+      const kind = s.tool as MapDeviceKind;
+      const deviceList = s.deviceList();
+
+      // Reject stacking a device on top of an existing one (< 5 m): coincident
+      // AP/tower/CPE markers hide each other and skew coverage/link math.
+      const tooClose = deviceList.find((d) => haversineM(d.lat, d.lng, lat, lng) < 5);
+      if (tooClose) {
+        s.flashNotice(`Too close to ${tooClose.name} (< 5 m) — zoom in or pick another spot.`);
+        return;
+      }
+
+      const count = deviceList.filter((d) => d.kind === kind).length + 1;
+      s.addDevice({
+        name: `${KIND_LABEL[kind]}-${count}`,
+        kind,
+        lat,
+        lng,
+        txPower: kind === 'tower' ? 27 : 20,
+        frequency: 5,
+        range: kind === 'tower' ? 2000 : 500,
+        antennaHeight: kind === 'tower' ? 30 : 6, // metres AGL
+        ip: '',
+      });
+      // Multi-point flow (UISP-style): after an AP goes down, the natural next
+      // step is placing its CPE clients — switch so the hint guides the user.
+      if (kind === 'ap') s.setTool('cpe');
+    };
+
+    map.on('click', onClick);
+    return () => {
+      map.off('click', onClick);
+    };
+  }, [map, onDeployClick]);
+
+  // In-map measure result: line + glass distance label (replaces the old
+  // alert()). Only while the measure tool is active with both endpoints.
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, MEASURE_SRC);
+    ensureLayer(map, {
+      id: MEASURE_LAYER,
+      type: 'line',
+      source: MEASURE_SRC,
+      paint: { 'line-color': '#2DD4BF', 'line-width': 2.5, 'line-opacity': 0.9, 'line-dasharray': [4, 6] },
+    });
+    return () => teardown(map, MEASURE_SRC, [MEASURE_LAYER]);
+  }, [map]);
+
+  const showMeasure = tool === 'measure' && !!measure?.end;
+  useEffect(() => {
+    if (!map) return;
+    const fc: GeoJSON.FeatureCollection =
+      showMeasure && measure?.end
+        ? {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: {
+                  type: 'LineString',
+                  coordinates: [
+                    [measure.start[1], measure.start[0]],
+                    [measure.end[1], measure.end[0]],
+                  ],
+                },
+                properties: {},
+              },
+            ],
+          }
+        : EMPTY_FC;
+    setSourceData(map, MEASURE_SRC, fc);
+  }, [map, showMeasure, measure]);
+
+  const measureDist =
+    showMeasure && measure?.end ? haversineM(measure.start[0], measure.start[1], measure.end[0], measure.end[1]) : 0;
+  const measureLabels = useMemo<LabelItem[]>(() => {
+    if (!showMeasure || !measure?.end) return [];
+    const midLat = (measure.start[0] + measure.end[0]) / 2;
+    const midLng = (measure.start[1] + measure.end[1]) / 2;
+    return [
+      {
+        id: 'measure-dist',
+        lat: midLat,
+        lng: midLng,
+        text: `${Math.round(measureDist).toLocaleString()} m · ${(measureDist / 1000).toFixed(2)} km`,
+        color: '#2DD4BF',
+      },
+    ];
+  }, [showMeasure, measure, measureDist]);
+  useLabelMarkers(map, measureLabels);
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
 /* Signal legend                                                               */
 /* -------------------------------------------------------------------------- */
 function SignalLegend() {
@@ -1427,6 +1992,7 @@ function GradientLegend() {
 /* -------------------------------------------------------------------------- */
 export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
   const [glMap, setGlMap] = useState<MapLibreMap | null>(null);
+  const [deployAnchor, setDeployAnchor] = useState<DeployAnchor | null>(null);
   const showOnboarding = useMapStore((s) => s.showOnboarding);
   const activeModal = useUiStore((s) => s.activeModal);
   const openModal = useUiStore((s) => s.openModal);
@@ -1454,11 +2020,20 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             in this order, matching the pre-migration Leaflet z-order. */}
         {towersVisible && <OsmTowerLayer />}
         {(buildingsVisible || densityVisible) && <OsmBuildingsLayer densityMode={densityVisible} />}
+        {coverageVisible && <RfCoverageLayer />}
         <SearchResultLayer />
+        <ProfileLine />
         <TopologyLinkLayer />
         <TopologyNodeLayer />
         <LinkLayer />
         <DeviceLayer />
+        {/* RF workspace: the PtP beam between the two chosen endpoints — always
+            on top, matching the old JSX order (rendered last in MapContainer). */}
+        {rfMode && <RfBeamLayer />}
+
+        {/* Stage 3: click-to-place (device/measure/profile/deploy) + search-pin
+            dismiss. Owns no visible chrome of its own besides the measure line. */}
+        <MapClickHandler onDeployClick={setDeployAnchor} />
 
         {/* Overlay UI */}
         <MapSearch />
@@ -1479,6 +2054,16 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
         <MapLayerSwitcher />
         {!rfMode && <ElevationProfilePanel />}
 
+        {/* Deploy popover — positioned in absolute px coords over the map. */}
+        {deployAnchor && (
+          <MapDeployMenu
+            px={deployAnchor.px}
+            lat={deployAnchor.lat}
+            lon={deployAnchor.lon}
+            onClose={() => setDeployAnchor(null)}
+          />
+        )}
+
         {/* First-run + device library — share the single exclusive modal slot. */}
         {activeModal === 'mapOnboarding' && <MapOnboardingModal />}
         {activeModal === 'deviceLibrary' && <DeviceLibraryModal />}
@@ -1488,16 +2073,14 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
 }
 
 /* -------------------------------------------------------------------------- */
-/* Stage 3 debt — deliberately not in this Stage 2 pass (design doc §4):       */
-/*  - Click-to-place tool (device/measure/profile/deploy), incl. the          */
-/*    MapDeployMenu popover trigger (deployAnchor) and the elevation-profile  */
-/*    line/endpoints tool. Needs the e.point/unproject rewrite — the doc's    */
-/*    own named precision-risk area, so it's scoped alone in Stage 3.         */
-/*  - RF coverage raster (best-server RSSI canvas → MapLibre `image` source). */
-/*  - "Any map click dismisses the search pin" — was wired through the        */
-/*    click-to-place event handler; folds into that Stage 3 rewrite.         */
-/* Everything else from the original debt list is live above: device markers  */
-/* + coverage rings, link polylines, topology node/link markers, device/OSM   */
-/* popups, OSM towers/buildings, geocode fly-to. RF PtP beam (RfBeamLayer)    */
-/* stays deleted — it wasn't in Stage 2's required feature list.              */
+/* Stage 4 debt — deliberately not in this Stage 3 pass (design doc §4):       */
+/*  - Mute tile saturation per basemap/theme (old per-tile CSS filter on the   */
+/*    removed DOM tile layer → MapLibre `raster-saturation` paint). Cosmetic,  */
+/*    explicitly deferred to Stage 4 polish; the migration doc never scoped   */
+/*    it into Stage 3.                                                        */
+/* Everything else from the original debt list is now live: device markers +  */
+/* coverage rings, link polylines, topology node/link markers, device/OSM     */
+/* popups, OSM towers/buildings, geocode fly-to, click-to-place (device/       */
+/* measure/profile/deploy) + search-pin dismiss, RF coverage raster (image    */
+/* source), RF PtP beam (GeoJSON, ported back from the deleted RfBeamLayer).  */
 /* -------------------------------------------------------------------------- */
