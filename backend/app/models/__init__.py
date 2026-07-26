@@ -80,6 +80,7 @@ from app.models.schemas import (  # noqa: F401
     ScenarioStep,
     Site,
     SiteCreate,
+    SiteUpdate,
     SimulateRequest,
     Topology,
     WirelessLink,

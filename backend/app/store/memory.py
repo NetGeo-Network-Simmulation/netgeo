@@ -172,7 +172,7 @@ class MemoryRepository:
     # Node fields whose value may legitimately be None (i.e. "clear this field"),
     # as opposed to fields where None simply means "not provided in this PATCH".
     _NULLABLE_NODE_FIELDS: frozenset[str] = frozenset(
-        {"lat", "lon", "radio", "intent", "config_ref"}
+        {"lat", "lon", "radio", "intent", "config_ref", "site_id"}
     )
 
     async def update_node(self, nid: str, patch: dict) -> Node:
@@ -186,6 +186,23 @@ class MemoryRepository:
                 for k, v in patch.items()
                 if v is not None or k in self._NULLABLE_NODE_FIELDS
             }
+            # site_id is the truth. A node placed into a rack inherits the rack's
+            # site so the two can never disagree; reject rather than reconcile
+            # afterwards (NG-PH-01 A1.3).
+            if "rack_id" in filtered and filtered["rack_id"] is not None:
+                rack = self._racks.get(filtered["rack_id"])
+                if rack is not None and rack.site_id is not None:
+                    # effective site_id = what this patch explicitly says, else
+                    # whatever the node already has — either way, it must not
+                    # disagree with the target rack's site.
+                    current = filtered["site_id"] if "site_id" in filtered else node.site_id
+                    if current is not None and current != rack.site_id:
+                        from app.exceptions.base import Conflict
+                        raise Conflict(
+                            f"node site_id {current!r} conflicts with rack "
+                            f"{filtered['rack_id']!r}'s site {rack.site_id!r}"
+                        )
+                    filtered["site_id"] = rack.site_id
             updated = node.model_copy(update=filtered)
             self._nodes[nid] = updated
             return updated
@@ -253,6 +270,42 @@ class MemoryRepository:
         async with self._lock:
             self._sites[site.id] = site
             return site
+
+    async def list_sites(self, pid: str) -> list[Site]:
+        return [s for s in self._sites.values() if s.project_id == pid]
+
+    async def get_site(self, sid: str) -> Site:
+        try:
+            return self._sites[sid]
+        except KeyError as exc:
+            raise NotFound(sid) from exc
+
+    async def update_site(self, sid: str, patch: dict) -> Site:
+        async with self._lock:
+            site = self._sites.get(sid)
+            if site is None:
+                raise NotFound(sid)
+            # model_copy skips validation — revalidate the merged dict so a bad
+            # lat/lon in the patch is rejected instead of stored raw.
+            updated = Site.model_validate(
+                {**site.model_dump(), **{k: v for k, v in patch.items() if v is not None}}
+            )
+            self._sites[sid] = updated
+            return updated
+
+    async def delete_site(self, sid: str) -> None:
+        async with self._lock:
+            if sid not in self._sites:
+                raise NotFound(sid)
+            del self._sites[sid]
+            # Racks/nodes keep working without a site — clear the back-reference
+            # rather than cascading a delete the user did not ask for.
+            for rid, rack in self._racks.items():
+                if rack.site_id == sid:
+                    self._racks[rid] = rack.model_copy(update={"site_id": None})
+            for nid, node in self._nodes.items():
+                if node.site_id == sid:
+                    self._nodes[nid] = node.model_copy(update={"site_id": None})
 
     async def add_rack(self, rack: Rack) -> Rack:
         async with self._lock:

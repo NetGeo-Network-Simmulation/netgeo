@@ -155,6 +155,11 @@ class Node(_Base):
     rack_id: str | None = None
     ru_start: int | None = None
     ru_span: int = 1
+    # Owning site (NG-PH-01). Source of truth for site membership — set it from
+    # rack.site_id whenever the node is placed into a rack, so a node in a rack
+    # can never disagree with the rack's own site. Settable directly too, for
+    # outdoor nodes (tower/pole) deployed on the map without a rack.
+    site_id: str | None = None
     # extension fields used by the ForgeOS compiler (see protocols/NEEDS.md)
     intent: dict | None = None
 
@@ -171,6 +176,7 @@ class NodeCreate(_Base):
     lon: float | None = None
     radio: Radio | None = None
     interfaces: list[Interface] = Field(default_factory=list)
+    site_id: str | None = None
     intent: dict | None = None
 
 
@@ -188,6 +194,7 @@ class NodeUpdate(_Base):
     rack_id: str | None = None
     ru_start: int | None = None
     ru_span: int | None = None
+    site_id: str | None = None
     intent: dict | None = None
 
 
@@ -256,12 +263,18 @@ class CableMedia(str, Enum):
 
 
 class Site(_Base):
-    """A building/location that holds racks (NG-PH-01)."""
+    """A building/location that holds racks (NG-PH-01).
+
+    ``lat``/``lon`` are optional so pre-geo projects keep loading; a site
+    without coordinates simply never renders on the map.
+    """
 
     id: str
     project_id: str
     name: str
     region: str = ""
+    lat: float | None = Field(None, ge=-90, le=90)
+    lon: float | None = Field(None, ge=-180, le=180)
 
 
 class Rack(_Base):
@@ -292,6 +305,17 @@ class SiteCreate(_Base):
     project_id: str
     name: str
     region: str = ""
+    lat: float | None = Field(None, ge=-90, le=90)
+    lon: float | None = Field(None, ge=-180, le=180)
+
+
+class SiteUpdate(_Base):
+    """PATCH body — every field optional, only provided keys are applied."""
+
+    name: str | None = None
+    region: str | None = None
+    lat: float | None = Field(None, ge=-90, le=90)
+    lon: float | None = Field(None, ge=-180, le=180)
 
 
 class RackCreate(_Base):

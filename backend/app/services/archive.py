@@ -8,7 +8,8 @@ scenarios and per-node config artifacts — into a self-describing envelope.
 *Import* replays that envelope into a **fresh** project: every entity is minted
 a new id and every cross-reference (``project_id``, the interface ids a link
 points at via ``a_iface`` / ``b_iface``, ``Interface.peer_link_id``,
-``Cable.link_id``, ``Node.rack_id``, ``Rack.site_id``, ``ConfigArtifact.node_id``)
+``Cable.link_id``, ``Node.rack_id``, ``Node.site_id``, ``Rack.site_id``,
+``ConfigArtifact.node_id``)
 is rewritten through the id maps. The result is internally consistent and cannot
 collide with an existing copy of the same content — so an archive round-trips
 across a fresh install (the R3 exit criterion).
@@ -167,6 +168,7 @@ def remap(parsed: dict, new_project_id: str) -> dict:
                     "project_id": new_project_id,
                     "interfaces": ifaces,
                     "rack_id": rack_map.get(n.rack_id) if n.rack_id else None,
+                    "site_id": site_map.get(n.site_id) if n.site_id else None,
                 }
             )
         )

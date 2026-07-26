@@ -36,6 +36,7 @@ async def create_node(body: NodeCreate, r: MemoryRepository = Depends(repo)):
         lon=body.lon,
         radio=body.radio,
         interfaces=ifaces,
+        site_id=body.site_id,
         intent=body.intent,
     )
     created = await r.add_node(node)

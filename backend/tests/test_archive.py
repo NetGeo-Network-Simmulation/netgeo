@@ -35,7 +35,11 @@ async def _build_project(client) -> dict:
     link_id = link.json()["id"]
 
     # Physical plant: a site + rack, a switch placed into the rack.
-    site_id = (await client.post("/api/sites", json={"project_id": pid, "name": "HQ"})).json()["id"]
+    site_id = (
+        await client.post(
+            "/api/sites", json={"project_id": pid, "name": "HQ", "lat": -6.2, "lon": 106.8}
+        )
+    ).json()["id"]
     rack_id = (
         await client.post(
             "/api/racks", json={"project_id": pid, "site_id": site_id, "name": "R1"}
@@ -100,6 +104,11 @@ async def test_export_import_round_trips(client):
     assert sw["ru_start"] == 10 and sw["ru_span"] == 2
     assert sw["rack_id"] in {rk["id"] for rk in dst["racks"]}
     assert sw["rack_id"] != orig["rack_id"]  # remapped
+
+    # Site geo + sw1's site_id (inherited from the rack) survive, remapped.
+    site = next(s for s in dst["sites"] if s["name"] == "HQ")
+    assert site["lat"] == -6.2 and site["lon"] == 106.8
+    assert sw["site_id"] == site["id"]
 
 
 async def test_overlength_cable_effect_survives_round_trip(client):

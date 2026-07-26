@@ -180,3 +180,129 @@ async def test_place_node_in_rack_persists(client):
     assert body["rack_id"] == rack_id
     assert body["ru_start"] == 10
     assert body["ru_span"] == 2
+
+
+# --- sites: geo + CRUD (NG-PH-01 A1) -----------------------------------------
+async def test_site_has_coordinates(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    resp = await client.post(
+        "/api/sites",
+        json={"project_id": pid, "name": "HQ", "lat": -6.2, "lon": 106.8},
+    )
+    assert resp.status_code == 201, resp.text
+    body = resp.json()
+    assert body["lat"] == -6.2 and body["lon"] == 106.8
+
+
+async def test_site_get_list_patch_delete(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site = (
+        await client.post("/api/sites", json={"project_id": pid, "name": "HQ"})
+    ).json()
+    sid = site["id"]
+
+    listed = await client.get("/api/sites", params={"project_id": pid})
+    assert listed.status_code == 200
+    assert [s["id"] for s in listed.json()] == [sid]
+
+    got = await client.get(f"/api/sites/{sid}")
+    assert got.status_code == 200
+    assert got.json()["name"] == "HQ"
+
+    patched = await client.patch(f"/api/sites/{sid}", json={"lat": 1.0, "lon": 2.0})
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["lat"] == 1.0 and patched.json()["lon"] == 2.0
+
+    deleted = await client.delete(f"/api/sites/{sid}")
+    assert deleted.status_code == 200
+    assert (await client.get(f"/api/sites/{sid}")).status_code == 404
+
+
+async def test_site_delete_clears_rack_and_node_back_reference(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site = (
+        await client.post("/api/sites", json={"project_id": pid, "name": "HQ"})
+    ).json()
+    rack = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site["id"], "name": "R1"}
+        )
+    ).json()
+    node = (
+        await client.post(
+            "/api/nodes", json={"project_id": pid, "name": "sw1", "kind": "switch"}
+        )
+    ).json()
+    await client.patch(f"/api/nodes/{node['id']}", json={"rack_id": rack["id"]})
+
+    await client.delete(f"/api/sites/{site['id']}")
+
+    topo = (await client.get(f"/api/projects/{pid}/topology")).json()
+    rk = next(r for r in topo["racks"] if r["id"] == rack["id"])
+    nd = next(n for n in topo["nodes"] if n["id"] == node["id"])
+    assert rk["site_id"] is None
+    assert nd["site_id"] is None
+
+
+async def test_unknown_site_operations_are_404(client):
+    assert (await client.get("/api/sites/ghost")).status_code == 404
+    assert (await client.patch("/api/sites/ghost", json={"name": "x"})).status_code == 404
+    assert (await client.delete("/api/sites/ghost")).status_code == 404
+
+
+# --- Node.site_id invariant (NG-PH-01 A1.3) ----------------------------------
+async def test_placing_node_in_rack_inherits_site_id(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site = (
+        await client.post("/api/sites", json={"project_id": pid, "name": "HQ"})
+    ).json()
+    rack = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site["id"], "name": "R1"}
+        )
+    ).json()
+    node = (
+        await client.post(
+            "/api/nodes", json={"project_id": pid, "name": "sw1", "kind": "switch"}
+        )
+    ).json()
+
+    patched = await client.patch(
+        f"/api/nodes/{node['id']}", json={"rack_id": rack["id"]}
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["site_id"] == site["id"]
+
+
+async def test_cross_site_placement_is_rejected(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site_a = (
+        await client.post("/api/sites", json={"project_id": pid, "name": "A"})
+    ).json()
+    site_b = (
+        await client.post("/api/sites", json={"project_id": pid, "name": "B"})
+    ).json()
+    rack_a = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site_a["id"], "name": "RA"}
+        )
+    ).json()
+    node = (
+        await client.post(
+            "/api/nodes",
+            json={"project_id": pid, "name": "sw1", "kind": "switch", "site_id": site_b["id"]},
+        )
+    ).json()
+    assert node["site_id"] == site_b["id"]
+
+    # Placing a node explicitly owned by site B into a rack in site A must be
+    # rejected at the point of placement, not silently reconciled.
+    resp = await client.patch(
+        f"/api/nodes/{node['id']}", json={"rack_id": rack_a["id"]}
+    )
+    assert resp.status_code == 409, resp.text
+
+    # ...and the node's rack_id/site_id are unchanged (no partial write).
+    unchanged = (await client.get(f"/api/nodes/{node['id']}")).json()
+    assert unchanged["rack_id"] is None
+    assert unchanged["site_id"] == site_b["id"]

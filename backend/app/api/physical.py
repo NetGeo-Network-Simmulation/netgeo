@@ -22,6 +22,7 @@ from app.models import (
     RackCreate,
     Site,
     SiteCreate,
+    SiteUpdate,
 )
 from app.services import notify
 from app.services.physical import plant_report
@@ -36,6 +37,43 @@ router = APIRouter(tags=["physical"])
 @router.post("/sites", response_model=Site, status_code=201)
 async def create_site(body: SiteCreate, r: MemoryRepository = Depends(repo)):
     return await r.add_site(Site(id=new_id(), **body.model_dump()))
+
+
+@router.get("/sites", response_model=list[Site])
+async def list_sites(project_id: str, r: MemoryRepository = Depends(repo)):
+    return await r.list_sites(project_id)
+
+
+@router.get("/sites/{site_id}", response_model=Site)
+async def get_site(site_id: str, r: MemoryRepository = Depends(repo)):
+    try:
+        return await r.get_site(site_id)
+    except StoreNotFound as exc:
+        raise translate_not_found(exc) from exc
+
+
+@router.patch("/sites/{site_id}", response_model=Site)
+async def update_site(
+    site_id: str, body: SiteUpdate, r: MemoryRepository = Depends(repo)
+):
+    try:
+        patch = body.model_dump(exclude_unset=True)
+        if not patch:
+            return await r.get_site(site_id)
+        return await r.update_site(site_id, patch)
+    except StoreNotFound as exc:
+        raise translate_not_found(exc) from exc
+
+
+@router.delete("/sites/{site_id}", status_code=200)
+async def delete_site(site_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+    # Racks/nodes keep working without a site — clear the back-reference
+    # rather than cascading a delete the user did not ask for.
+    try:
+        await r.delete_site(site_id)
+    except StoreNotFound as exc:
+        raise translate_not_found(exc) from exc
+    return {"deleted": site_id}
 
 
 @router.post("/racks", response_model=Rack, status_code=201)
