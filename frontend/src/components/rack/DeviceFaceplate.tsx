@@ -24,6 +24,7 @@
  */
 import type { LinkStatus, NodeModel } from '@/api/types';
 import { linkStatusColors } from '@/theme/tokens';
+import { cn } from '@/lib/cn';
 import { resolveDeviceType } from './deviceTypes';
 import type { DeviceType, PortType, PortSpec, PortZone } from './deviceTypes';
 
@@ -248,6 +249,9 @@ function renderFront(
   accent: string,
   node: NodeModel,
   linkStatusByIface: Map<string, LinkStatus>,
+  cableMode: boolean,
+  pendingIface: string | null | undefined,
+  onPortClick: ((ifaceId: string) => void) | undefined,
 ): React.ReactNode[] {
   const els: React.ReactNode[] = [];
   const panelY0 = H * 0.20;
@@ -314,9 +318,43 @@ function renderFront(
         const iface = node.interfaces?.[portOrdinal];
         const status = iface ? linkStatusByIface.get(iface.id) : undefined;
         portIdx++;
-        els.push(
-          renderPort(spec.type, r, portOrdinal, accent, `port-${spec.type}-${portIdx}`, spec.poe, status),
-        );
+        const portEl = renderPort(spec.type, r, portOrdinal, accent, `port-${spec.type}-${portIdx}`, spec.poe, status);
+        // Cable Mode (E1): wrap the port in a clickable <g> with a state ring.
+        // Occupancy comes from linkStatusByIface (already derived from
+        // links[].a_iface/b_iface upstream) — no new field, no new Set.
+        if (cableMode && iface && onPortClick) {
+          const occupied = linkStatusByIface.has(iface.id);
+          const isPending = pendingIface === iface.id;
+          els.push(
+            <g
+              key={`portwrap-${iface.id}`}
+              className={cn('group', occupied ? 'cursor-not-allowed' : 'cursor-pointer')}
+              onClick={() => onPortClick(iface.id)}
+            >
+              {portEl}
+              {(occupied || isPending) && (
+                <title>{occupied ? 'Port in use — unlink first' : 'Pending — click destination port'}</title>
+              )}
+              <rect
+                x={r.x - 1}
+                y={r.y - 1}
+                width={r.w + 2}
+                height={r.h + 2}
+                rx="1.2"
+                fill="none"
+                stroke={occupied ? linkStatusColors.unknown : 'rgb(var(--ng-accent-rgb))'}
+                strokeWidth={isPending ? 1.4 : 1}
+                strokeDasharray={occupied ? '1.5 1.5' : undefined}
+                className={cn(
+                  'pointer-events-none',
+                  isPending ? 'opacity-100 animate-pulse' : occupied ? 'opacity-70' : 'opacity-0 transition-opacity group-hover:opacity-90',
+                )}
+              />
+            </g>,
+          );
+        } else {
+          els.push(portEl);
+        }
         // tiny label above first port in zone (WAN/DMZ etc)
         if (spec.label && i === 0) {
           els.push(
@@ -495,9 +533,23 @@ interface Props {
   face: Face;
   /** iface id -> link status (Rack#1). Omitted/empty -> every port renders neutral. */
   linkStatusByIface?: Map<string, LinkStatus>;
+  /** E1: when true, front-face ports become clickable for link creation. */
+  cableMode?: boolean;
+  /** E1: the iface id currently locked as the link's first endpoint (any device). */
+  pendingIface?: string | null;
+  /** E1: fired with the clicked port's iface id when cableMode is on. */
+  onPortClick?: (ifaceId: string) => void;
 }
 
-export function DeviceFaceplate({ node, span, face, linkStatusByIface = EMPTY_LINK_STATUS }: Props) {
+export function DeviceFaceplate({
+  node,
+  span,
+  face,
+  linkStatusByIface = EMPTY_LINK_STATUS,
+  cableMode = false,
+  pendingIface = null,
+  onPortClick,
+}: Props) {
   const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
   const H = Math.max(RU_H, span * RU_H);
   const { accent, chassis, label } = dt.brand;
@@ -576,7 +628,7 @@ export function DeviceFaceplate({ node, span, face, linkStatusByIface = EMPTY_LI
 
       {/* Port field / back blocks */}
       {face === 'front'
-        ? renderFront(dt, H, accent, node, linkStatusByIface)
+        ? renderFront(dt, H, accent, node, linkStatusByIface, cableMode, pendingIface, onPortClick)
         : renderBack(dt, H, accent)}
     </svg>
   );
