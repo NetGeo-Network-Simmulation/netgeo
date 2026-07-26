@@ -16,10 +16,10 @@
  * `KIND_WATTS` below is the fallback for kinds with no catalog match (e.g.
  * `host`) or if the catalog fetch hasn't landed yet.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Plus, Server, Zap } from 'lucide-react';
-import { deviceTypesApi, nodesApi, physicalApi, projectsApi } from '@/api/client';
+import { AlertTriangle, Cable, Plus, Server, Zap } from 'lucide-react';
+import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi } from '@/api/client';
 import type { DeviceType } from '@/api/client';
 import type { LinkModel, LinkStatus, NodeKind, NodeModel, Rack, Site } from '@/api/types';
 import { useUiStore } from '@/store/uiStore';
@@ -74,6 +74,12 @@ interface Dragload {
   span: number;
 }
 
+/** The link's first locked endpoint, while the user picks the second port. */
+interface PendingPort {
+  nodeId: string;
+  ifaceId: string;
+}
+
 export function RackElevationPanel() {
   const projectId = useUiStore((s) => s.projectId);
   const queryClient = useQueryClient();
@@ -83,6 +89,13 @@ export function RackElevationPanel() {
   const [newRackSite, setNewRackSite] = useState<string>('');
   const [newRackU, setNewRackU] = useState(42);
   const [face, setFace] = useState<Face>('front');
+
+  // E1: Cable Mode — click port A then port B to create a physical link.
+  const [cableMode, setCableMode] = useState(false);
+  const [pendingPort, setPendingPort] = useState<PendingPort | null>(null);
+  const [rejectMsg, setRejectMsg] = useState<string | null>(null);
+  const [mousePos, setMousePos] = useState<{ x: number; y: number } | null>(null);
+  const rejectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const topoQ = useQuery({
     queryKey: ['topology', projectId],
@@ -132,6 +145,20 @@ export function RackElevationPanel() {
     mutationFn: (nodeId: string) =>
       nodesApi.update(nodeId, { rack_id: null, ru_start: null }),
     onSuccess: invalidate,
+  });
+
+  // E1: create the physical link once both ports are picked. Reuses the same
+  // a_iface/b_iface POST /links contract as TopologyCanvas.onConnect — no new
+  // endpoint, no optimistic temp-link (this panel already follows the
+  // mutate-then-invalidate idiom used by place/unplace/addDevice above).
+  const createLink = useMutation({
+    mutationFn: (v: { aIface: string; bIface: string }) =>
+      linksApi.create({ project_id: projectId!, a_iface: v.aIface, b_iface: v.bIface, type: 'copper' }),
+    onSuccess: () => {
+      setError(null);
+      invalidate();
+    },
+    onError: () => setError('Failed to create link.'),
   });
 
   const createSite = useMutation({
@@ -227,6 +254,49 @@ export function RackElevationPanel() {
       .map((c) => ({ cable: c, media: links[c.link_id]?.over_media ?? c.media }));
   }, [cables, plantQ.data]);
 
+  // E1: Escape cancels the pending port while Cable Mode is mid-selection.
+  useEffect(() => {
+    if (!pendingPort) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPendingPort(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pendingPort]);
+
+  // Clear the reject-toast timer on unmount so it never fires into a dead component.
+  useEffect(() => () => {
+    if (rejectTimer.current) clearTimeout(rejectTimer.current);
+  }, []);
+
+  const flashReject = (msg: string) => {
+    setRejectMsg(msg);
+    if (rejectTimer.current) clearTimeout(rejectTimer.current);
+    rejectTimer.current = setTimeout(() => setRejectMsg(null), 2500);
+  };
+
+  /** Port-click state machine for Cable Mode: pick A, pick B, link created. */
+  const handlePortClick = (nodeId: string, ifaceId: string) => {
+    if (linkStatusByIface.has(ifaceId)) {
+      flashReject('Port in use — unlink first.');
+      return;
+    }
+    if (!pendingPort) {
+      setPendingPort({ nodeId, ifaceId });
+      return;
+    }
+    if (ifaceId === pendingPort.ifaceId) {
+      setPendingPort(null); // clicking the locked port again cancels it
+      return;
+    }
+    if (nodeId === pendingPort.nodeId) {
+      flashReject('Cannot link a port to itself.');
+      return;
+    }
+    createLink.mutate({ aIface: pendingPort.ifaceId, bIface: ifaceId });
+    setPendingPort(null);
+  };
+
   if (!projectId) {
     return <div className="p-6 text-sm text-fg/50">Select a project to view racks.</div>;
   }
@@ -297,8 +367,28 @@ export function RackElevationPanel() {
           <Plus size={12} /> Rack
         </button>
 
+        {/* E1: Cable Mode toggle — click two ports to link them. Mimics the
+            Front/Back pill's visual language, plus an engaged glow since this
+            one also changes drag behavior (Front/Back doesn't). */}
+        <button
+          onClick={() => {
+            setCableMode((v) => !v);
+            setPendingPort(null);
+            setRejectMsg(null);
+          }}
+          className={cn(
+            'ml-auto flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium',
+            cableMode
+              ? 'bg-accent text-accent-fg shadow-[0_0_0_2px_rgb(var(--ng-accent-rgb)/0.35)]'
+              : 'bg-fg/10 text-fg/70 hover:bg-fg/20',
+          )}
+          title="Click two ports to create a physical link"
+        >
+          <Cable size={12} /> Cable Mode
+        </button>
+
         {/* Front / Back faceplate toggle */}
-        <div className="ml-auto flex items-center rounded bg-fg/10 p-0.5">
+        <div className="flex items-center rounded bg-fg/10 p-0.5">
           {(['front', 'back'] as Face[]).map((f) => (
             <button
               key={f}
@@ -313,6 +403,18 @@ export function RackElevationPanel() {
           ))}
         </div>
       </div>
+
+      {cableMode && (
+        <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
+          Drag disabled while Cable Mode is active — click two ports to connect them, press Escape to cancel.
+        </div>
+      )}
+
+      {rejectMsg && (
+        <div className="flex items-center gap-2 bg-red-500/15 px-3 py-1.5 text-xs text-red-300">
+          <AlertTriangle size={13} /> {rejectMsg}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 bg-red-500/15 px-3 py-1.5 text-xs text-red-300">
@@ -344,14 +446,17 @@ export function RackElevationPanel() {
           {unplaced.map((n) => (
             <div
               key={n.id}
-              draggable
+              draggable={!cableMode}
               onDragStart={(e) =>
                 e.dataTransfer.setData(
                   'application/netgeo-device',
                   JSON.stringify({ nodeId: n.id, span: n.ru_span ?? 1 } satisfies Dragload),
                 )
               }
-              className="mb-1 cursor-grab rounded border border-fg/10 bg-fg/5 px-2 py-1 text-xs hover:bg-fg/10 active:cursor-grabbing"
+              className={cn(
+                'mb-1 rounded border border-fg/10 bg-fg/5 px-2 py-1 text-xs hover:bg-fg/10',
+                cableMode ? 'cursor-not-allowed opacity-50' : 'cursor-grab active:cursor-grabbing',
+              )}
               title={`${n.kind} · ${nodeWatts(n, wattsByIcon)} W`}
             >
               {n.name}
@@ -364,7 +469,10 @@ export function RackElevationPanel() {
         </div>
 
         {/* racks grouped by site */}
-        <div className="relative flex-1 overflow-auto p-3">
+        <div
+          className="relative flex-1 overflow-auto p-3"
+          onMouseMove={cableMode && pendingPort ? (e) => setMousePos({ x: e.clientX, y: e.clientY }) : undefined}
+        >
           {bucketBySite.length === 0 && (
             <WorkspaceEmptyState
               icon={Server}
@@ -405,6 +513,10 @@ export function RackElevationPanel() {
                       }
                       onError={setError}
                       wattsByIcon={wattsByIcon}
+                      cableMode={cableMode}
+                      pendingPort={pendingPort}
+                      mousePos={mousePos}
+                      onPortClick={handlePortClick}
                     />
                   ))}
                   {bucket.racks.length === 0 && (
@@ -432,6 +544,10 @@ interface RackColumnProps {
   onAdd: (kind: NodeKind, ruStart: number, ruSpan: number) => void;
   onError: (msg: string | null) => void;
   wattsByIcon: Map<string, DeviceType>;
+  cableMode: boolean;
+  pendingPort: PendingPort | null;
+  mousePos: { x: number; y: number } | null;
+  onPortClick: (nodeId: string, ifaceId: string) => void;
 }
 
 function RackColumn({
@@ -446,6 +562,10 @@ function RackColumn({
   onAdd,
   onError,
   wattsByIcon,
+  cableMode,
+  pendingPort,
+  mousePos,
+  onPortClick,
 }: RackColumnProps) {
   const ruHeight = rack.ru_height || DEFAULT_RU_HEIGHT;
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -476,6 +596,9 @@ function RackColumn({
 
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
+    // ponytail: draggable={!cableMode} on every drag source already prevents a
+    // drag from starting; this is a defensive no-op guard, not the real gate.
+    if (cableMode) return;
     const raw = e.dataTransfer.getData('application/netgeo-device');
     if (!raw) return;
     let load: Dragload;
@@ -553,6 +676,22 @@ function RackColumn({
     cableLines.push({ x1: anchorA.x, y1: anchorA.y, x2: anchorB.x, y2: anchorB.y, color });
   }
 
+  // E1: rubber-band line from the locked port to the live cursor, drawn only
+  // in the rack column that actually holds the pending device (cross-rack
+  // pending is a known gap — see NG-PH cable overlay bug at the `!a || !b`
+  // guard above, deliberately left untouched per slice scope).
+  let pendingLine: { x1: number; y1: number; x2: number; y2: number } | null = null;
+  if (cableMode && pendingPort && mousePos && devicesById.has(pendingPort.nodeId)) {
+    const ru = placedRu.get(pendingPort.nodeId);
+    const dev = devicesById.get(pendingPort.nodeId);
+    const rect = bodyRef.current?.getBoundingClientRect();
+    if (ru && dev && rect) {
+      const yCenter = bodyH - (ru.ruStart - 1 + ru.ruSpan / 2) * RU_PX;
+      const origin = portAnchor(dev, ru, pendingPort.ifaceId, yCenter);
+      pendingLine = { x1: origin.x, y1: origin.y, x2: mousePos.x - rect.left, y2: mousePos.y - rect.top };
+    }
+  }
+
   // ── Add-device affordance ─────────────────────────────────────────────────
   // Find the lowest free RU (default span 1 for the affordance slot).
   const freeRu = firstFreeRu(1);
@@ -597,7 +736,7 @@ function RackColumn({
               return (
                 <div
                   key={d.id}
-                  draggable
+                  draggable={!cableMode}
                   onDragStart={(e) =>
                     e.dataTransfer.setData(
                       'application/netgeo-device',
@@ -606,7 +745,10 @@ function RackColumn({
                   }
                   onDoubleClick={() => onUnplace(d.id)}
                   title={`${d.kind} · ${nodeWatts(d, wattsByIcon)} W — double-click to remove`}
-                  className="absolute inset-x-1 cursor-grab overflow-hidden rounded active:cursor-grabbing"
+                  className={cn(
+                    'absolute inset-x-1 overflow-hidden rounded',
+                    cableMode ? 'cursor-crosshair' : 'cursor-grab active:cursor-grabbing',
+                  )}
                   style={{ bottom, height: span * RU_PX - 2 }}
                 >
                   <DeviceFaceplate
@@ -614,6 +756,9 @@ function RackColumn({
                     span={span}
                     face={face}
                     linkStatusByIface={linkStatusByIface}
+                    cableMode={cableMode}
+                    pendingIface={pendingPort?.ifaceId ?? null}
+                    onPortClick={(ifaceId) => onPortClick(d.id, ifaceId)}
                   />
                   {/* name label: small overlay so it doesn't hide the faceplate */}
                   <span className="absolute left-0.5 top-0.5 truncate rounded bg-recess/20 px-1 text-[9px] leading-tight text-fg/80 pointer-events-none">
@@ -668,7 +813,7 @@ function RackColumn({
           )}
 
           {/* Cable overlay — best-effort/decorative, pointer-events-none */}
-          {cableLines.length > 0 && (
+          {(cableLines.length > 0 || pendingLine) && (
             <svg
               className="pointer-events-none absolute inset-0"
               width={bodyW}
@@ -690,6 +835,19 @@ function RackColumn({
                   />
                 );
               })}
+              {/* E1: rubber-band from the locked port to the live cursor */}
+              {pendingLine && (
+                <line
+                  x1={pendingLine.x1}
+                  y1={pendingLine.y1}
+                  x2={pendingLine.x2}
+                  y2={pendingLine.y2}
+                  stroke="rgb(var(--ng-accent-rgb))"
+                  strokeWidth="1.5"
+                  strokeDasharray="4 3"
+                  strokeOpacity="0.85"
+                />
+              )}
             </svg>
           )}
         </div>
