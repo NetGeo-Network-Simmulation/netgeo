@@ -67,6 +67,14 @@ class DeviceType(BaseModel):
     power_watts_max: float | None = Field(
         default=None, description="Maximum rated power draw in watts"
     )
+    # Device console (docs/design/stitch-html/clay/device-console): the PoE
+    # budget available to *connected* devices — distinct from this chassis's
+    # own typical/max draw above. None when the pack's vendor datasheet never
+    # published one (e.g. non-PoE switches) — the console must show "PoE
+    # unavailable" for those, never a fabricated number.
+    poe_budget_w: float | None = Field(
+        default=None, description="Total PoE wattage this device can deliver to connected ports"
+    )
     snmp_oids: dict[str, str] | None = Field(
         default=None, description="Named SNMP OIDs for monitoring this device type"
     )
@@ -189,6 +197,7 @@ def _device_json_to_type(pack_id: str, dev: dict) -> DeviceType:
         builtin=True,  # read-only, like _BUILTIN — managed via pack enable/disable, not DELETE
         power_watts_idle=power.get("typical_w"),
         power_watts_max=power.get("max_w"),
+        poe_budget_w=power.get("poe_budget_w"),
         snmp_oids=dev.get("snmp_oids") or _IF_MIB_OIDS,
     )
 

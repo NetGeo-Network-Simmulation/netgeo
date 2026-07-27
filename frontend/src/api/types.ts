@@ -51,6 +51,10 @@ export interface Interface {
   speed: number; // Mbps
   mtu: number;
   peer_link_id: string | null;
+  /** Device console P5: per-port admin state + PoE delivery. Always present —
+   *  the backend defaults old interfaces to enabled/no-PoE. */
+  admin_enabled: boolean;
+  poe_enabled: boolean;
 }
 
 /** Where a cloud node attaches to the real world. Persisted in `intent.uplink`. */

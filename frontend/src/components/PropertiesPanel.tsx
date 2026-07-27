@@ -5,16 +5,19 @@
  * nosStore so user-defined images are selectable alongside built-ins.
  */
 import { useEffect, useState } from 'react';
-import { Cpu, Plug, RefreshCw, Settings2, Image as ImageIcon } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Cpu, MapPin, RefreshCw, Settings2, Image as ImageIcon } from 'lucide-react';
 import { useTopologyStore } from '@/store/topologyStore';
 import { useNosStore } from '@/store/nosStore';
 import { useIconStore } from '@/store/iconStore';
 import { useUiStore } from '@/store/uiStore';
-import { nodesApi, configsApi } from '@/api/client';
+import { nodesApi, configsApi, deviceTypesApi, physicalApi } from '@/api/client';
 import { CloudUplink } from '@/components/CloudUplink';
 import { Select } from '@/components/ui/Select';
 import { semantic } from '@/theme/tokens';
-import type { NodeMode, Nos } from '@/api/types';
+import { frontPortList } from '@/components/rack/DeviceFaceplate';
+import { PortStrip, PoeBudget, LinksTable, ConfigTabs } from '@/components/DeviceConsoleSections';
+import type { Interface, NodeMode, Nos } from '@/api/types';
 
 const BUILTIN_NOS: { value: string; label: string }[] = [
   { value: 'forgeos', label: 'NetGeo OS' },
@@ -48,9 +51,29 @@ export function PropertiesPanel() {
   const { customNos } = useNosStore();
   const icons = useIconStore((s) => s.icons);
   const simState = useUiStore((s) => s.simState);
+  const links = useTopologyStore((s) => s.links);
+  const nodesById = useTopologyStore((s) => s.nodes);
   const [name, setName] = useState('');
+  const [locationText, setLocationText] = useState('');
 
   useEffect(() => setName(node?.name ?? ''), [node?.id, node?.name]);
+  useEffect(() => {
+    setLocationText(node?.lat != null && node?.lon != null ? `${node.lat}, ${node.lon}` : '');
+  }, [node?.id, node?.lat, node?.lon]);
+
+  // Device console (P4): product-model catalog (for PoE budget + the identity
+  // dropdown) and this project's sites (for the Site field) — same
+  // staleTime:Infinity + query-key pattern RackElevationPanel already uses.
+  const deviceTypesQ = useQuery({
+    queryKey: ['device-types'],
+    queryFn: () => deviceTypesApi.list(),
+    staleTime: Infinity,
+  });
+  const sitesQ = useQuery({
+    queryKey: ['sites', node?.project_id],
+    queryFn: () => physicalApi.listSites(node!.project_id),
+    enabled: !!node?.project_id,
+  });
 
   if (!node) {
     return (
@@ -71,6 +94,16 @@ export function PropertiesPanel() {
     upsertNode(updated);
     void nodesApi.update(node.id, p).catch(() => {});
   };
+
+  // Device console (P5): per-port admin/PoE/IP edits all round-trip through
+  // the same generic node PATCH — replace the one interface, patch the array.
+  const patchInterface = (ifaceId: string, p: Partial<Interface>) => {
+    patch({ interfaces: node.interfaces.map((i) => (i.id === ifaceId ? { ...i, ...p } : i)) });
+  };
+
+  const deviceTypeId = typeof node.intent?.device_type_id === 'string' ? node.intent.device_type_id : '';
+  const selectedDeviceType = deviceTypesQ.data?.find((dt) => dt.id === deviceTypeId);
+  const ports = frontPortList(node);
 
   // During a live sim run the engine is stepping every node; reflect that in the
   // status indicator rather than showing the stored topology state ("stopped").
@@ -117,13 +150,63 @@ export function PropertiesPanel() {
         </div>
       </div>
 
-      <Field label="Name">
+      <Field label="Product Model">
+        <Select
+          aria-label="Product model"
+          value={deviceTypeId}
+          onChange={(v) =>
+            patch({ intent: { ...(node.intent ?? {}), device_type_id: v || undefined } })
+          }
+          placeholder="Select product model…"
+          options={(deviceTypesQ.data ?? []).map((dt) => ({ value: dt.id, label: dt.name }))}
+          className="w-full"
+        />
+      </Field>
+
+      <Field label="Hostname">
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
           onBlur={() => name !== node.name && patch({ name })}
           className="w-full rounded-md border border-fg/10 bg-recess/20 px-2 py-1.5 text-sm text-fg/90 outline-none transition-colors focus:border-accent"
         />
+      </Field>
+
+      <Field label="Site">
+        <Select
+          aria-label="Site"
+          value={node.site_id ?? ''}
+          onChange={(v) => patch({ site_id: v || null })}
+          placeholder="No site"
+          options={(sitesQ.data ?? []).map((s) => ({ value: s.id, label: s.name }))}
+          className="w-full"
+        />
+      </Field>
+
+      <Field label="Location (lat, lon)">
+        <div className="relative">
+          <MapPin className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-fg/35" />
+          <input
+            value={locationText}
+            onChange={(e) => setLocationText(e.target.value)}
+            onBlur={() => {
+              const parts = locationText.split(',').map((s) => s.trim());
+              if (locationText.trim() === '') {
+                if (node.lat != null || node.lon != null) patch({ lat: null, lon: null });
+                return;
+              }
+              const [lat, lon] = parts.map(Number);
+              if (parts.length === 2 && Number.isFinite(lat) && Number.isFinite(lon)) {
+                if (lat !== node.lat || lon !== node.lon) patch({ lat, lon });
+              } else {
+                // Invalid input — revert to the last known-good value.
+                setLocationText(node.lat != null && node.lon != null ? `${node.lat}, ${node.lon}` : '');
+              }
+            }}
+            placeholder="-6.121435, 106.774213"
+            className="w-full rounded-md border border-fg/10 bg-recess/20 py-1.5 pl-8 pr-2 text-sm text-fg/90 outline-none transition-colors focus:border-accent"
+          />
+        </div>
       </Field>
 
       <div className="grid grid-cols-2 gap-2">
@@ -181,34 +264,10 @@ export function PropertiesPanel() {
 
       {node.kind === 'cloud' && <CloudUplink node={node} patch={patch} />}
 
-      <section>
-        <h4 className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg/45">
-          <Plug className="h-3.5 w-3.5" />
-          Interfaces
-          <span className="ml-auto rounded-full bg-fg/8 px-1.5 py-0.5 text-[10px] font-normal">
-            {node.interfaces.length}
-          </span>
-        </h4>
-        {node.interfaces.length === 0 ? (
-          <p className="rounded-md border border-dashed border-fg/10 p-3 text-center text-xs text-fg/35">
-            No interfaces yet. Connect a link to provision one.
-          </p>
-        ) : (
-          <ul className="space-y-1">
-            {node.interfaces.map((i) => (
-              <li
-                key={i.id}
-                className="flex items-center justify-between rounded-md bg-fg/4 px-2.5 py-1.5 text-xs"
-              >
-                <span className="font-mono text-fg/80">{i.name}</span>
-                <span className="text-fg/40">
-                  {i.type} &middot; {i.speed >= 1000 ? `${(i.speed / 1000).toFixed(0)}G` : `${i.speed}M`}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
+      <PortStrip ports={ports} />
+      <PoeBudget node={node} deviceType={selectedDeviceType} />
+      <LinksTable node={node} links={links} nodesById={nodesById} />
+      <ConfigTabs node={node} ports={ports} patchInterface={patchInterface} />
 
       <div className="flex gap-2">
         <button

@@ -939,6 +939,9 @@ export interface DeviceType {
   /** Rack power datasheet (C-4/Rack#3) — optional, older entries omit these. */
   power_watts_idle?: number | null;
   power_watts_max?: number | null;
+  /** Device console PoE budget — distinct from idle/max chassis draw above.
+   *  null when the pack's datasheet never published one (non-PoE device). */
+  poe_budget_w?: number | null;
   snmp_oids?: Record<string, string> | null;
 }
 

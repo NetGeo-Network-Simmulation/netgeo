@@ -22,7 +22,7 @@
  * engine covers every kind. Upgrade path: add NodeModel.model → look up
  * DEVICE_TYPES by slug → eventually swap SVG shapes for per-model art / 3D.
  */
-import type { LinkStatus, NodeModel } from '@/api/types';
+import type { Interface, LinkStatus, NodeModel } from '@/api/types';
 import { linkStatusColors } from '@/theme/tokens';
 import { cn } from '@/lib/cn';
 import { resolveDeviceType } from './deviceTypes';
@@ -519,6 +519,46 @@ export function frontPortFractions(node: NodeModel, span: number): Map<string, {
         portIdx++;
         if (!iface) continue;
         out.set(iface.id, { x: (r.x + r.w / 2) / W, y: (r.y + r.h / 2) / H });
+      }
+    }
+  }
+  return out;
+}
+
+/** One physical port slot in on-screen ordinal order, for the device console's
+ *  compact port strip (docs/design/stitch-html/clay/device-console/NOTES.md
+ *  point #2: same catalog data as the rack faceplate, not the pixel-precise
+ *  SVG). `iface` is the node's own interface at that ordinal, or null for an
+ *  unprovisioned slot (Rack#1: no data for a port → neutral, never guessed). */
+export interface ConsolePort {
+  ordinal: number;
+  type: PortType;
+  poeCapable: boolean;
+  label?: string;
+  iface: Interface | null;
+}
+
+/** Same zone/ordinal walk as `frontPortFractions`, minus the pixel geometry —
+ *  reused so the console lists ports in the exact order the rack faceplate
+ *  maps them, keeping the two views consistent. */
+export function frontPortList(node: NodeModel): ConsolePort[] {
+  const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
+  if (dt.front.isServerBezel) return [];
+
+  const zonesOrder = layoutZones(dt.front.portZones, 0, 1, 0, 1);
+  const out: ConsolePort[] = [];
+  let ordinal = 0;
+  for (const { zone } of zonesOrder) {
+    for (const spec of zone.ports) {
+      for (let n = 0; n < spec.count; n++) {
+        out.push({
+          ordinal,
+          type: spec.type,
+          poeCapable: Boolean(spec.poe),
+          label: spec.label,
+          iface: node.interfaces[ordinal] ?? null,
+        });
+        ordinal++;
       }
     }
   }

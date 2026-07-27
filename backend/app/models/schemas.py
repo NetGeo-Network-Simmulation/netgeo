@@ -117,6 +117,12 @@ class Interface(_Base):
     speed: int = 1000          # Mbps
     mtu: int = 1500
     peer_link_id: str | None = None
+    # Device console P5 (docs/design/stitch-html/clay/device-console): per-port
+    # admin state and PoE delivery, editable from the console's Port Settings
+    # tab via the existing generic node PATCH (interfaces: [...]), same pattern
+    # links.py already uses for peer_link_id — no new endpoint needed.
+    admin_enabled: bool = True
+    poe_enabled: bool = False
 
 
 class Radio(_Base):
