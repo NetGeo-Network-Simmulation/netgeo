@@ -907,6 +907,16 @@ export function useSites(): Site[] {
 
 const SITE_SRC = 'ng-sites';
 const SITE_LAYER = 'ng-sites-circle';
+// ponytail-debt: raw hex, not a theme token — matches NODE_KIND_COLOR/
+// OSM_KIND_COLOR above, the existing (and only) convention for MapLibre
+// `paint` colors in this file. MapLibre GL JS paint properties take literal
+// hex/rgba/expressions, not CSS custom properties, so there is no live
+// token-feed bridge to plug into today; grepped for one before adding this
+// (`getComputedStyle`/`--ng-` reads only exist for one DOM inline style at
+// GlobeBasemap, not for any `paint:` object). Upgrade path if this needs to
+// react to theme swaps: read `getComputedStyle(document.documentElement)
+// .getPropertyValue('--ng-success')` once and feed it into `ensureLayer`.
+const SITE_COLOR = '#27C28B'; // == theme `success` token's light value
 
 function sitesFC(sites: Site[]): GeoJSON.FeatureCollection {
   return {
@@ -939,9 +949,9 @@ function TopologySiteLayer({ onSiteClick }: { onSiteClick: (site: Site, px: { x:
       source: SITE_SRC,
       paint: {
         'circle-radius': 10,
-        'circle-color': '#27C28B',
+        'circle-color': SITE_COLOR,
         'circle-opacity': 0.25,
-        'circle-stroke-color': '#27C28B',
+        'circle-stroke-color': SITE_COLOR,
         'circle-stroke-width': 2,
       },
     });
@@ -971,7 +981,7 @@ function TopologySiteLayer({ onSiteClick }: { onSiteClick: (site: Site, px: { x:
   }, [map, geoSites]);
 
   const labels = useMemo<LabelItem[]>(
-    () => geoSites.map((s) => ({ id: `site-${s.id}`, lat: s.lat as number, lng: s.lon as number, text: s.name, color: '#27C28B' })),
+    () => geoSites.map((s) => ({ id: `site-${s.id}`, lat: s.lat as number, lng: s.lon as number, text: s.name, color: SITE_COLOR })),
     [geoSites],
   );
   useLabelMarkers(map, labels);

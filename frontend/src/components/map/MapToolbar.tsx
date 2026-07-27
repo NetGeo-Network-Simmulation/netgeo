@@ -15,10 +15,16 @@ interface ToolItem {
   color: string;
 }
 
+// ponytail-debt: every color below is a raw hex literal, not a theme token —
+// pre-existing convention in this file (every tool was already keyed this
+// way before this slice touched it). Kept consistent rather than making
+// `site` the one entry that reads a token while its seven siblings don't;
+// a partial migration would look like an accident, not a decision. If this
+// ever gets tokenized, do the whole array in one pass.
 const TOOLS: ToolItem[] = [
   { tool: 'select',  icon: MousePointer2, label: 'Select',                       color: '#8E8E93' },
   { tool: 'deploy',  icon: MapPin,        label: 'Deploy Device',                 color: '#FF9F0A' },
-  { tool: 'site',    icon: Building2,     label: 'Place Site',                    color: '#30D158' },
+  { tool: 'site',    icon: Building2,     label: 'Place Site',                    color: '#27C28B' }, // matches TopologySiteLayer's SITE_COLOR (MapView.tsx)
   { tool: 'ap',      icon: Radio,         label: 'Place AP (RF planning)',        color: '#5856D6' },
   { tool: 'cpe',     icon: Smartphone,    label: 'Place CPE (RF planning)',       color: '#007AFF' },
   { tool: 'tower',   icon: RadioTower,    label: 'Place Tower (RF planning)',     color: '#FF9F0A' },

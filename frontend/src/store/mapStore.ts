@@ -15,10 +15,18 @@
  * a real backend `Node` (with `lat`/`lon`/`site_id`) that the topology canvas,
  * rack view, and simulation engine all see. `MapDevice` survives only because
  * the RF Planning workspace (`RfWorkspace`/`RfLinkBar`/`RfAnalysisPanel`) still
- * computes PtP/PtMP/coverage against it, not against real `Node`s — unifying
- * that is a separate, larger migration (parity-plan Slice A3), deliberately
- * out of scope here. Do not add new general-map features on top of `MapDevice`;
- * new device placement belongs on the `Node` path.
+ * computes PtP/PtMP/coverage against it, not against real `Node`s.
+ *
+ * FOLLOW-UP (not started, do not assume it's silently in progress): unifying
+ * RF planning onto real `Node`/`Radio` data is tracked as "Slice A3 — satukan
+ * endpoint RF ke Node backend" in docs/design/16-UISP-PARITY-PLAN.md (§7,
+ * Fase A). It means changing `RfLinkBar.useRfEndpoints()`, `RfAnalysisPanel`,
+ * `RfCoverageLayer.sites`, and `rfStore` to read `topoNodes` instead of
+ * `mapStore.devices` — an M-sized slice, deliberately out of scope for the
+ * v1.2.52 UISP-parity Site work that added this comment. Until A3 lands, this
+ * duplication (two device populations on one map) is a known, named trade-off,
+ * not an oversight. Do not add new general-map features on top of `MapDevice`;
+ * new device placement belongs on the `Node` path (`deployAt()`).
  */
 import { create } from 'zustand';
 import type { LosStatus } from '@/services/signalSim';
