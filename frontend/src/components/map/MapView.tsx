@@ -76,6 +76,7 @@ import { Layers as LayersIcon, AlertTriangle } from 'lucide-react';
 import { useUiStore } from '@/store/uiStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { MAP_CHROME_INSET } from '@/theme/shell';
 
 /* -------------------------------------------------------------------------- */
 /* Map instance context — lets the vector-layer components below reach the    */
@@ -1169,8 +1170,11 @@ function OsmTowerLayer() {
   useLabelMarkers(map, labels);
 
   return loading ? (
+    // left-[180px]: the pre-bleed `left-[60px]` re-based onto x=0 (was x=120
+    // inside the old rail-inset container) — same MAP_CHROME_INSET math as
+    // the toolbar/search box, just a different original offset.
     <div
-      className={cn('pointer-events-none absolute left-[60px] top-2 rounded-md px-2 py-0.5 text-[10px]', zc.workspace)}
+      className={cn('pointer-events-none absolute left-[180px] top-2 rounded-md px-2 py-0.5 text-[10px]', zc.workspace)}
       style={{ background: 'rgba(0,0,0,0.65)', color: '#FF6B00' }}
     >
       Loading OSM towers…
@@ -1280,7 +1284,7 @@ function OsmBuildingsLayer({ densityMode }: { densityMode: boolean }) {
 
   return loading ? (
     <div
-      className={cn('pointer-events-none absolute left-[60px] top-2 rounded-md px-2 py-0.5 text-[10px]', zc.workspace)}
+      className={cn('pointer-events-none absolute left-[180px] top-2 rounded-md px-2 py-0.5 text-[10px]', zc.workspace)}
       style={{ background: 'rgba(0,0,0,0.65)', color: '#4C9AFF' }}
     >
       {densityMode ? 'Loading density…' : 'Loading buildings…'}
@@ -1508,7 +1512,7 @@ function RfCoverageLayer() {
   }, [map, opacity]);
 
   return (
-    <div className={cn('pointer-events-none absolute bottom-10 left-4', zc.workspace)}>
+    <div className={cn('pointer-events-none absolute bottom-10', MAP_CHROME_INSET, zc.workspace)}>
       <div className="rounded-xl border border-fg/15 bg-recess/60 px-3 py-2 shadow-glass backdrop-blur">
         <p className="mb-1.5 flex items-center gap-1.5 text-[9px] font-semibold uppercase tracking-wider text-fg/40">
           RF Coverage

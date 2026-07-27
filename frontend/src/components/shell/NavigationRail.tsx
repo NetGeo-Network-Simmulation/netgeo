@@ -128,7 +128,7 @@ export function NavigationRail() {
     <nav
       aria-label="Primary"
       className={cn(
-        'rail-chassis pointer-events-auto absolute left-6 top-6 flex w-[76px] flex-col items-center gap-1 overflow-hidden rounded-xl border py-4',
+        'rail-chassis pointer-events-auto absolute left-6 top-1/2 flex w-[76px] -translate-y-1/2 flex-col items-center gap-1 overflow-hidden rounded-xl border py-4',
         zc.workspace,
       )}
     >

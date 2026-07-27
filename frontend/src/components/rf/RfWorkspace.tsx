@@ -13,6 +13,8 @@ import { useMapStore } from '@/store/mapStore';
 import { useRfStore } from '@/store/rfStore';
 import { useUiStore } from '@/store/uiStore';
 import { zc } from '@/theme/z';
+import { MAP_CHROME_INSET } from '@/theme/shell';
+import { cn } from '@/lib/cn';
 import { RfAnalysisPanel } from './RfAnalysisPanel';
 import { RfLinkBar } from './RfLinkBar';
 
@@ -50,7 +52,7 @@ export function RfWorkspace() {
       <RfAnalysisPanel />
       <RfLinkBar />
       {towersVisible && (
-        <div className={`pointer-events-none absolute left-4 top-16 ${zc.workspace}`}>
+        <div className={cn('pointer-events-none absolute top-16', MAP_CHROME_INSET, zc.workspace)}>
           <span className="glass-strong flex items-center gap-1.5 rounded-full border border-fg/15 px-2.5 py-1 text-[11px] text-fg/60 shadow-glass">
             <span className="h-2 w-2 rounded-full border border-dashed border-fg/50" aria-hidden />
             OSM reference — not selectable

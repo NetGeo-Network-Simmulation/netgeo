@@ -13,6 +13,7 @@ import { useMapStore } from '@/store/mapStore';
 import { geocode, type GeoResult } from '@/services/geocodeService';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { MAP_CHROME_INSET } from '@/theme/shell';
 
 export function MapSearch() {
   const setSearchResult = useMapStore((s) => s.setSearchResult);
@@ -56,7 +57,7 @@ export function MapSearch() {
   }
 
   return (
-    <div className={cn('pointer-events-auto absolute left-4 top-3 w-72', zc.popover)}>
+    <div className={cn('pointer-events-auto absolute top-3 w-72', MAP_CHROME_INSET, zc.popover)}>
       <div className="glass-strong flex items-center gap-2 rounded-xl border border-fg/15 px-3 shadow-glass-lg">
         <Search className="h-4 w-4 shrink-0 text-fg/45" />
         <input

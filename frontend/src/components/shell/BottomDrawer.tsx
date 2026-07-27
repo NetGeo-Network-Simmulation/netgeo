@@ -62,7 +62,7 @@ export function BottomDrawer() {
     <section
       aria-label="Diagnostics drawer"
       className={cn(
-        'glass-strong absolute inset-x-0 bottom-0 flex flex-col border-t border-fg/15 shadow-glass-lg',
+        'glass-strong pointer-events-auto absolute inset-x-0 bottom-0 flex flex-col border-t border-fg/15 shadow-glass-lg',
         zc.drawer,
       )}
       style={{ height }}

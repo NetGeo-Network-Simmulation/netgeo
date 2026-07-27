@@ -6,7 +6,7 @@
  * and the free, key-less providers in `config/mapTiles.ts`.
  *
  * Sits above MapCounterChips' slot in the top-right stack — see the
- * top-3/top-16/top-28/top-40/top-52 rhythm comment in MapView.tsx.
+ * top-3/top-16/top-28/top-40 rhythm comment in MapView.tsx.
  */
 import { Satellite, Map as MapIcon, Layers, Moon, Mountain } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';

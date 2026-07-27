@@ -7,6 +7,7 @@ import { MousePointer2, Radio, Smartphone, RadioTower, Ruler, Mountain, Trash2, 
 import { useMapStore, rainRateLabel, type MapTool } from '@/store/mapStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { MAP_CHROME_INSET } from '@/theme/shell';
 
 interface ToolItem {
   tool: MapTool;
@@ -46,7 +47,7 @@ export function MapToolbar() {
   };
 
   return (
-    <div className={cn('pointer-events-auto absolute left-4 top-1/2 -translate-y-1/2', zc.workspace)}>
+    <div className={cn('pointer-events-auto absolute top-1/2 -translate-y-1/2', MAP_CHROME_INSET, zc.workspace)}>
       <div className="glass-strong flex flex-col gap-1 rounded-xl border border-fg/15 p-1.5 shadow-glass-lg">
 
         {/* Placement tools */}

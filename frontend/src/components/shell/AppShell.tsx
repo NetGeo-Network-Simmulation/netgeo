@@ -12,6 +12,8 @@ import type { ConnState } from '@/api/ws';
 import { useUiStore } from '@/store/uiStore';
 import { useLabStore } from '@/store/labStore';
 import { useShortcuts } from '@/hooks/useShortcuts';
+import { cn } from '@/lib/cn';
+import { RAIL_INSET } from '@/theme/shell';
 import { TopBar } from './TopBar';
 import { NavigationRail } from './NavigationRail';
 import { StatusBar } from './StatusBar';
@@ -73,6 +75,12 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
   const viewMode = useUiStore((s) => s.viewMode);
   const simMode = useLabStore((s) => s.mode) === 'simulation';
   const drawerHosted = viewMode === 'topology' || viewMode === 'map';
+  // Map/RF are the only workspaces whose canvas bleeds under the rail (design
+  // feedback 2026-07-27): both render MapView, whose tiles are infinitely
+  // pannable, so nothing real is ever lost under the rail chassis. Every
+  // other workspace (draggable topology nodes, plant/config/reports content)
+  // keeps the reserved-space contract below.
+  const bleed = viewMode === 'map' || viewMode === 'rf';
   useShortcuts();
 
   return (
@@ -92,9 +100,19 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
               PADDING box, not content box, so it ignores ancestor padding
               entirely and renders from x=0, under the rail. This wrapper's
               own left offset becomes the containing block those descendants
-              inherit, so every workspace (and BottomDrawer) clears the rail
-              without each one hand-rolling its own offset. */}
-          <div className="absolute inset-y-0 left-[120px] right-0">
+              inherit, so every workspace clears the rail without each one
+              hand-rolling its own offset.
+              Map/RF are the exception (v1.2.56): their wrapper bleeds to
+              `left-0` instead, so the map canvas itself renders behind the
+              rail (the rail floats over it) rather than starting at the
+              rail's right edge — the map's own left-anchored chrome
+              (toolbar, search box, …) compensates with `MAP_CHROME_INSET`
+              (theme/shell.ts) so it stays visually put.
+              BottomDrawer/SimulationDock live in a second, always-rail-inset
+              wrapper below (not this one): the drawer is hosted on topology
+              AND map, so if it rode inside the bleed wrapper it would render
+              under the rail on the map view. */}
+          <div className={cn('absolute inset-y-0 right-0', bleed ? 'left-0' : RAIL_INSET)}>
           {viewMode === 'projects' ? (
             <Suspense
               fallback={
@@ -181,11 +199,19 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
               <DevicePicker />
             </>
           )}
+          </div>
 
-          {/* Shared diagnostics drawer — topology/map only; other workspaces own
-              their own bottom edge. Simulation transport — topology + running sim. */}
-          {drawerHosted && <BottomDrawer />}
-          {viewMode === 'topology' && simMode && <SimulationDock />}
+          {/* Second, always-rail-inset layer: BottomDrawer (topology/map) and
+              SimulationDock (topology + running sim) must never render under
+              the rail, even when the workspace layer above bleeds for map/RF
+              — with the rail now vertically centered its lower half would
+              otherwise overlap the drawer region. `pointer-events-none` here
+              so the wrapper's empty area never blocks clicks on the bled map
+              beneath it; the drawer/dock re-enable `pointer-events-auto` on
+              their own root. */}
+          <div className={cn('pointer-events-none absolute inset-y-0 right-0', RAIL_INSET)}>
+            {drawerHosted && <BottomDrawer />}
+            {viewMode === 'topology' && simMode && <SimulationDock />}
           </div>
         </main>
       </div>
