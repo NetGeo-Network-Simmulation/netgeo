@@ -88,8 +88,11 @@ services:
       # Vendor config templates: configgen resolves repo-root/config-gen, which
       # lands on /config-gen inside the container (/app is the backend root).
       - ../config-gen:/config-gen:ro
-    # --reload untuk dev (override CMD image).
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    # --reload untuk dev (override CMD image). --ws websockets: explicit, not
+    # "auto" — see backend.Dockerfile CMD comment (D5): uvicorn 0.49's
+    # auto-detect against websockets 16.x fails, so /ws/* 404s instead of
+    # reaching auth.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload", "--ws", "websockets"]
     depends_on:
       postgres:
         condition: service_healthy

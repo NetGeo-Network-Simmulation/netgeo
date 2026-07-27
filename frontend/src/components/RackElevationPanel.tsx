@@ -21,7 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, Plus, Server, Zap } from 'lucide-react';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi } from '@/api/client';
 import { Select } from '@/components/ui/Select';
-import type { DeviceType } from '@/api/client';
+import type { ApiError, DeviceType } from '@/api/client';
 import type { LinkStatus, NodeKind, NodeModel, Rack, Site } from '@/api/types';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
@@ -229,8 +229,13 @@ export function RackElevationPanel() {
     mutationFn: (name: string) => physicalApi.createSite({ project_id: projectId!, name }),
     onSuccess: () => {
       setNewSite('');
+      setError(null);
       invalidate();
     },
+    // D4: this mutation had no onError — a failed request (401/422/whatever)
+    // was silent, and the "+ Site" button read as dead. Surface the real
+    // server message like place/createLink/addDevice already do.
+    onError: (e) => setError((e as unknown as ApiError).message || 'Failed to create site.'),
   });
 
   const createRack = useMutation({
@@ -238,8 +243,10 @@ export function RackElevationPanel() {
       physicalApi.createRack({ project_id: projectId!, name: v.name, site_id: v.siteId, ru_height: v.ruHeight }),
     onSuccess: () => {
       setNewRackName('');
+      setError(null);
       invalidate();
     },
+    onError: (e) => setError((e as unknown as ApiError).message || 'Failed to create rack.'),
   });
 
   // Add a brand-new device straight into a rack slot (create → place).

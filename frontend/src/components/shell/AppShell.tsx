@@ -70,14 +70,21 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
       <TopBar projectName={projectName} conn={conn} />
 
       {/* relative: anchors the floating device-rail (design 12-UI shell-device-
-          rail). The rail is `absolute` so it no longer reserves flex width —
-          canvas workspaces (topology/map) let it float over content, same as
-          the existing TopologyToolbar/ContextInspector overlays; flow-layout
-          workspaces get pl-[120px] on <main> below so their content clears it. */}
+          rail). The rail is `absolute` so it no longer reserves flex width. */}
       <div className="relative flex min-h-0 flex-1">
         <NavigationRail />
 
-        <main className="relative min-w-0 flex-1 overflow-hidden pl-[120px]" aria-label="Workspace">
+        <main className="relative min-w-0 flex-1 overflow-hidden" aria-label="Workspace">
+          {/* Reserved-space contract for the rail: a positioned wrapper, not
+              padding, on <main>. Padding only offsets normal-flow children —
+              every workspace here is `absolute inset-0` (or similar), and an
+              absolutely-positioned box's containing block is its ancestor's
+              PADDING box, not content box, so it ignores ancestor padding
+              entirely and renders from x=0, under the rail. This wrapper's
+              own left offset becomes the containing block those descendants
+              inherit, so every workspace (and BottomDrawer) clears the rail
+              without each one hand-rolling its own offset. */}
+          <div className="absolute inset-y-0 left-[120px] right-0">
           {viewMode === 'projects' ? (
             <Suspense
               fallback={
@@ -153,6 +160,7 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
               their own bottom edge. Simulation transport — topology + running sim. */}
           {drawerHosted && <BottomDrawer />}
           {viewMode === 'topology' && simMode && <SimulationDock />}
+          </div>
         </main>
       </div>
 

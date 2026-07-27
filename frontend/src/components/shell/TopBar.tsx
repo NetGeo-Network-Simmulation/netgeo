@@ -9,7 +9,7 @@
  * UpdatesButton so no simulation or collaboration behaviour is duplicated.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Check, LogOut, Moon, Search, Settings2, Sun, Wand2, Wifi, WifiOff } from 'lucide-react';
+import { Check, LogOut, Moon, Search, Sun, Wand2, Wifi, WifiOff } from 'lucide-react';
 import type { ConnState } from '@/api/ws';
 import { useUiStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
@@ -207,14 +207,6 @@ export function TopBar({ projectName, conn }: TopBarProps) {
           {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
 
-        <button
-          onClick={() => openModal('settings')}
-          aria-label="Open settings"
-          className="grid h-8 w-8 place-items-center rounded-md text-fg/60 hover:bg-fg/10 hover:text-fg"
-        >
-          <Settings2 className="h-4 w-4" />
-        </button>
-
         <time className="hidden tabular-nums text-fg/50 lg:inline">
           {clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </time>
@@ -234,12 +226,6 @@ export function TopBar({ projectName, conn }: TopBarProps) {
                 <p className="text-xs font-medium text-fg/80">{username}</p>
                 <p className="text-[10px] text-fg/40">Local account</p>
               </div>
-              <button
-                onClick={() => openModal('settings')}
-                className="flex w-full items-center gap-2 px-3 py-2 text-xs text-fg/70 hover:bg-fg/8 hover:text-fg"
-              >
-                <Settings2 className="h-3.5 w-3.5" /> Settings
-              </button>
               <button
                 onClick={() => {
                   closeModal();

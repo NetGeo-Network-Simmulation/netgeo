@@ -149,7 +149,17 @@ export const useUiStore = create<UiState>((set, get) => ({
   setProject: (projectId) => set({ projectId }),
   setViewMode: (viewMode) => {
     syncPath(viewMode);
-    set({ viewMode });
+    set((s) => {
+      // 'updates' and 'userMenu' are corner popovers, not blocking dialog
+      // modals (design 12-UI §2.3) — there's no full-screen scrim, so a rail
+      // click can still reach the rail while one is open, leaving it stranded
+      // over the new workspace (D6). Dialog modals (settings, command, …)
+      // never hit this: their scrim blocks the rail, so viewMode can't change
+      // under them in the first place.
+      const closesOnNav: ModalId[] = ['updates', 'userMenu'];
+      const activeModal = s.activeModal && closesOnNav.includes(s.activeModal) ? null : s.activeModal;
+      return { viewMode, activeModal };
+    });
   },
 
   openDrawer: (tab) =>

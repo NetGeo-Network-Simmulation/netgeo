@@ -4,7 +4,7 @@ FastAPI app assembling the §4 REST surface, the WebSocket endpoints, the shared
 error envelope, CORS, JWT authentication (RB-01), and in-process rate limiting
 (RB-14) — mirroring the secureops/storagehub app factory style.
 
-Run:  uvicorn app.main:app --reload --port 8000
+Run:  uvicorn app.main:app --reload --port 8000 --ws websockets
 Smoke: python -c "from app.main import app; print('netgeo backend imports OK')"
 """
 from __future__ import annotations

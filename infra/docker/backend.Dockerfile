@@ -48,4 +48,8 @@ EXPOSE 8000
 HEALTHCHECK --interval=15s --timeout=5s --start-period=60s --retries=5 \
     CMD curl -fsS http://localhost:8000/api/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+# --ws websockets: explicit, not "auto" — uvicorn 0.49's auto-detection against
+# websockets 16.x fails to find the installed library, so every /ws/* upgrade
+# is answered 404 ("No supported WebSocket library detected") instead of
+# reaching auth. The library is present; only the auto-probe is broken (D5).
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--ws", "websockets"]

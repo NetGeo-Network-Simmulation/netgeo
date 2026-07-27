@@ -21,7 +21,11 @@ export const ONBOARDING_KEY = 'netgeo.onboarding.done';
 
 interface Step {
   icon: typeof Network;
-  color: string;
+  /** Hex accent for the icon box. Omit to use the theme accent token instead
+   *  (coral/orange) — the fixed hexes below are per-step decoration, not
+   *  brand color, so they stay as-is; this step is the one users see first
+   *  and read as "the app's color," so it must track the theme (D1). */
+  color?: string;
   title: string;
   description: string;
   hint?: string;
@@ -30,7 +34,6 @@ interface Step {
 const STEPS: Step[] = [
   {
     icon: Network,
-    color: '#007AFF',
     title: 'Welcome to NetGeo',
     description:
       'NetGeo is a browser-based network simulation platform. Design, simulate, and generate configs for complex network topologies — all without physical hardware.',
@@ -104,8 +107,15 @@ export function OnboardingModal({ onClose }: OnboardingModalProps) {
         {/* Step icon + header */}
         <div className="px-8 pb-4 pt-8 text-center">
           <div
-            className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl shadow-lg"
-            style={{ background: `${current.color}22`, color: current.color, boxShadow: `0 8px 24px ${current.color}40` }}
+            className={cn(
+              'mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl shadow-lg',
+              !current.color && 'bg-accent/15 text-accent shadow-[0_8px_24px_rgb(var(--ng-accent-rgb)_/_0.25)]',
+            )}
+            style={
+              current.color
+                ? { background: `${current.color}22`, color: current.color, boxShadow: `0 8px 24px ${current.color}40` }
+                : undefined
+            }
           >
             <Icon className="h-7 w-7" />
           </div>

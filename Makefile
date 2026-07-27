@@ -41,7 +41,7 @@ ps:            ## Show running services
 	$(DC) $(DEV) ps
 
 backend:       ## Run backend locally (needs Postgres + Redis + venv)
-	cd backend && uvicorn app.main:app --reload --port 8000
+	cd backend && uvicorn app.main:app --reload --port 8000 --ws websockets
 
 frontend:      ## Run frontend dev server
 	cd frontend && npm run dev
