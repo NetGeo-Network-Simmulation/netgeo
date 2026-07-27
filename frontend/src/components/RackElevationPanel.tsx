@@ -111,7 +111,6 @@ export function RackElevationPanel() {
   const projectId = useUiStore((s) => s.projectId);
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [newSite, setNewSite] = useState('');
   const [newRackName, setNewRackName] = useState('');
   const [newRackSite, setNewRackSite] = useState<string>('');
   const [newRackU, setNewRackU] = useState(42);
@@ -223,19 +222,6 @@ export function RackElevationPanel() {
       invalidate();
     },
     onError: () => setError('Failed to create link.'),
-  });
-
-  const createSite = useMutation({
-    mutationFn: (name: string) => physicalApi.createSite({ project_id: projectId!, name }),
-    onSuccess: () => {
-      setNewSite('');
-      setError(null);
-      invalidate();
-    },
-    // D4: this mutation had no onError — a failed request (401/422/whatever)
-    // was silent, and the "+ Site" button read as dead. Surface the real
-    // server message like place/createLink/addDevice already do.
-    onError: (e) => setError((e as unknown as ApiError).message || 'Failed to create site.'),
   });
 
   const createRack = useMutation({
@@ -454,14 +440,19 @@ export function RackElevationPanel() {
         <Server size={14} className="text-fg/50" />
         <span className="font-medium">Rack Elevation</span>
         <span className="text-fg/30">·</span>
-        <input
-          value={newSite}
-          onChange={(e) => setNewSite(e.target.value)}
-          placeholder="New site name"
-          className="w-32 rounded bg-fg/10 px-2 py-1 outline-none placeholder:text-fg/30"
-        />
+        {/* v1.2.55: a Site has a location the moment it exists, so "+ Site" now
+            opens the map with the Place Site tool armed — click a point, name
+            it right there (SiteCreateMenu). Replaces the old name-only ghost
+            input, which had no coordinates to give the site anyway. */}
         <button
-          onClick={() => newSite.trim() && createSite.mutate(newSite.trim())}
+          onClick={() => {
+            useUiStore.getState().setViewMode('map');
+            // Dynamic: mapStore only otherwise loads inside the async map/rf
+            // chunks. A static import here would pull it (and its MapLibre
+            // neighbours) into the entry bundle just for this one call.
+            void import('@/store/mapStore').then(({ useMapStore }) => useMapStore.getState().setTool('site'));
+          }}
+          title="Opens the map — click a point to place and name the new site"
           className="flex items-center gap-1 rounded bg-fg/10 px-2 py-1 hover:bg-fg/20"
         >
           <Plus size={12} /> Site
@@ -471,6 +462,7 @@ export function RackElevationPanel() {
           value={newRackName}
           onChange={(e) => setNewRackName(e.target.value)}
           placeholder="New rack name"
+          aria-label="New rack name"
           className="w-32 rounded bg-fg/10 px-2 py-1 outline-none placeholder:text-fg/30"
         />
         <Select
@@ -488,12 +480,16 @@ export function RackElevationPanel() {
           options={RACK_SIZES.map((u) => ({ value: String(u), label: `${u}U` }))}
           className="w-20"
         />
+        {/* Racks aren't geographic — no map round-trip, but a name is required
+            server-side, so a blank name disables the button instead of the old
+            silent no-op (the actual bug this whole slice fixes). */}
         <button
           onClick={() =>
-            newRackName.trim() &&
             createRack.mutate({ name: newRackName.trim(), siteId: newRackSite || null, ruHeight: newRackU })
           }
-          className="flex items-center gap-1 rounded bg-fg/10 px-2 py-1 hover:bg-fg/20"
+          disabled={!newRackName.trim() || createRack.isPending}
+          title={!newRackName.trim() ? 'Enter a rack name first' : undefined}
+          className="flex items-center gap-1 rounded bg-fg/10 px-2 py-1 hover:bg-fg/20 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-fg/10"
         >
           <Plus size={12} /> Rack
         </button>

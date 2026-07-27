@@ -48,7 +48,7 @@ import { useTopologyStore } from '@/store/topologyStore';
 import { useRfStore } from '@/store/rfStore';
 import { marginStatus, STATUS_COLOR, fmtKm } from '@/components/rf/rfLogic';
 import type { NodeModel, LinkModel, Site, Topology } from '@/api/types';
-import { rfApi, physicalApi, projectsApi, type CoverageSite } from '@/api/client';
+import { rfApi, projectsApi, type CoverageSite } from '@/api/client';
 import {
   fetchOsmTowers,
   towerLabel,
@@ -69,6 +69,7 @@ import { MapSearch } from './MapSearch';
 import { GisLayerPanel } from './GisLayerPanel';
 import { ElevationProfilePanel } from './ElevationProfilePanel';
 import { MapDeployMenu } from './MapDeployMenu';
+import { SiteCreateMenu } from './SiteCreateMenu';
 import { SitePopup } from './SitePopup';
 import { DeviceLibraryModal } from './DeviceLibraryModal';
 import { Layers as LayersIcon, AlertTriangle } from 'lucide-react';
@@ -1757,10 +1758,21 @@ export interface DeployAnchor {
   lon: number;
 }
 
-function MapClickHandler({ onDeployClick }: { onDeployClick: (anchor: DeployAnchor) => void }) {
+/** Same pixel/lat/lon anchor as deploy, plus the proposed `Site-N` default
+ *  name so SiteCreateMenu doesn't need its own topology-count lookup. */
+export interface SiteCreateAnchor extends DeployAnchor {
+  defaultName: string;
+}
+
+function MapClickHandler({
+  onDeployClick,
+  onPlaceSiteClick,
+}: {
+  onDeployClick: (anchor: DeployAnchor) => void;
+  onPlaceSiteClick: (anchor: SiteCreateAnchor) => void;
+}) {
   const map = useGlobeMap();
   const tool = useMapStore((s) => s.tool);
-  const flashNotice = useMapStore((s) => s.flashNotice);
   const projectId = useUiStore((s) => s.projectId);
   const queryClient = useQueryClient();
   const [measure, setMeasure] = useState<{ start: [number, number]; end: [number, number] | null } | null>(null);
@@ -1804,16 +1816,18 @@ function MapClickHandler({ onDeployClick }: { onDeployClick: (anchor: DeployAnch
         return;
       }
 
-      // Site tool: place a geo-located Site directly (no popover — a site is
-      // a container, not a device with kind/radio choices). Shares the
-      // ['topology', projectId] cache key MapView's SitePopup/App.tsx read.
+      // Site tool: drop the pin, then let SiteCreateMenu capture the name —
+      // a site's location and its name are chosen in the same gesture,
+      // instead of the old dead ghost-input on the Plant toolbar (v1.2.55).
       if (s.tool === 'site') {
         if (!projectId) return;
         const existing = queryClient.getQueryData<Topology>(['topology', projectId])?.sites?.length ?? 0;
-        void physicalApi
-          .createSite({ project_id: projectId, name: `Site-${existing + 1}`, lat, lon: lng })
-          .then(() => queryClient.invalidateQueries({ queryKey: ['topology', projectId] }))
-          .catch(() => flashNotice('Failed to place site — check backend.'));
+        onPlaceSiteClick({
+          px: { x: e.point.x, y: e.point.y },
+          lat,
+          lon: lng,
+          defaultName: `Site-${existing + 1}`,
+        });
         return;
       }
 
@@ -1849,7 +1863,7 @@ function MapClickHandler({ onDeployClick }: { onDeployClick: (anchor: DeployAnch
     return () => {
       map.off('click', onClick);
     };
-  }, [map, onDeployClick]);
+  }, [map, onDeployClick, onPlaceSiteClick]);
 
   // In-map measure result: line + glass distance label (replaces the old
   // alert()). Only while the measure tool is active with both endpoints.
@@ -2006,6 +2020,7 @@ function SignalLegend() {
 const TOOL_HINTS: Record<string, string> = {
   select: 'Click a device to select it • Delete key removes selected device',
   deploy: 'Click the map to deploy a real device — choose wireless or cabled',
+  site: 'Click the map to drop a Site — name it right after',
   ap: 'Click the map to place an Access Point (legacy, local-only)',
   cpe: 'Click the map to place a CPE client (legacy, local-only)',
   tower: 'Click the map to place a Tower (legacy, local-only)',
@@ -2116,6 +2131,10 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
   // never touches uiStore.activeModal (see MapDeployMenu/mapStore boundary
   // note). Only one map popover lives at a time.
   const [siteAnchor, setSiteAnchor] = useState<{ site: Site; px: { x: number; y: number } } | null>(null);
+  // Site *creation* naming popover (v1.2.55) — a third, mutually-exclusive
+  // popover anchor alongside deploy/site-popup, opened by the 'site' tool's
+  // click instead of auto-creating "Site-N" with no name confirmation.
+  const [siteCreateAnchor, setSiteCreateAnchor] = useState<SiteCreateAnchor | null>(null);
   const showOnboarding = useMapStore((s) => s.showOnboarding);
   const activeModal = useUiStore((s) => s.activeModal);
   const openModal = useUiStore((s) => s.openModal);
@@ -2151,6 +2170,7 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
         <TopologySiteLayer
           onSiteClick={(site, px) => {
             setDeployAnchor(null);
+            setSiteCreateAnchor(null);
             setSiteAnchor({ site, px });
           }}
         />
@@ -2165,7 +2185,13 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
         <MapClickHandler
           onDeployClick={(a) => {
             setSiteAnchor(null);
+            setSiteCreateAnchor(null);
             setDeployAnchor(a);
+          }}
+          onPlaceSiteClick={(a) => {
+            setSiteAnchor(null);
+            setDeployAnchor(null);
+            setSiteCreateAnchor(a);
           }}
         />
 
@@ -2217,6 +2243,18 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             site={siteAnchor.site}
             px={siteAnchor.px}
             onClose={() => setSiteAnchor(null)}
+          />
+        )}
+
+        {/* Site naming popover (v1.2.55) — appears right after the 'site' tool
+            drops a pin; the point and the name are chosen in the same gesture. */}
+        {siteCreateAnchor && (
+          <SiteCreateMenu
+            px={siteCreateAnchor.px}
+            lat={siteCreateAnchor.lat}
+            lon={siteCreateAnchor.lon}
+            defaultName={siteCreateAnchor.defaultName}
+            onClose={() => setSiteCreateAnchor(null)}
           />
         )}
 
