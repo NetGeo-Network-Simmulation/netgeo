@@ -63,6 +63,7 @@ import { MapToolbar } from './MapToolbar';
 import { MapDevicePanel } from './MapDevicePanel';
 import { MapOnboardingModal } from './MapOnboardingModal';
 import { MapLayerSwitcher } from './MapLayerSwitcher';
+import { MapCounterChips } from './MapCounterChips';
 import { MapSearch } from './MapSearch';
 import { GisLayerPanel } from './GisLayerPanel';
 import { ElevationProfilePanel } from './ElevationProfilePanel';
@@ -1951,7 +1952,7 @@ function GisLayerToggle() {
       aria-pressed={open}
       title="GIS layers"
       className={cn(
-        'pointer-events-auto absolute right-4 top-16 grid h-9 w-9 place-items-center rounded-lg border border-fg/15 shadow-glass backdrop-blur transition-colors',
+        'pointer-events-auto absolute right-4 top-40 grid h-9 w-9 place-items-center rounded-lg border border-fg/15 shadow-glass backdrop-blur transition-colors',
         zc.workspace,
         open ? 'bg-accent/25 text-accent' : 'bg-recess/55 text-fg/70 hover:text-fg',
       )}
@@ -1966,7 +1967,7 @@ function GisLayerToggle() {
 /* -------------------------------------------------------------------------- */
 function GradientLegend() {
   return (
-    <div className={cn('pointer-events-none absolute right-4 top-3', zc.workspace)}>
+    <div className={cn('pointer-events-none absolute right-4 top-28', zc.workspace)}>
       <div className="glass-strong rounded-xl border border-fg/15 px-3 py-2 shadow-glass">
         <p className="mb-1.5 text-[9px] font-semibold uppercase tracking-wider text-fg/60">
           Signal Strength
@@ -2051,6 +2052,11 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
         {!rfMode && <ToolHint />}
         <MapNotice />
         <WeatherBar />
+        {/* Top-right stack (QA D8/P3) — each item reserves a fixed slot whether
+            or not it's currently visible, so nothing shifts when a conditional
+            neighbor toggles: top-3 chips, top-16 basemap switcher, top-28
+            gradient legend, top-40 GIS toggle, top-52 GIS panel. */}
+        <MapCounterChips />
         <MapLayerSwitcher />
         {!rfMode && <ElevationProfilePanel />}
 

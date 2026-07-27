@@ -36,7 +36,7 @@ export function GisLayerPanel() {
     <aside
       role="region"
       aria-label="GIS layers"
-      className={cn('pointer-events-auto absolute right-4 top-28 w-72 animate-fade-in', zc.workspace)}
+      className={cn('pointer-events-auto absolute right-4 top-52 w-72 animate-fade-in', zc.workspace)}
     >
       <div className="glass-strong flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-fg/15 shadow-glass-lg">
         {/* Header */}

@@ -45,7 +45,7 @@ export function MapDevicePanel() {
   const patch = (p: Parameters<typeof updateDevice>[1]) => updateDevice(device.id, p);
 
   return (
-    <div className={cn('pointer-events-auto absolute right-4 top-16 w-72 animate-fade-in', zc.workspace)}>
+    <div className={cn('pointer-events-auto absolute right-4 top-40 w-72 animate-fade-in', zc.workspace)}>
       <div className="glass-strong overflow-hidden rounded-xl border border-fg/15 shadow-glass-lg">
         {/* Header */}
         <div
