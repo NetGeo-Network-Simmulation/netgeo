@@ -1,7 +1,12 @@
 /**
- * MapLayerSwitcher — basemap selector (Satellite / Street / Hybrid), bottom-left.
- * Mirrors the UISP Design Center layer toggle. Backed by `mapStore.mapLayer`
+ * MapLayerSwitcher — basemap selector (Satellite / Street / Hybrid), top-right.
+ * Mirrors the UISP Design Center layer toggle, which docks basemap controls
+ * top-right instead of colliding with the left-side navigation rail
+ * (QA D8 — docs/design/16-UISP-PARITY-PLAN.md). Backed by `mapStore.mapLayer`
  * and the free, key-less providers in `config/mapTiles.ts`.
+ *
+ * Sits above MapCounterChips' slot in the top-right stack — see the
+ * top-3/top-16/top-28/top-40/top-52 rhythm comment in MapView.tsx.
  */
 import { Satellite, Map as MapIcon, Layers, Moon, Mountain } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
@@ -22,7 +27,7 @@ export function MapLayerSwitcher() {
   const setMapLayer = useMapStore((s) => s.setMapLayer);
 
   return (
-    <div className={cn('pointer-events-auto absolute bottom-10 left-4', zc.workspace)}>
+    <div className={cn('pointer-events-auto absolute right-4 top-16', zc.workspace)}>
       <div
         className="glass-strong flex gap-1 rounded-xl border border-fg/15 p-1 shadow-glass-lg"
         role="group"

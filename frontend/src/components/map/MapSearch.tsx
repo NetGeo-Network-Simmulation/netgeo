@@ -4,7 +4,8 @@
  * Enter runs a Nominatim search (services/geocodeService); picking a result flies
  * the map there and drops a temporary marker (SearchResultLayer in MapView).
  * Placed top-left by convention — the vertical tool bar is left-center, and the
- * signal legend + GIS toggle own the top-right, so this corner is free.
+ * counter chips, basemap switcher, signal legend, and GIS toggle stack the
+ * top-right, so this corner is free.
  */
 import { useRef, useState } from 'react';
 import { Search, Loader2, X } from 'lucide-react';

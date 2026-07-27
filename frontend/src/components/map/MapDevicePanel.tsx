@@ -6,7 +6,6 @@
 import { Radio, Smartphone, RadioTower, MapPin, Signal, X, Mountain } from 'lucide-react';
 import { useMapStore, calcRssi, rssiColor, type MapDeviceKind } from '@/store/mapStore';
 import { cn } from '@/lib/cn';
-import { zc } from '@/theme/z';
 import { Select } from '@/components/ui/Select';
 
 const FREQ_OPTIONS = [
@@ -45,7 +44,7 @@ export function MapDevicePanel() {
   const patch = (p: Parameters<typeof updateDevice>[1]) => updateDevice(device.id, p);
 
   return (
-    <div className={cn('pointer-events-auto absolute right-4 top-16 w-72 animate-fade-in', zc.workspace)}>
+    <div className="pointer-events-auto w-72 animate-fade-in">
       <div className="glass-strong overflow-hidden rounded-xl border border-fg/15 shadow-glass-lg">
         {/* Header */}
         <div
