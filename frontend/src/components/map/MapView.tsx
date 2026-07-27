@@ -1952,8 +1952,7 @@ function GisLayerToggle() {
       aria-pressed={open}
       title="GIS layers"
       className={cn(
-        'pointer-events-auto absolute right-4 top-40 grid h-9 w-9 place-items-center rounded-lg border border-fg/15 shadow-glass backdrop-blur transition-colors',
-        zc.workspace,
+        'pointer-events-auto grid h-9 w-9 place-items-center rounded-lg border border-fg/15 shadow-glass backdrop-blur transition-colors',
         open ? 'bg-accent/25 text-accent' : 'bg-recess/55 text-fg/70 hover:text-fg',
       )}
     >
@@ -2042,20 +2041,28 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
         {/* RF mode owns the right dock + bottom bar, so suppress the generic map
             chrome that would collide (device panel, signal legend, tool hint,
             center-bottom elevation panel). */}
-        {!rfMode && <MapDevicePanel />}
         {!rfMode && <SignalLegend />}
         {/* Signal-strength gradient only describes the RF coverage raster — show it
             only when that layer is on, so it doesn't float over the top bar/popovers. */}
         {coverageVisible && <GradientLegend />}
-        <GisLayerToggle />
-        <GisLayerPanel />
+        {/* GIS toggle, GIS panel, and device panel used to share the same fixed
+            `top-N` slot and paint over each other whenever a device was selected
+            (QA: "masih banyak ui yang tumpang tindih"). A flex column stacks them
+            by real rendered height instead of guessed pixel offsets, so the
+            toggle button, the layer tree, and the device inspector are all
+            reachable at once no matter which combination is open. */}
+        <div className={cn('pointer-events-none absolute right-4 top-40 flex max-h-[calc(100%-11rem)] flex-col items-end gap-2 overflow-y-auto', zc.workspace)}>
+          <GisLayerToggle />
+          <GisLayerPanel />
+          {!rfMode && <MapDevicePanel />}
+        </div>
         {!rfMode && <ToolHint />}
         <MapNotice />
         <WeatherBar />
         {/* Top-right stack (QA D8/P3) — each item reserves a fixed slot whether
             or not it's currently visible, so nothing shifts when a conditional
             neighbor toggles: top-3 chips, top-16 basemap switcher, top-28
-            gradient legend, top-40 GIS toggle, top-52 GIS panel. */}
+            gradient legend, top-40 the toggle/GIS-panel/device-panel column. */}
         <MapCounterChips />
         <MapLayerSwitcher />
         {!rfMode && <ElevationProfilePanel />}

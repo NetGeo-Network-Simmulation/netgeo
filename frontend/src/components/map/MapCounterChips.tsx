@@ -47,7 +47,12 @@ export function MapCounterChips() {
   if (chips.every((c) => c.value === 0)) return null;
 
   return (
-    <div className={cn('pointer-events-auto absolute right-4 top-3 flex gap-1.5', zc.workspace)}>
+    <div
+      className={cn(
+        'pointer-events-auto absolute right-4 top-3 flex max-w-[calc(100vw-2rem)] flex-wrap justify-end gap-1.5',
+        zc.workspace,
+      )}
+    >
       {chips.map(({ label, value }) => (
         <div
           key={label}

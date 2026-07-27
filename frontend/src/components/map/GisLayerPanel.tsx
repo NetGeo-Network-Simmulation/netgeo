@@ -15,7 +15,6 @@ import { Layers, ChevronRight, X, Lock } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
 import { GIS_GROUPS, GIS_LAYERS, type GisLayerGroup } from '@/config/gisLayers';
 import { cn } from '@/lib/cn';
-import { zc } from '@/theme/z';
 
 export function GisLayerPanel() {
   const open = useMapStore((s) => s.gisPanelOpen);
@@ -36,7 +35,7 @@ export function GisLayerPanel() {
     <aside
       role="region"
       aria-label="GIS layers"
-      className={cn('pointer-events-auto absolute right-4 top-52 w-72 animate-fade-in', zc.workspace)}
+      className="pointer-events-auto w-72 animate-fade-in"
     >
       <div className="glass-strong flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-fg/15 shadow-glass-lg">
         {/* Header */}
