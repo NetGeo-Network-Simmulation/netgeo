@@ -93,6 +93,9 @@ export interface NodeModel {
   rack_id?: string | null;
   ru_start?: number | null;
   ru_span?: number;
+  /** Owning site (NG-PH-01). Source of truth for site membership — mirrors
+   *  the rack's site when racked, settable directly for outdoor map nodes. */
+  site_id?: string | null;
   /** Extension bag (ForgeOS intent; cloud-node `uplink`). */
   intent?: Record<string, unknown> | null;
 }
@@ -260,12 +263,15 @@ export type CableMedia =
   | 'coax'
   | 'gpon_drop';
 
-/** A building/location that holds racks (NG-PH-01). */
+/** A building/location that holds racks (NG-PH-01). `lat`/`lon` are optional —
+ *  a site without coordinates simply never renders on the map. */
 export interface Site {
   id: string;
   project_id: string;
   name: string;
   region: string;
+  lat: number | null;
+  lon: number | null;
 }
 
 /** An RU-gridded rack inside a site (NG-PH-01). Devices are placed into it
@@ -293,6 +299,16 @@ export interface SiteCreate {
   project_id: string;
   name: string;
   region?: string;
+  lat?: number | null;
+  lon?: number | null;
+}
+
+/** PATCH body — every field optional, only provided keys are applied. */
+export interface SiteUpdate {
+  name?: string;
+  region?: string;
+  lat?: number | null;
+  lon?: number | null;
 }
 
 export interface RackCreate {

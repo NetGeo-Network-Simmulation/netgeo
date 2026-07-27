@@ -130,7 +130,7 @@ export async function ensureRackPlacement(projectId: string, node: NodeModel): P
  * Full deploy orchestration:
  *  1. Name the node
  *  2. Compute canvas position relative to upstream
- *  3. Create the node via API (with lat/lon and optional radio)
+ *  3. Create the node via API (with lat/lon, optional radio, optional site_id)
  *  4. Link to upstream (tolerates 409 — iface already taken)
  *  5. Rack placement for cabled infrastructure nodes
  *  6. Upsert into topologyStore so the map refreshes immediately
@@ -141,6 +141,7 @@ export async function deployAt(
   lat: number,
   lon: number,
   onNotice?: (msg: string) => void,
+  siteId?: string,
 ): Promise<void> {
   const { nodes, upsertNode, upsertLink } = useTopologyStore.getState();
   const nodeList = Array.from(nodes.values());
@@ -157,6 +158,7 @@ export async function deployAt(
     lon,
     x,
     y,
+    site_id: siteId ?? null,
     radio: WIRELESS_KINDS.has(kind)
       ? { tx_power_dbm: 20, frequency_ghz: 5.8, antenna_gain_dbi: 14, bandwidth_mhz: 20, rx_sensitivity_dbm: -85, misc_loss_db: 2, max_range_m: null }
       : undefined,

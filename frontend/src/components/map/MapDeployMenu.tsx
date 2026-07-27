@@ -1,9 +1,11 @@
 /**
  * MapDeployMenu — popover that appears at the click point on the map when the
  * "Deploy Device" tool is active. Two primary categories (Wireless / Cabled) plus
- * per-kind preset buttons. Positioned via pixel coords from Leaflet containerPoint.
+ * per-kind preset buttons. Positioned via pixel coords from MapLibre's `e.point`.
  *
- * Calls deployAt() from mapDeploy.ts, then closes itself.
+ * Calls deployAt() from mapDeploy.ts, then closes itself. Also reused by
+ * SitePopup.tsx (with `siteId` set) so "Add Device" from a site popup goes
+ * through the exact same deploy flow as an empty-map click.
  */
 import { useRef, useEffect } from 'react';
 import { Radio, Cable, WifiOff, Server, Network, FlameKindling, X, Loader } from 'lucide-react';
@@ -16,11 +18,13 @@ import { useUiStore } from '@/store/uiStore';
 import { useMapStore } from '@/store/mapStore';
 
 interface Props {
-  /** Pixel position (containerPoint from Leaflet click event). */
+  /** Pixel position (MapLibre `e.point` from the map click event). */
   px: { x: number; y: number };
   lat: number;
   lon: number;
   onClose: () => void;
+  /** Set when opened from a site popup — deployed devices join that site. */
+  siteId?: string;
 }
 
 interface PresetItem {
@@ -41,7 +45,7 @@ const CABLED_PRESETS: PresetItem[] = [
   { kind: 'firewall', label: 'Firewall', icon: FlameKindling },
 ];
 
-export function MapDeployMenu({ px, lat, lon, onClose }: Props) {
+export function MapDeployMenu({ px, lat, lon, onClose, siteId }: Props) {
   const projectId = useUiStore((s) => s.projectId);
   const flashNotice = useMapStore((s) => s.flashNotice);
   const [busy, setBusy] = useState(false);
@@ -67,7 +71,7 @@ export function MapDeployMenu({ px, lat, lon, onClose }: Props) {
     if (!projectId || busy) return;
     setBusy(true);
     try {
-      await deployAt(projectId, kind, lat, lon, (msg) => flashNotice(msg));
+      await deployAt(projectId, kind, lat, lon, (msg) => flashNotice(msg), siteId);
     } catch {
       flashNotice('Deploy failed — check backend.');
     } finally {

@@ -19,6 +19,7 @@
  * feature parity.
  */
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   MapLibreMap,
@@ -46,8 +47,8 @@ import {
 import { useTopologyStore } from '@/store/topologyStore';
 import { useRfStore } from '@/store/rfStore';
 import { marginStatus, STATUS_COLOR, fmtKm } from '@/components/rf/rfLogic';
-import type { NodeModel, LinkModel } from '@/api/types';
-import { rfApi, type CoverageSite } from '@/api/client';
+import type { NodeModel, LinkModel, Site, Topology } from '@/api/types';
+import { rfApi, physicalApi, projectsApi, type CoverageSite } from '@/api/client';
 import {
   fetchOsmTowers,
   towerLabel,
@@ -68,6 +69,7 @@ import { MapSearch } from './MapSearch';
 import { GisLayerPanel } from './GisLayerPanel';
 import { ElevationProfilePanel } from './ElevationProfilePanel';
 import { MapDeployMenu } from './MapDeployMenu';
+import { SitePopup } from './SitePopup';
 import { DeviceLibraryModal } from './DeviceLibraryModal';
 import { Layers as LayersIcon, AlertTriangle } from 'lucide-react';
 import { useUiStore } from '@/store/uiStore';
@@ -887,6 +889,97 @@ function TopologyLinkLayer() {
 }
 
 /* -------------------------------------------------------------------------- */
+/* Sites (NG-PH-01, UISP-parity P2) — geo-located sites, clickable → popup.    */
+/* Sites have no WS events (physical plant isn't broadcast); this shares the   */
+/* same `['topology', projectId]` react-query cache App.tsx already primes,   */
+/* so no extra request, and `invalidateQueries` after create/delete refreshes  */
+/* it same as RackElevationPanel does for racks/cables.                       */
+/* -------------------------------------------------------------------------- */
+export function useSites(): Site[] {
+  const projectId = useUiStore((s) => s.projectId);
+  const { data } = useQuery({
+    queryKey: ['topology', projectId],
+    queryFn: () => projectsApi.topology(projectId!),
+    enabled: !!projectId,
+  });
+  return data?.sites ?? [];
+}
+
+const SITE_SRC = 'ng-sites';
+const SITE_LAYER = 'ng-sites-circle';
+
+function sitesFC(sites: Site[]): GeoJSON.FeatureCollection {
+  return {
+    type: 'FeatureCollection',
+    features: sites
+      .filter((s) => s.lat != null && s.lon != null)
+      .map((s) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [s.lon as number, s.lat as number] },
+        properties: { id: s.id, name: s.name },
+      })),
+  };
+}
+
+function TopologySiteLayer({ onSiteClick }: { onSiteClick: (site: Site, px: { x: number; y: number }) => void }) {
+  const map = useGlobeMap();
+  const sites = useSites();
+  const geoSites = useMemo(() => sites.filter((s) => s.lat != null && s.lon != null), [sites]);
+  // ponytail: the click handler below is bound once per map instance; a ref
+  // keeps it reading the latest site list without re-binding the listener.
+  const geoSitesRef = useRef(geoSites);
+  geoSitesRef.current = geoSites;
+
+  useEffect(() => {
+    if (!map) return;
+    ensureSource(map, SITE_SRC);
+    ensureLayer(map, {
+      id: SITE_LAYER,
+      type: 'circle',
+      source: SITE_SRC,
+      paint: {
+        'circle-radius': 10,
+        'circle-color': '#27C28B',
+        'circle-opacity': 0.25,
+        'circle-stroke-color': '#27C28B',
+        'circle-stroke-width': 2,
+      },
+    });
+
+    const onClick = (e: MapLayerMouseEvent) => {
+      const f = e.features?.[0];
+      if (!f?.properties) return;
+      const site = geoSitesRef.current.find((s) => s.id === f.properties!.id);
+      if (site) onSiteClick(site, { x: e.point.x, y: e.point.y });
+    };
+    const enter = () => setCursor(map, 'pointer');
+    const leave = () => setCursor(map, '');
+    map.on('click', SITE_LAYER, onClick);
+    map.on('mouseenter', SITE_LAYER, enter);
+    map.on('mouseleave', SITE_LAYER, leave);
+
+    return () => {
+      map.off('click', SITE_LAYER, onClick);
+      map.off('mouseenter', SITE_LAYER, enter);
+      map.off('mouseleave', SITE_LAYER, leave);
+      teardown(map, SITE_SRC, [SITE_LAYER]);
+    };
+  }, [map, onSiteClick]);
+
+  useEffect(() => {
+    if (map) setSourceData(map, SITE_SRC, sitesFC(geoSites));
+  }, [map, geoSites]);
+
+  const labels = useMemo<LabelItem[]>(
+    () => geoSites.map((s) => ({ id: `site-${s.id}`, lat: s.lat as number, lng: s.lon as number, text: s.name, color: '#27C28B' })),
+    [geoSites],
+  );
+  useLabelMarkers(map, labels);
+
+  return null;
+}
+
+/* -------------------------------------------------------------------------- */
 /* OSM towers/buildings — reference-only overlays fed by Overpass              */
 /* -------------------------------------------------------------------------- */
 const OSM_KIND_COLOR: Record<string, string> = {
@@ -1645,7 +1738,7 @@ const MEASURE_SRC = 'ng-measure-line';
 const MEASURE_LAYER = 'ng-measure-line-layer';
 
 function stoppedPropagationLayerIds(map: MapLibreMap): string[] {
-  return [DEV_POINT_LAYER, TNODE_LAYER, SEARCH_LAYER].filter((id) => map.getLayer(id));
+  return [DEV_POINT_LAYER, TNODE_LAYER, SEARCH_LAYER, SITE_LAYER].filter((id) => map.getLayer(id));
 }
 
 export interface DeployAnchor {
@@ -1657,6 +1750,9 @@ export interface DeployAnchor {
 function MapClickHandler({ onDeployClick }: { onDeployClick: (anchor: DeployAnchor) => void }) {
   const map = useGlobeMap();
   const tool = useMapStore((s) => s.tool);
+  const flashNotice = useMapStore((s) => s.flashNotice);
+  const projectId = useUiStore((s) => s.projectId);
+  const queryClient = useQueryClient();
   const [measure, setMeasure] = useState<{ start: [number, number]; end: [number, number] | null } | null>(null);
 
   // Leaving the measure tool clears its line.
@@ -1695,6 +1791,19 @@ function MapClickHandler({ onDeployClick }: { onDeployClick: (anchor: DeployAnch
       // Deploy tool: show the popover at the click pixel position.
       if (s.tool === 'deploy') {
         onDeployClick({ px: { x: e.point.x, y: e.point.y }, lat, lon: lng });
+        return;
+      }
+
+      // Site tool: place a geo-located Site directly (no popover — a site is
+      // a container, not a device with kind/radio choices). Shares the
+      // ['topology', projectId] cache key MapView's SitePopup/App.tsx read.
+      if (s.tool === 'site') {
+        if (!projectId) return;
+        const existing = queryClient.getQueryData<Topology>(['topology', projectId])?.sites?.length ?? 0;
+        void physicalApi
+          .createSite({ project_id: projectId, name: `Site-${existing + 1}`, lat, lon: lng })
+          .then(() => queryClient.invalidateQueries({ queryKey: ['topology', projectId] }))
+          .catch(() => flashNotice('Failed to place site — check backend.'));
         return;
       }
 
@@ -1993,6 +2102,10 @@ function GradientLegend() {
 export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
   const [glMap, setGlMap] = useState<MapLibreMap | null>(null);
   const [deployAnchor, setDeployAnchor] = useState<DeployAnchor | null>(null);
+  // Site popup (P2) — mirrors deployAnchor exactly: local state, pixel-anchored,
+  // never touches uiStore.activeModal (see MapDeployMenu/mapStore boundary
+  // note). Only one map popover lives at a time.
+  const [siteAnchor, setSiteAnchor] = useState<{ site: Site; px: { x: number; y: number } } | null>(null);
   const showOnboarding = useMapStore((s) => s.showOnboarding);
   const activeModal = useUiStore((s) => s.activeModal);
   const openModal = useUiStore((s) => s.openModal);
@@ -2025,6 +2138,12 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
         <ProfileLine />
         <TopologyLinkLayer />
         <TopologyNodeLayer />
+        <TopologySiteLayer
+          onSiteClick={(site, px) => {
+            setDeployAnchor(null);
+            setSiteAnchor({ site, px });
+          }}
+        />
         <LinkLayer />
         <DeviceLayer />
         {/* RF workspace: the PtP beam between the two chosen endpoints — always
@@ -2033,7 +2152,12 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
 
         {/* Stage 3: click-to-place (device/measure/profile/deploy) + search-pin
             dismiss. Owns no visible chrome of its own besides the measure line. */}
-        <MapClickHandler onDeployClick={setDeployAnchor} />
+        <MapClickHandler
+          onDeployClick={(a) => {
+            setSiteAnchor(null);
+            setDeployAnchor(a);
+          }}
+        />
 
         {/* Overlay UI */}
         <MapSearch />
@@ -2074,6 +2198,15 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             lat={deployAnchor.lat}
             lon={deployAnchor.lon}
             onClose={() => setDeployAnchor(null)}
+          />
+        )}
+
+        {/* Site popup (P2) — link table + add-device entry point. */}
+        {siteAnchor && (
+          <SitePopup
+            site={siteAnchor.site}
+            px={siteAnchor.px}
+            onClose={() => setSiteAnchor(null)}
           />
         )}
 

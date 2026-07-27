@@ -7,6 +7,18 @@
  *  - Free Space Path Loss (FSPL)
  *  - ITU-R P.838 rain attenuation
  *  - Line-of-sight / Fresnel zone check (async via Open Elevation API)
+ *
+ * BOUNDARY (UISP-parity slice, v1.2.52): `MapDevice` here is a client-only,
+ * session-scoped RF *planning sandbox* — it is never persisted and is lost on
+ * refresh. It is intentionally NOT the canonical way to place a network device
+ * anymore. The canonical path is `lib/mapDeploy.ts` `deployAt()`, which creates
+ * a real backend `Node` (with `lat`/`lon`/`site_id`) that the topology canvas,
+ * rack view, and simulation engine all see. `MapDevice` survives only because
+ * the RF Planning workspace (`RfWorkspace`/`RfLinkBar`/`RfAnalysisPanel`) still
+ * computes PtP/PtMP/coverage against it, not against real `Node`s — unifying
+ * that is a separate, larger migration (parity-plan Slice A3), deliberately
+ * out of scope here. Do not add new general-map features on top of `MapDevice`;
+ * new device placement belongs on the `Node` path.
  */
 import { create } from 'zustand';
 import type { LosStatus } from '@/services/signalSim';
@@ -31,7 +43,7 @@ function initialGisLayers(): Record<string, GisLayerState> {
   return out;
 }
 
-export type MapTool = 'select' | 'ap' | 'cpe' | 'tower' | 'measure' | 'profile' | 'deploy';
+export type MapTool = 'select' | 'ap' | 'cpe' | 'tower' | 'measure' | 'profile' | 'deploy' | 'site';
 export type MapDeviceKind = 'ap' | 'cpe' | 'tower';
 
 /**

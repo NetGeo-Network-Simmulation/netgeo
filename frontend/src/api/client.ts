@@ -28,6 +28,7 @@ import type {
   SimulateRequest,
   Site,
   SiteCreate,
+  SiteUpdate,
   Topology,
 } from './types';
 import {
@@ -241,6 +242,12 @@ export const scenariosApi = {
  */
 export const physicalApi = {
   createSite: (body: SiteCreate) => http.post<Site>('/sites', body).then((r) => r.data),
+  listSites: (projectId: string) =>
+    http.get<Site[]>('/sites', { params: { project_id: projectId } }).then((r) => r.data),
+  getSite: (id: string) => http.get<Site>(`/sites/${id}`).then((r) => r.data),
+  updateSite: (id: string, patch: SiteUpdate) =>
+    http.patch<Site>(`/sites/${id}`, patch).then((r) => r.data),
+  removeSite: (id: string) => http.delete(`/sites/${id}`).then(() => undefined),
   createRack: (body: RackCreate) => http.post<Rack>('/racks', body).then((r) => r.data),
   createCable: (body: CableCreate) => http.post<Cable>('/cables', body).then((r) => r.data),
   getCable: (id: string) => http.get<Cable>(`/cables/${id}`).then((r) => r.data),
