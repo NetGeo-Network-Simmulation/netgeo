@@ -22,12 +22,20 @@ const LAYERS: { key: MapTileKey; label: string; icon: typeof Satellite }[] = [
   { key: 'topo', label: 'Topo', icon: Mountain },
 ];
 
-export function MapLayerSwitcher() {
+export interface MapLayerSwitcherProps {
+  /** Basemap tile-load state, fed by MapView (owns the MapLibre instance).
+   *  Surfaces slow/failed tile providers instead of a silent black map —
+   *  QA screencast bug where a style change looked "stuck" with nothing
+   *  telling the user whether it was still loading or broken. */
+  tileStatus?: 'loading' | 'ready' | 'error';
+}
+
+export function MapLayerSwitcher({ tileStatus = 'ready' }: MapLayerSwitcherProps) {
   const mapLayer = useMapStore((s) => s.mapLayer);
   const setMapLayer = useMapStore((s) => s.setMapLayer);
 
   return (
-    <div className={cn('pointer-events-auto absolute right-4 top-16', zc.workspace)}>
+    <div className={cn('pointer-events-auto absolute right-4 top-16 flex flex-col items-end gap-1', zc.workspace)}>
       <div
         className="glass-strong flex gap-1 rounded-xl border border-fg/15 p-1 shadow-glass-lg"
         role="group"
@@ -51,6 +59,19 @@ export function MapLayerSwitcher() {
           );
         })}
       </div>
+      {tileStatus !== 'ready' && (
+        <span
+          role="status"
+          className={cn(
+            'glass-strong rounded-md border px-2 py-0.5 text-[11px] font-medium',
+            tileStatus === 'error'
+              ? 'border-danger/30 text-danger'
+              : 'border-fg/15 text-fg/55',
+          )}
+        >
+          {tileStatus === 'error' ? 'Tiles unavailable' : 'Loading tiles…'}
+        </span>
+      )}
     </div>
   );
 }

@@ -206,6 +206,17 @@ function syncRasterLayers(
 function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) => void }) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  // Sticky "initial style setup done" flag — NOT map.isStyleLoaded(). That
+  // API reflects whether every current tile manager is finished loading
+  // (style.loaded() walks style.tileManagers), which flickers back to false
+  // continuously on a live map (tiles streaming in as the user pans/zooms,
+  // markers updating). Gating basemap resync on it meant syncRasterLayers
+  // ran once on mount and then silently never again — clicking a basemap
+  // button updated the store/button highlight but never touched the map
+  // (bug: switcher looked connected, tiles never followed). This flag only
+  // asks "has the style finished its one-time initial load", which is what
+  // re-adding raster sources safely requires.
+  const readyRef = useRef(false);
   const mapLayer = useMapStore((s) => s.mapLayer);
   const gisLayers = useMapStore((s) => s.gisLayers);
 
@@ -226,6 +237,7 @@ function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) 
       map.setProjection({ type: 'globe' });
       const s = useMapStore.getState();
       syncRasterLayers(map, s.mapLayer, s.gisLayers);
+      readyRef.current = true;
       onMapChange(map);
     });
     mapRef.current = map;
@@ -243,6 +255,7 @@ function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) 
     return () => {
       ro.disconnect();
       if (timer) clearTimeout(timer);
+      readyRef.current = false;
       onMapChange(null);
       map.remove();
       mapRef.current = null;
@@ -252,7 +265,7 @@ function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) 
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map && map.isStyleLoaded()) syncRasterLayers(map, mapLayer, gisLayers);
+    if (map && readyRef.current) syncRasterLayers(map, mapLayer, gisLayers);
   }, [mapLayer, gisLayers]);
 
   return (
@@ -2165,6 +2178,37 @@ function GradientLegend() {
 /* -------------------------------------------------------------------------- */
 export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
   const [glMap, setGlMap] = useState<MapLibreMap | null>(null);
+  const mapLayer = useMapStore((s) => s.mapLayer);
+  // Basemap tile status (QA screencast bug: switching styles could look like
+  // silent failure — a slow/rate-limited provider paints in over several
+  // seconds with nothing telling the user it's still loading vs. broken).
+  // Tracked here, not inside GlobeBasemap, so it's plain state fed to
+  // MapLayerSwitcher as a prop — no new context, no circular import back
+  // into this file.
+  const [tileStatus, setTileStatus] = useState<'loading' | 'ready' | 'error'>('ready');
+  useEffect(() => setTileStatus('loading'), [mapLayer]);
+  useEffect(() => {
+    if (!glMap) return;
+    const onData = (e: unknown) => {
+      // ponytail: MapSourceDataEvent types sourceId/isSourceLoaded, but the
+      // public `.on('data', ...)` overload for the generic 'data' event
+      // doesn't narrow to it — one localized cast beats duplicating the
+      // event union here (mirrors the ensureLayer cast above).
+      const ev = e as { dataType?: string; sourceId?: string; isSourceLoaded?: boolean };
+      if (ev.dataType !== 'source' || ev.sourceId !== BASE_SOURCE_ID) return;
+      setTileStatus(ev.isSourceLoaded ? 'ready' : 'loading');
+    };
+    const onError = (e: unknown) => {
+      const ev = e as { sourceId?: string };
+      if (ev.sourceId === BASE_SOURCE_ID) setTileStatus('error');
+    };
+    glMap.on('data', onData);
+    glMap.on('error', onError);
+    return () => {
+      glMap.off('data', onData);
+      glMap.off('error', onError);
+    };
+  }, [glMap]);
   const [deployAnchor, setDeployAnchor] = useState<DeployAnchor | null>(null);
   // Site popup (P2) — mirrors deployAnchor exactly: local state, pixel-anchored,
   // never touches uiStore.activeModal (see MapDeployMenu/mapStore boundary
@@ -2263,7 +2307,7 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             neighbor toggles: top-3 chips, top-16 basemap switcher, top-28
             gradient legend, top-40 the toggle/GIS-panel/device-panel column. */}
         <MapCounterChips />
-        <MapLayerSwitcher />
+        <MapLayerSwitcher tileStatus={tileStatus} />
         {!rfMode && <ElevationProfilePanel />}
 
         {/* Deploy popover — positioned in absolute px coords over the map. */}
