@@ -69,6 +69,7 @@ import { MapSearch } from './MapSearch';
 import { GisLayerPanel } from './GisLayerPanel';
 import { ElevationProfilePanel } from './ElevationProfilePanel';
 import { MapDeployMenu } from './MapDeployMenu';
+import { MapContextMenu } from './MapContextMenu';
 import { SiteCreateMenu } from './SiteCreateMenu';
 import { SitePopup } from './SitePopup';
 import { DeviceLibraryModal } from './DeviceLibraryModal';
@@ -1784,9 +1785,11 @@ export interface SiteCreateAnchor extends DeployAnchor {
 function MapClickHandler({
   onDeployClick,
   onPlaceSiteClick,
+  onContextMenu,
 }: {
   onDeployClick: (anchor: DeployAnchor) => void;
   onPlaceSiteClick: (anchor: SiteCreateAnchor) => void;
+  onContextMenu: (anchor: DeployAnchor) => void;
 }) {
   const map = useGlobeMap();
   const tool = useMapStore((s) => s.tool);
@@ -1915,6 +1918,21 @@ function MapClickHandler({
       map.off('click', onClick);
     };
   }, [map, onDeployClick, onPlaceSiteClick, moveSite]);
+
+  // Right-click: open the two-step device-placement menu at that point,
+  // independent of whatever left-click tool is currently armed — and
+  // suppress the browser's native context menu (product decision, v1.2.59).
+  useEffect(() => {
+    if (!map) return;
+    const onCtx = (e: MapMouseEvent) => {
+      e.originalEvent.preventDefault();
+      onContextMenu({ px: { x: e.point.x, y: e.point.y }, lat: e.lngLat.lat, lon: e.lngLat.lng });
+    };
+    map.on('contextmenu', onCtx);
+    return () => {
+      map.off('contextmenu', onCtx);
+    };
+  }, [map, onContextMenu]);
 
   // In-map measure result: line + glass distance label (replaces the old
   // alert()). Only while the measure tool is active with both endpoints.
@@ -2218,6 +2236,9 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
   // popover anchor alongside deploy/site-popup, opened by the 'site' tool's
   // click instead of auto-creating "Site-N" with no name confirmation.
   const [siteCreateAnchor, setSiteCreateAnchor] = useState<SiteCreateAnchor | null>(null);
+  // Right-click device-placement menu (v1.2.59) — a fourth, mutually-exclusive
+  // popover anchor alongside deploy/site-popup/site-create.
+  const [contextMenuAnchor, setContextMenuAnchor] = useState<DeployAnchor | null>(null);
   const showOnboarding = useMapStore((s) => s.showOnboarding);
   const activeModal = useUiStore((s) => s.activeModal);
   const openModal = useUiStore((s) => s.openModal);
@@ -2254,6 +2275,7 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
           onSiteClick={(site, px) => {
             setDeployAnchor(null);
             setSiteCreateAnchor(null);
+            setContextMenuAnchor(null);
             setSiteAnchor({ site, px });
           }}
         />
@@ -2269,12 +2291,20 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
           onDeployClick={(a) => {
             setSiteAnchor(null);
             setSiteCreateAnchor(null);
+            setContextMenuAnchor(null);
             setDeployAnchor(a);
           }}
           onPlaceSiteClick={(a) => {
             setSiteAnchor(null);
             setDeployAnchor(null);
+            setContextMenuAnchor(null);
             setSiteCreateAnchor(a);
+          }}
+          onContextMenu={(a) => {
+            setSiteAnchor(null);
+            setDeployAnchor(null);
+            setSiteCreateAnchor(null);
+            setContextMenuAnchor(a);
           }}
         />
 
@@ -2338,6 +2368,18 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             lon={siteCreateAnchor.lon}
             defaultName={siteCreateAnchor.defaultName}
             onClose={() => setSiteCreateAnchor(null)}
+          />
+        )}
+
+        {/* Right-click context menu (v1.2.59) — two-step category → catalog
+            product picker; picking a product auto-creates a site here and
+            deploys the product into it (see MapContextMenu.tsx doc comment). */}
+        {contextMenuAnchor && (
+          <MapContextMenu
+            px={contextMenuAnchor.px}
+            lat={contextMenuAnchor.lat}
+            lon={contextMenuAnchor.lon}
+            onClose={() => setContextMenuAnchor(null)}
           />
         )}
 
