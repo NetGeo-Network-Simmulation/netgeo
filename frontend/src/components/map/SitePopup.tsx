@@ -6,29 +6,57 @@
  * modals, not map popovers — see mapStore.ts boundary note). Only one map
  * popover lives at a time; MapView is responsible for closing its sibling.
  *
- * Table columns are `PtP | Distance | Capacity` (UISP reference), renamed to
- * NetGeo's own link vocabulary. Distance is haversine over real node
- * coordinates (WGS84 a=6378137, matches UISP — see mapStore.haversineM).
- * Capacity is `Link.bandwidth`, the only capacity NetGeo actually computes
- * today (RF-predicted throughput is a later slice, B2) — labelled honestly
- * as configured, not measured.
+ * v1.2.60 UISP-parity close-out: adds a Devices section (nodes with this
+ * site's id, real count) above the link table, and groups links by their
+ * REAL `LinkType` instead of a flat list. UISP's reference groups links as
+ * "PtP (n)" — NetGeo's `LinkModel.type` (types.ts:35) is only
+ * `copper|fiber|wireless|virtual`, there is no PtP/PtMP field anywhere on the
+ * link model (grepped backend RF schemas — `Ptp*`/`Ptmp*` there are RF-study
+ * request/response shapes, not link data). Labeling a wireless-link group
+ * "PtP (n)" would claim a topology fact (point-to-point vs point-to-multipoint)
+ * NetGeo cannot see, so groups use the link's actual type instead:
+ * Wireless / Fiber / Copper / Virtual. See NOTES.md section 4 for the fuller
+ * writeup of this gap. Distance is haversine over real node coordinates
+ * (WGS84 a=6378137, matches UISP — see mapStore.haversineM). Capacity is
+ * `Link.bandwidth`, the only capacity NetGeo actually computes today
+ * (RF-predicted throughput is a later slice, B2) — labelled honestly as
+ * configured, not measured.
  *
  * Rename (inline edit here) and Move (hands off to mapStore's 'site-move'
  * tool, see MapView's MapClickHandler) both PATCH /sites/{id} — the only
- * way to edit a placed site short of delete-and-recreate (N1).
+ * way to edit a placed site short of delete-and-recreate (N1). Unchanged by
+ * this pass — still both work, see MapView's site-move tool wiring.
+ *
+ * Footer: "Add AP" / "Add Fiber" reopen `MapContextMenu` pre-filtered to that
+ * category with THIS site's id, so the picked product attaches here instead
+ * of minting a new site (its own default behavior for a bare map click).
+ * The category back-arrow still works, so either button doubles as a
+ * general "add any device to this site" entry point (Routing & Switching and
+ * Compute are reachable that way too). "Add PtP" / "Add Backbone" are
+ * disabled — both imply creating a LINK between two endpoints, and no
+ * two-endpoint link-creation flow exists yet (only single-device placement
+ * via `deployAt`); wiring them to a device-category picker instead would
+ * silently give a device with no such link, which is the same kind of
+ * dishonesty the grouping rule above forbids. The old generic "Add Device"
+ * button (-> MapDeployMenu) is removed: `MapDeployMenu`'s CABLED_PRESETS
+ * never covered `server` either (NOTES.md section 6, item 7), so nothing
+ * that used to work is lost — this is a strict upgrade to real catalog
+ * products, not a swap of equal capability.
  */
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, Check, Link2, Move, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { ArrowLeftRight, Building2, Cable, Check, Move, Network, Pencil, Radio, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { semantic } from '@/theme/tokens';
 import { physicalApi, type ApiError } from '@/api/client';
 import { haversineM, useMapStore } from '@/store/mapStore';
 import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
 import { fmtKm } from '@/components/rf/rfLogic';
-import { MapDeployMenu } from './MapDeployMenu';
-import type { NodeModel, Site } from '@/api/types';
+import { DeviceIcon } from '@/components/canvas/DeviceIcon';
+import { MapContextMenu } from './MapContextMenu';
+import type { LinkType, NodeModel, NodeStatus, Site } from '@/api/types';
 
 interface Props {
   site: Site;
@@ -51,17 +79,37 @@ function endpointNode(ref: string, nodeById: Map<string, NodeModel>): NodeModel 
   return undefined;
 }
 
+/** Real `LinkType` values only — no invented PtP/PtMP bucket, see module doc. */
+const LINK_TYPE_ORDER: LinkType[] = ['wireless', 'fiber', 'copper', 'virtual'];
+const LINK_TYPE_LABEL: Record<LinkType, string> = {
+  wireless: 'Wireless',
+  fiber: 'Fiber',
+  copper: 'Copper',
+  virtual: 'Virtual',
+};
+
+/** Mirrors PropertiesPanel's STATUS_COLORS (not exported there) — small
+ *  enough to duplicate rather than refactor that file for one shared const. */
+const STATUS_DOT: Record<NodeStatus, string> = {
+  running: semantic.success,
+  booting: semantic.warning,
+  degraded: semantic.warning,
+  error: semantic.danger,
+  stopped: '#8A93A6',
+};
+
 export function SitePopup({ site, px, onClose }: Props) {
   const projectId = useUiStore((s) => s.projectId);
   const queryClient = useQueryClient();
   const nodes = useTopologyStore((s) => s.nodeList());
   const links = useTopologyStore((s) => s.linkList());
-  const [deploying, setDeploying] = useState(false);
+  const [addCategory, setAddCategory] = useState<'wireless' | 'fiber' | null>(null);
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(site.name);
   const [renameError, setRenameError] = useState<string | null>(null);
 
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
+  const devicesAtSite = nodes.filter((n) => n.site_id === site.id);
   const rows = links
     .map((link) => {
       const a = endpointNode(link.a_iface, nodeById);
@@ -71,12 +119,18 @@ export function SitePopup({ site, px, onClose }: Props) {
       const hasCoords = a.lat != null && a.lon != null && b.lat != null && b.lon != null;
       return {
         id: link.id,
+        type: link.type,
         label: `${a.name} ↔ ${b.name}`,
         distance: hasCoords ? fmtKm(haversineM(a.lat!, a.lon!, b.lat!, b.lon!)) : null,
         capacity: formatCapacity(link.bandwidth),
       };
     })
     .filter((r): r is NonNullable<typeof r> => r !== null);
+  const linkGroups = LINK_TYPE_ORDER.map((type) => ({
+    type,
+    label: LINK_TYPE_LABEL[type],
+    rows: rows.filter((r) => r.type === type),
+  })).filter((g) => g.rows.length > 0);
 
   const removeSite = useMutation({
     mutationFn: () => physicalApi.removeSite(site.id),
@@ -218,57 +272,114 @@ export function SitePopup({ site, px, onClose }: Props) {
           </div>
         )}
 
-        {/* Link table */}
-        <div className="max-h-64 overflow-y-auto px-3.5 py-2.5">
-          {rows.length === 0 ? (
-            <p className="py-1 text-center text-[11px] text-fg/40">No links at this site yet.</p>
-          ) : (
-            <table className="w-full text-left text-[11px]">
-              <thead>
-                <tr className="text-fg/40">
-                  <th className="pb-1 font-medium">Link</th>
-                  <th className="pb-1 font-medium">Distance</th>
-                  <th className="pb-1 font-medium">Capacity</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((r) => (
-                  <tr key={r.id} className="border-t border-fg/5">
-                    <td className="max-w-[7.5rem] truncate py-1.5 pr-2 text-fg/80" title={r.label}>
-                      {r.label}
-                    </td>
-                    <td className="py-1.5 pr-2 font-mono text-fg/60">{r.distance ?? '—'}</td>
-                    <td className="py-1.5 font-mono text-fg/60">{r.capacity}</td>
-                  </tr>
+        {/* Devices + links — scrollable so a busy site still fits on screen (f). */}
+        <div className="ng-scroll max-h-80 overflow-y-auto px-3.5 py-2.5">
+          <div className="mb-3">
+            <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-fg/40">
+              Devices ({devicesAtSite.length})
+            </p>
+            {devicesAtSite.length === 0 ? (
+              <p className="py-1 text-[11px] text-fg/40">No devices at this site yet.</p>
+            ) : (
+              <ul className="space-y-1">
+                {devicesAtSite.map((n) => (
+                  <li key={n.id} className="flex items-center gap-2 py-0.5">
+                    <DeviceIcon kind={n.kind} className="h-3.5 w-3.5 shrink-0 text-fg/60" />
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-fg/80" title={n.name}>
+                      {n.name}
+                    </span>
+                    <span
+                      className="h-1.5 w-1.5 shrink-0 rounded-full"
+                      style={{ background: STATUS_DOT[n.status] }}
+                      title={n.status}
+                    />
+                  </li>
                 ))}
-              </tbody>
-            </table>
+              </ul>
+            )}
+          </div>
+
+          {linkGroups.length === 0 ? (
+            <p className="py-1 text-[11px] text-fg/40">No links at this site yet.</p>
+          ) : (
+            linkGroups.map((g) => (
+              <div key={g.type} className="mb-2 last:mb-0">
+                <p className="mb-1 text-[10px] font-semibold uppercase tracking-wider text-fg/40">
+                  {g.label} ({g.rows.length})
+                </p>
+                <table className="w-full text-left text-[11px]">
+                  <thead>
+                    <tr className="text-fg/40">
+                      <th className="pb-1 font-medium">Link</th>
+                      <th className="pb-1 font-medium">Distance</th>
+                      <th className="pb-1 font-medium">Capacity</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {g.rows.map((r) => (
+                      <tr key={r.id} className="border-t border-fg/5">
+                        <td className="max-w-[7.5rem] truncate py-1.5 pr-2 text-fg/80" title={r.label}>
+                          {r.label}
+                        </td>
+                        <td className="py-1.5 pr-2 font-mono text-fg/60">{r.distance ?? '—'}</td>
+                        <td className="py-1.5 font-mono text-fg/60">{r.capacity}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ))
           )}
         </div>
 
-        {/* Add device */}
+        {/* Footer actions — "Add AP"/"Add Fiber" reopen MapContextMenu scoped to
+            this site (see module doc for why PtP/Backbone are disabled). */}
         <div className="border-t border-fg/10 p-2">
-          <button
-            onClick={() => setDeploying(true)}
-            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-accent/20 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent transition-colors hover:bg-accent/20"
-          >
-            <Plus className="h-3.5 w-3.5" /> Add Device
-          </button>
-          <p className="mt-1 flex items-center gap-1 text-center text-[10px] text-fg/35">
-            <Link2 className="h-2.5 w-2.5 shrink-0" /> New devices auto-link to the nearest upstream.
-          </p>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={() => setAddCategory('wireless')}
+              disabled={site.lat == null || site.lon == null}
+              title={site.lat == null || site.lon == null ? 'Site has no coordinates yet' : 'Add a wireless AP to this site'}
+              className="flex items-center justify-center gap-1 rounded-lg border border-accent/20 bg-accent/10 px-2 py-1.5 text-[11px] font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
+            >
+              <Radio className="h-3 w-3" /> Add AP
+            </button>
+            <button
+              disabled
+              title="Add PtP would create a link between two endpoints — no two-endpoint link-creation flow exists yet, only single-device placement."
+              className="flex cursor-not-allowed items-center justify-center gap-1 rounded-lg border border-fg/10 px-2 py-1.5 text-[11px] font-medium text-fg/30"
+            >
+              <ArrowLeftRight className="h-3 w-3" /> Add PtP
+            </button>
+            <button
+              disabled
+              title="Add Backbone would create a link between two endpoints — no two-endpoint link-creation flow exists yet, only single-device placement."
+              className="flex cursor-not-allowed items-center justify-center gap-1 rounded-lg border border-fg/10 px-2 py-1.5 text-[11px] font-medium text-fg/30"
+            >
+              <Network className="h-3 w-3" /> Add Backbone
+            </button>
+            <button
+              onClick={() => setAddCategory('fiber')}
+              disabled={site.lat == null || site.lon == null}
+              title={site.lat == null || site.lon == null ? 'Site has no coordinates yet' : 'Add a fiber device to this site'}
+              className="flex items-center justify-center gap-1 rounded-lg border border-accent/20 bg-accent/10 px-2 py-1.5 text-[11px] font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
+            >
+              <Cable className="h-3 w-3" /> Add Fiber
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Reuses the same deploy popover as an empty-map click, anchored here
-          and bound to this site's id — no new device-creation UI needed. */}
-      {deploying && site.lat != null && site.lon != null && (
-        <MapDeployMenu
+      {/* Reopens the right-click device menu, scoped to this site's id and
+          pre-filtered to the picked category — see module doc. */}
+      {addCategory && site.lat != null && site.lon != null && (
+        <MapContextMenu
           px={{ x: px.x + 60, y: px.y }}
           lat={site.lat}
           lon={site.lon}
           siteId={site.id}
-          onClose={() => setDeploying(false)}
+          initialCategoryKey={addCategory}
+          onClose={() => setAddCategory(null)}
         />
       )}
     </>

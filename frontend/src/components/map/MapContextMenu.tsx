@@ -21,6 +21,13 @@
  * the 9 real device-library packs (38 devices) — built-in/custom device
  * types have no verified NodeKind mapping for this categorization and are
  * deliberately left out rather than guessed at (see NOTES.md section 6).
+ *
+ * v1.2.60: optional `siteId` + `initialCategoryKey` so `SitePopup`'s footer
+ * ("Add AP" / "Add Fiber") can reopen this exact menu pre-filtered to a
+ * category and scoped to an EXISTING site — skips the auto-create-site step
+ * below and attaches the placed device to that site directly. The category
+ * back-arrow still works, so this doubles as the site's general "add any
+ * device" entry point (all 4 categories reachable, not just the prefilled one).
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -38,6 +45,12 @@ interface Props {
   lat: number;
   lon: number;
   onClose: () => void;
+  /** Attach the placed device to this existing site instead of minting a new
+   *  one (SitePopup's footer buttons). */
+  siteId?: string;
+  /** Pre-select a category (SitePopup passes its own vocabulary's target
+   *  category); user can still hit the back arrow to browse the others. */
+  initialCategoryKey?: string;
 }
 
 interface Category {
@@ -58,11 +71,13 @@ const CATEGORIES: Category[] = [
 
 const packIdOf = (dt: DeviceType) => dt.id.split(':')[0] ?? '';
 
-export function MapContextMenu({ px, lat, lon, onClose }: Props) {
+export function MapContextMenu({ px, lat, lon, onClose, siteId, initialCategoryKey }: Props) {
   const projectId = useUiStore((s) => s.projectId);
   const flashNotice = useMapStore((s) => s.flashNotice);
   const queryClient = useQueryClient();
-  const [category, setCategory] = useState<Category | null>(null);
+  const [category, setCategory] = useState<Category | null>(
+    () => CATEGORIES.find((c) => c.key === initialCategoryKey) ?? null,
+  );
   const [search, setSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -102,15 +117,19 @@ export function MapContextMenu({ px, lat, lon, onClose }: Props) {
     if (!projectId || busy || !dt.icon) return;
     setBusy(true);
     try {
-      const topo = queryClient.getQueryData<Topology>(['topology', projectId]);
-      const existing = topo?.sites?.length ?? 0;
-      const site = await physicalApi.createSite({
-        project_id: projectId,
-        name: `Site-${existing + 1}`,
-        lat,
-        lon,
-      });
-      await deployAt(projectId, dt.icon as NodeKind, lat, lon, (msg) => flashNotice(msg), site.id, {
+      let targetSiteId = siteId;
+      if (!targetSiteId) {
+        const topo = queryClient.getQueryData<Topology>(['topology', projectId]);
+        const existing = topo?.sites?.length ?? 0;
+        const site = await physicalApi.createSite({
+          project_id: projectId,
+          name: `Site-${existing + 1}`,
+          lat,
+          lon,
+        });
+        targetSiteId = site.id;
+      }
+      await deployAt(projectId, dt.icon as NodeKind, lat, lon, (msg) => flashNotice(msg), targetSiteId, {
         device_type_id: dt.id,
       });
       await queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
