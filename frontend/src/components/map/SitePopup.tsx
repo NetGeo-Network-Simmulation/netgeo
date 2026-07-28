@@ -12,14 +12,18 @@
  * Capacity is `Link.bandwidth`, the only capacity NetGeo actually computes
  * today (RF-predicted throughput is a later slice, B2) — labelled honestly
  * as configured, not measured.
+ *
+ * Rename (inline edit here) and Move (hands off to mapStore's 'site-move'
+ * tool, see MapView's MapClickHandler) both PATCH /sites/{id} — the only
+ * way to edit a placed site short of delete-and-recreate (N1).
  */
 import { useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
-import { Building2, Link2, Plus, Trash2, X } from 'lucide-react';
+import { Building2, Check, Link2, Move, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
-import { physicalApi } from '@/api/client';
-import { haversineM } from '@/store/mapStore';
+import { physicalApi, type ApiError } from '@/api/client';
+import { haversineM, useMapStore } from '@/store/mapStore';
 import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
 import { fmtKm } from '@/components/rf/rfLogic';
@@ -53,6 +57,9 @@ export function SitePopup({ site, px, onClose }: Props) {
   const nodes = useTopologyStore((s) => s.nodeList());
   const links = useTopologyStore((s) => s.linkList());
   const [deploying, setDeploying] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [name, setName] = useState(site.name);
+  const [renameError, setRenameError] = useState<string | null>(null);
 
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const rows = links
@@ -79,6 +86,41 @@ export function SitePopup({ site, px, onClose }: Props) {
     },
   });
 
+  const renameSite = useMutation({
+    mutationFn: (newName: string) => physicalApi.updateSite(site.id, { name: newName }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
+      setEditing(false);
+      setRenameError(null);
+    },
+    onError: (e) => setRenameError((e as unknown as ApiError).message || 'Failed to rename site.'),
+  });
+
+  const cancelEdit = () => {
+    setEditing(false);
+    setName(site.name);
+    setRenameError(null);
+  };
+
+  const saveEdit = () => {
+    const trimmed = name.trim();
+    if (!trimmed || renameSite.isPending) return;
+    if (trimmed === site.name) {
+      setEditing(false);
+      return;
+    }
+    renameSite.mutate(trimmed);
+  };
+
+  // "Move" hands off to the map's site-move tool (mapStore.setMovingSiteId) —
+  // this popup closes and the next map click PATCHes the new lat/lon (see
+  // MapClickHandler in MapView.tsx). No drag machinery: sites render as a
+  // MapLibre circle layer, not a draggable Marker.
+  const startMove = () => {
+    useMapStore.getState().setMovingSiteId(site.id);
+    onClose();
+  };
+
   return (
     <>
       <div
@@ -96,25 +138,85 @@ export function SitePopup({ site, px, onClose }: Props) {
             <Building2 className="h-4 w-4" />
           </div>
           <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-fg/90">{site.name}</p>
-            {site.region && <p className="truncate text-[10px] text-fg/45">{site.region}</p>}
+            {editing ? (
+              <input
+                autoFocus
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') saveEdit();
+                  if (e.key === 'Escape') cancelEdit();
+                }}
+                disabled={renameSite.isPending}
+                className="w-full rounded-md border border-accent/40 bg-recess/30 px-1.5 py-0.5 text-sm font-semibold text-fg/90 outline-none"
+              />
+            ) : (
+              <div className="flex items-center gap-1">
+                <p className="truncate text-sm font-semibold text-fg/90">{site.name}</p>
+                <button
+                  onClick={() => setEditing(true)}
+                  aria-label="Rename site"
+                  className="grid h-5 w-5 shrink-0 place-items-center rounded text-fg/35 hover:text-fg/80"
+                >
+                  <Pencil className="h-3 w-3" />
+                </button>
+              </div>
+            )}
+            {site.region && !editing && <p className="truncate text-[10px] text-fg/45">{site.region}</p>}
           </div>
-          <button
-            onClick={() => removeSite.mutate()}
-            disabled={removeSite.isPending}
-            aria-label="Delete site"
-            className="grid h-6 w-6 place-items-center rounded-md text-fg/40 hover:bg-danger/10 hover:text-danger disabled:opacity-50"
-          >
-            <Trash2 className="h-3.5 w-3.5" />
-          </button>
-          <button
-            onClick={onClose}
-            aria-label="Close"
-            className="grid h-6 w-6 place-items-center rounded-md text-fg/40 hover:bg-fg/10 hover:text-fg"
-          >
-            <X className="h-3.5 w-3.5" />
-          </button>
+          {editing ? (
+            <>
+              <button
+                onClick={saveEdit}
+                disabled={renameSite.isPending || !name.trim()}
+                aria-label="Save name"
+                className="grid h-6 w-6 place-items-center rounded-md text-success hover:bg-success/10 disabled:opacity-40"
+              >
+                <Check className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={cancelEdit}
+                aria-label="Cancel rename"
+                className="grid h-6 w-6 place-items-center rounded-md text-fg/40 hover:bg-fg/10 hover:text-fg"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={startMove}
+                disabled={site.lat == null || site.lon == null}
+                title={site.lat == null || site.lon == null ? 'Site has no coordinates yet' : 'Move this site'}
+                aria-label="Move site"
+                className="grid h-6 w-6 place-items-center rounded-md text-fg/40 hover:bg-accent/10 hover:text-accent disabled:opacity-30"
+              >
+                <Move className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={() => removeSite.mutate()}
+                disabled={removeSite.isPending}
+                aria-label="Delete site"
+                className="grid h-6 w-6 place-items-center rounded-md text-fg/40 hover:bg-danger/10 hover:text-danger disabled:opacity-50"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+              </button>
+              <button
+                onClick={onClose}
+                aria-label="Close"
+                className="grid h-6 w-6 place-items-center rounded-md text-fg/40 hover:bg-fg/10 hover:text-fg"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </>
+          )}
         </div>
+
+        {renameError && (
+          <div className="flex items-center gap-1.5 bg-danger/15 px-3.5 py-1.5 text-[11px] text-danger">
+            <X className="h-3 w-3 shrink-0" /> {renameError}
+          </div>
+        )}
 
         {/* Link table */}
         <div className="max-h-64 overflow-y-auto px-3.5 py-2.5">

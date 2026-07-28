@@ -51,7 +51,7 @@ function initialGisLayers(): Record<string, GisLayerState> {
   return out;
 }
 
-export type MapTool = 'select' | 'ap' | 'cpe' | 'tower' | 'measure' | 'profile' | 'deploy' | 'site';
+export type MapTool = 'select' | 'ap' | 'cpe' | 'tower' | 'measure' | 'profile' | 'deploy' | 'site' | 'site-move';
 export type MapDeviceKind = 'ap' | 'cpe' | 'tower';
 
 /**
@@ -222,6 +222,7 @@ interface MapState {
   gisPanelOpen: boolean;      // GIS layer panel visibility
   searchResult: GeoResult | null; // active geocoding pick (flyTo + temp marker)
   mapNotice: string | null;   // transient non-blocking notice (auto-clears)
+  movingSiteId: string | null; // site armed for reposition — next map click PATCHes its lat/lon
 
   // Elevation-profile tool (Phase B1)
   profilePts: [number, number][]; // 0..2 picked endpoints [lat, lng]
@@ -254,6 +255,8 @@ interface MapState {
   toggleGisPanel: (open?: boolean) => void;
   setSearchResult: (r: GeoResult | null) => void;
   flashNotice: (msg: string) => void;
+  /** Arm ('site-move' tool) with a site id, or pass null to disarm back to 'select'. */
+  setMovingSiteId: (id: string | null) => void;
 
   // Elevation-profile tool
   addProfilePoint: (lat: number, lng: number) => void;
@@ -286,6 +289,7 @@ export const useMapStore = create<MapState>((set, get) => ({
   gisPanelOpen: false,
   searchResult: null,
   mapNotice: null,
+  movingSiteId: null,
 
   profilePts: [],
   profileData: null,
@@ -373,6 +377,7 @@ export const useMapStore = create<MapState>((set, get) => ({
     set((s) => ({ gisPanelOpen: open ?? !s.gisPanelOpen })),
 
   setSearchResult: (searchResult) => set({ searchResult }),
+  setMovingSiteId: (movingSiteId) => set({ movingSiteId, tool: movingSiteId ? 'site-move' : 'select' }),
 
   flashNotice: (msg) => {
     set({ mapNotice: msg });

@@ -19,7 +19,7 @@
  * feature parity.
  */
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   MapLibreMap,
@@ -48,7 +48,7 @@ import { useTopologyStore } from '@/store/topologyStore';
 import { useRfStore } from '@/store/rfStore';
 import { marginStatus, STATUS_COLOR, fmtKm } from '@/components/rf/rfLogic';
 import type { NodeModel, LinkModel, Site, Topology } from '@/api/types';
-import { rfApi, projectsApi, type CoverageSite } from '@/api/client';
+import { rfApi, projectsApi, physicalApi, type CoverageSite, type ApiError } from '@/api/client';
 import {
   fetchOsmTowers,
   towerLabel,
@@ -1786,6 +1786,32 @@ function MapClickHandler({
     if (tool !== 'measure') setMeasure(null);
   }, [tool]);
 
+  // "Move" (SitePopup) arms this tool with the site id already in the store —
+  // the click just supplies the new lat/lon. Escape backs out with zero
+  // request, mirroring ElevationProfilePanel's escape route.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && useMapStore.getState().tool === 'site-move') {
+        useMapStore.getState().setMovingSiteId(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const moveSite = useMutation({
+    mutationFn: (v: { id: string; lat: number; lon: number }) =>
+      physicalApi.updateSite(v.id, { lat: v.lat, lon: v.lon }),
+    onSuccess: () => {
+      if (projectId) void queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
+      useMapStore.getState().setMovingSiteId(null);
+    },
+    onError: (e) => {
+      useMapStore.getState().flashNotice((e as unknown as ApiError).message || 'Failed to move site.');
+      useMapStore.getState().setMovingSiteId(null);
+    },
+  });
+
   useEffect(() => {
     if (!map) return;
 
@@ -1817,6 +1843,14 @@ function MapClickHandler({
       // Deploy tool: show the popover at the click pixel position.
       if (s.tool === 'deploy') {
         onDeployClick({ px: { x: e.point.x, y: e.point.y }, lat, lon: lng });
+        return;
+      }
+
+      // Site-move tool: armed by SitePopup's "Move" button with the site id
+      // already in mapStore — this click is the new location, PATCHed
+      // straight through (no naming popover, unlike site creation).
+      if (s.tool === 'site-move') {
+        if (s.movingSiteId) moveSite.mutate({ id: s.movingSiteId, lat, lon: lng });
         return;
       }
 
@@ -1867,7 +1901,7 @@ function MapClickHandler({
     return () => {
       map.off('click', onClick);
     };
-  }, [map, onDeployClick, onPlaceSiteClick]);
+  }, [map, onDeployClick, onPlaceSiteClick, moveSite]);
 
   // In-map measure result: line + glass distance label (replaces the old
   // alert()). Only while the measure tool is active with both endpoints.
@@ -2025,6 +2059,7 @@ const TOOL_HINTS: Record<string, string> = {
   select: 'Click a device to select it • Delete key removes selected device',
   deploy: 'Click the map to deploy a real device — choose wireless or cabled',
   site: 'Click the map to drop a Site — name it right after',
+  'site-move': 'Click the map to move this site — Escape to cancel',
   ap: 'Click the map to place an Access Point (legacy, local-only)',
   cpe: 'Click the map to place a CPE client (legacy, local-only)',
   tower: 'Click the map to place a Tower (legacy, local-only)',
