@@ -13,6 +13,7 @@
 import { useState } from 'react';
 import { RadioTower, X, Loader2, AlertTriangle, Radio, Plus } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
+import { useTopologyStore } from '@/store/topologyStore';
 import { useRfStore, RF_ANT_GAIN_DBI, type RfTab, type RfMode, type PtmpCpeInput } from '@/store/rfStore';
 import { zc } from '@/theme/z';
 import { ProfileChart, type ChartPoint } from '@/components/map/ProfileChart';
@@ -169,9 +170,9 @@ function StatusChip({ res }: { res: PtpResult }) {
 /* -------------------------------------------------------------------------- */
 function SummaryTab({ res }: { res: PtpResult }) {
   const { freqGhz, bwMhz, aId, bId } = useRfStore();
-  const devices = useMapStore((s) => s.devices);
-  const a = aId ? devices.get(aId) : undefined;
-  const b = bId ? devices.get(bId) : undefined;
+  const nodes = useTopologyStore((s) => s.nodes);
+  const a = aId ? nodes.get(aId) : undefined;
+  const b = bId ? nodes.get(bId) : undefined;
 
   return (
     <div className="space-y-4">
@@ -182,7 +183,7 @@ function SummaryTab({ res }: { res: PtpResult }) {
         <div className="grid grid-cols-2 gap-2">
           <StatCard label="Distance" value={fmtKm(res.distance_m)} />
           <StatCard label="Frequency" value={`${freqGhz} GHz`} />
-          <StatCard label="TX Power" value={`${a?.txPower ?? '—'} dBm`} />
+          <StatCard label="TX Power" value={`${a?.radio?.tx_power_dbm ?? '—'} dBm`} />
           <StatCard label="Antenna Gain" value={`2× ${RF_ANT_GAIN_DBI} dBi`} />
           <StatCard label="Path Loss (FSPL)" value={`${res.path_loss_db.toFixed(1)} dB`} />
           <StatCard label="Received Signal" value={`${res.rssi_dbm.toFixed(1)} dBm`} highlight />
@@ -199,8 +200,8 @@ function SummaryTab({ res }: { res: PtpResult }) {
             totalDistanceM={res.profile.total_distance_m}
             losClear={res.los_clear}
             fresnelClear={res.fresnel_clear}
-            txH={a?.antennaHeight ?? 10}
-            rxH={b?.antennaHeight ?? 5}
+            txH={a?.radio?.height_agl_m ?? 10}
+            rxH={b?.radio?.height_agl_m ?? 5}
             freqGhz={freqGhz}
             fresnelBand
           />
@@ -240,9 +241,9 @@ function VerdictBadge({ ok, okLabel, badLabel }: { ok: boolean; okLabel: string;
 
 function TerrainTab({ res }: { res: PtpResult }) {
   const { freqGhz, aId, bId } = useRfStore();
-  const devices = useMapStore((s) => s.devices);
-  const a = aId ? devices.get(aId) : undefined;
-  const b = bId ? devices.get(bId) : undefined;
+  const nodes = useTopologyStore((s) => s.nodes);
+  const a = aId ? nodes.get(aId) : undefined;
+  const b = bId ? nodes.get(bId) : undefined;
   if (!res.profile) return <p className="text-xs text-fg/50">No terrain profile in the last result.</p>;
   return (
     <div className="space-y-3">
@@ -254,8 +255,8 @@ function TerrainTab({ res }: { res: PtpResult }) {
         totalDistanceM={res.profile.total_distance_m}
         losClear={res.los_clear}
         fresnelClear={res.fresnel_clear}
-        txH={a?.antennaHeight ?? 10}
-        rxH={b?.antennaHeight ?? 5}
+        txH={a?.radio?.height_agl_m ?? 10}
+        rxH={b?.radio?.height_agl_m ?? 5}
         freqGhz={freqGhz}
         fresnelBand
       />
@@ -273,9 +274,9 @@ function TerrainTab({ res }: { res: PtpResult }) {
 
 function FresnelTab({ res }: { res: PtpResult }) {
   const { freqGhz, aId, bId } = useRfStore();
-  const devices = useMapStore((s) => s.devices);
-  const a = aId ? devices.get(aId) : undefined;
-  const b = bId ? devices.get(bId) : undefined;
+  const nodes = useTopologyStore((s) => s.nodes);
+  const a = aId ? nodes.get(aId) : undefined;
+  const b = bId ? nodes.get(bId) : undefined;
   const pct = Math.round(res.min_clearance_ratio * 100);
   return (
     <div className="space-y-3">
@@ -293,8 +294,8 @@ function FresnelTab({ res }: { res: PtpResult }) {
             totalDistanceM={res.profile.total_distance_m}
             losClear={res.los_clear}
             fresnelClear={res.fresnel_clear}
-            txH={a?.antennaHeight ?? 10}
-            rxH={b?.antennaHeight ?? 5}
+            txH={a?.radio?.height_agl_m ?? 10}
+            rxH={b?.radio?.height_agl_m ?? 5}
             freqGhz={freqGhz}
             fresnelBand
           />
@@ -432,10 +433,16 @@ function PtmpBody() {
     setPtmpTxPower, setPtmpTxGain, setPtmpRxSens, setPtmpModel, addCpeFromDevice, addManualCpe, removeCpe,
     calculatePtmp,
   } = useRfStore();
-  const devices = useMapStore((s) => s.deviceList());
+  const geoNodes = useTopologyStore((s) => s.nodeList()).filter((n) => n.lat != null && n.lon != null);
   const apRadios = radios.filter((r) => r.type === 'ptmp_ap');
-  const apOptions = devices.filter((d) => d.kind === 'ap' || d.kind === 'tower').map((d) => ({ id: d.id, name: d.name }));
-  const cpeOptions = devices.filter((d) => d.kind === 'cpe').map((d) => ({ id: d.id, name: d.name }));
+  const apOptions = geoNodes.filter((n) => n.kind === 'ap').map((n) => ({ id: n.id, name: n.name }));
+  // 'host' is included alongside the literal 'cpe' kind: the fiber-pack ONU/ONT
+  // catalog devices (placed via the map right-click menu) carry kind='host',
+  // and backend/app/services/wireless.py's _ROLE_BY_KIND already treats 'host'
+  // as RF role "cpe" — this mirrors that same convention client-side.
+  const cpeOptions = geoNodes
+    .filter((n) => n.kind === 'cpe' || n.kind === 'host')
+    .map((n) => ({ id: n.id, name: n.name }));
   const [manualLat, setManualLat] = useState('');
   const [manualLon, setManualLon] = useState('');
 
@@ -771,8 +778,8 @@ export function RfAnalysisPanel() {
   const loading = useRfStore((s) => s.loading);
   const error = useRfStore((s) => s.error);
   const clear = useRfStore((s) => s.clear);
-  const endpointCount = useMapStore(
-    (s) => s.deviceList().filter((d) => d.kind === 'ap' || d.kind === 'tower').length,
+  const endpointCount = useTopologyStore(
+    (s) => s.nodeList().filter((n) => n.kind === 'ap' && n.lat != null && n.lon != null).length,
   );
 
   return (

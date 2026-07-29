@@ -166,7 +166,7 @@ export async function deployAt(
     site_id: siteId ?? null,
     intent,
     radio: WIRELESS_KINDS.has(kind)
-      ? { tx_power_dbm: 20, frequency_ghz: 5.8, antenna_gain_dbi: 14, bandwidth_mhz: 20, rx_sensitivity_dbm: -85, misc_loss_db: 2, max_range_m: null }
+      ? { tx_power_dbm: 20, frequency_ghz: 5.8, antenna_gain_dbi: 14, bandwidth_mhz: 20, rx_sensitivity_dbm: -85, misc_loss_db: 2, max_range_m: null, height_agl_m: 6 }
       : undefined,
   });
 

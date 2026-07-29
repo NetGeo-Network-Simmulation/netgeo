@@ -1375,7 +1375,8 @@ const COVERAGE_LAYER = 'ng-rf-coverage-raster';
 
 function RfCoverageLayer() {
   const map = useGlobeMap();
-  const deviceMap = useMapStore((s) => s.devices);
+  // N3.2: geo-placed real Node/Radio, not the client-only MapDevice.
+  const nodeMap = useTopologyStore((s) => s.nodes);
   const opacity = useMapStore((s) => s.gisLayers['rf-coverage']?.opacity ?? 0.55);
   const [status, setStatus] = useState<'idle' | 'loading' | 'ok' | 'empty' | 'error'>('idle');
   const [siteCount, setSiteCount] = useState(0);
@@ -1385,16 +1386,16 @@ function RfCoverageLayer() {
 
   const sites = useMemo<CoverageSite[]>(
     () =>
-      Array.from(deviceMap.values())
-        .filter((d) => d.kind === 'ap' || d.kind === 'tower')
-        .map((d) => ({
-          lat: d.lat,
-          lon: d.lng,
-          height_m: d.antennaHeight,
-          tx_power_dbm: d.txPower,
-          freq_mhz: d.frequency * 1000, // GHz → MHz
+      Array.from(nodeMap.values())
+        .filter((n) => n.kind === 'ap' && n.lat != null && n.lon != null)
+        .map((n) => ({
+          lat: n.lat!,
+          lon: n.lon!,
+          height_m: n.radio?.height_agl_m ?? 6,
+          tx_power_dbm: n.radio?.tx_power_dbm ?? 20,
+          freq_mhz: (n.radio?.frequency_ghz ?? 5.8) * 1000, // GHz → MHz
         })),
-    [deviceMap],
+    [nodeMap],
   );
 
   useEffect(() => {

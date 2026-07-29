@@ -26,8 +26,37 @@ import {
   type RfStudy,
   type RfStudyKind,
 } from '@/api/client';
-import { useMapStore } from '@/store/mapStore';
+import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
+
+/** One geo-placed RF-capable node, normalized from the backend `Node`/`Radio`
+ *  (N3.2: replaces the client-only `MapDevice` as the RF workspace's data
+ *  source — real nodes persist across refresh, `MapDevice` never did). */
+interface RfNode {
+  id: string;
+  name: string;
+  kind: string;
+  lat: number;
+  lng: number;
+  txPower: number;
+  frequency: number;
+  antennaHeight: number;
+}
+
+function rfNode(id: string): RfNode | null {
+  const n = useTopologyStore.getState().nodes.get(id);
+  if (!n || n.lat == null || n.lon == null) return null;
+  return {
+    id: n.id,
+    name: n.name,
+    kind: n.kind,
+    lat: n.lat,
+    lng: n.lon,
+    txPower: n.radio?.tx_power_dbm ?? 20,
+    frequency: n.radio?.frequency_ghz ?? 5.8,
+    antennaHeight: n.radio?.height_agl_m ?? 6,
+  };
+}
 
 /** Fixed dish gain applied to both ends of the link budget (dBi). The map
  *  device model carries no antenna-gain field, so PtP uses one sensible default
@@ -158,8 +187,6 @@ interface RfState {
   deleteStudy: (id: string) => Promise<void>;
 }
 
-const RF_KINDS = new Set(['ap', 'tower']);
-
 export const useRfStore = create<RfState>((set, get) => ({
   mode: 'ptp',
   setMode: (mode) => set({ mode }),
@@ -176,8 +203,10 @@ export const useRfStore = create<RfState>((set, get) => ({
   tab: 'summary',
 
   pickEndpoint: (id) => {
-    const dev = useMapStore.getState().devices.get(id);
-    if (!dev || !RF_KINDS.has(dev.kind)) return; // only AP/Tower are RF endpoints
+    const dev = rfNode(id);
+    // Only AP nodes are RF endpoints (a "Tower" is kind='ap' + intent.map_role
+    // === 'tower' — see backend/app/services/wireless.py:_role_for).
+    if (!dev || dev.kind !== 'ap') return;
     const { aId, bId } = get();
     if (!aId) set({ aId: id, result: null, error: null });
     else if (aId === id) return;
@@ -220,9 +249,8 @@ export const useRfStore = create<RfState>((set, get) => ({
 
   calculate: async () => {
     const { aId, bId, freqGhz, modelId } = get();
-    const devices = useMapStore.getState().devices;
-    const a = aId ? devices.get(aId) : null;
-    const b = bId ? devices.get(bId) : null;
+    const a = aId ? rfNode(aId) : null;
+    const b = bId ? rfNode(bId) : null;
     if (!a || !b) return;
     set({ loading: true, error: null });
     try {
@@ -278,7 +306,7 @@ export const useRfStore = create<RfState>((set, get) => ({
   setPtmpModel: (ptmpModelId) => set({ ptmpModelId, ptmpResult: null }),
 
   addCpeFromDevice: (deviceId) => {
-    const dev = useMapStore.getState().devices.get(deviceId);
+    const dev = rfNode(deviceId);
     if (!dev) return;
     const cpe: PtmpCpeInput = { id: dev.id, name: dev.name, lat: dev.lat, lon: dev.lng, heightM: Math.max(dev.antennaHeight, 0.1) };
     set((s) => (s.ptmpCpes.some((c) => c.id === cpe.id) ? s : { ptmpCpes: [...s.ptmpCpes, cpe], ptmpResult: null }));
@@ -292,7 +320,7 @@ export const useRfStore = create<RfState>((set, get) => ({
 
   calculatePtmp: async () => {
     const s = get();
-    const ap = s.ptmpApId ? useMapStore.getState().devices.get(s.ptmpApId) : null;
+    const ap = s.ptmpApId ? rfNode(s.ptmpApId) : null;
     if (!ap || s.ptmpCpes.length === 0) return;
     const body: PtmpRequest = {
       lat: ap.lat,

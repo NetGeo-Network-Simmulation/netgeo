@@ -6,16 +6,19 @@
 import { ArrowRight, ArrowLeftRight, Radio, RadioTower } from 'lucide-react';
 import { useRfStore } from '@/store/rfStore';
 import { useMapStore } from '@/store/mapStore';
+import { useTopologyStore } from '@/store/topologyStore';
 import { zc } from '@/theme/z';
 import { cn } from '@/lib/cn';
 import { Select } from '@/components/ui/Select';
 
-/** Placed AP/Tower sites are the selectable PtP endpoints. */
+/** Placed AP/Tower nodes (real backend `Node`s, geo-placed) are the
+ *  selectable PtP endpoints (N3.2 — a "Tower" is kind='ap' with
+ *  intent.map_role === 'tower', see backend/app/services/wireless.py). */
 function useRfEndpoints() {
-  const devices = useMapStore((s) => s.deviceList());
-  return devices
-    .filter((d) => d.kind === 'ap' || d.kind === 'tower')
-    .map((d) => ({ id: d.id, name: d.name }));
+  const nodes = useTopologyStore((s) => s.nodeList());
+  return nodes
+    .filter((n) => n.kind === 'ap' && n.lat != null && n.lon != null)
+    .map((n) => ({ id: n.id, name: n.name }));
 }
 
 /** Exported for reuse by RfAnalysisPanel's PtMP sector-AP / CPE pickers — same
