@@ -129,10 +129,26 @@ export function MapContextMenu({ px, lat, lon, onClose, siteId, initialCategoryK
         });
         targetSiteId = site.id;
       }
-      await deployAt(projectId, dt.icon as NodeKind, lat, lon, (msg) => flashNotice(msg), targetSiteId, {
+      const kind = dt.icon as NodeKind;
+      await deployAt(projectId, kind, lat, lon, (msg) => flashNotice(msg), targetSiteId, {
         device_type_id: dt.id,
       });
       await queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
+      // Notice text must match deployAt's own auto-open gate (autoOpenRf,
+      // mapDeploy.ts) exactly, keyed off the real `kind` — not off which menu
+      // category the user clicked. Branching on category here was the bug:
+      // the Compute category's "Generic Linux Host" catalog device also
+      // deploys with kind='host' (network/devices/packs/servers), so it hit
+      // autoOpenRf same as a fiber ONU/ONT — but had no matching notice branch
+      // and silently jumped the user into RF Planning. Keying on `kind`
+      // covers every category at once (root cause, not per-category).
+      if (kind === 'ap' || kind === 'cpe' || kind === 'host') {
+        flashNotice(`${dt.name} placed — opened in RF Planning as ${kind === 'ap' ? 'an endpoint' : 'a CPE'}.`);
+      } else if (category?.key === 'wireless' || category?.key === 'fiber') {
+        // Picked from a category that implies RF/Fiber, but this product's
+        // kind isn't RF-capable — say so instead of a silent no-op close.
+        flashNotice(`${dt.name} placed — no RF/Fiber workspace support for this device yet.`);
+      }
       onClose();
     } catch (err) {
       flashNotice((err as unknown as ApiError)?.message || 'Failed to place device — check backend.');

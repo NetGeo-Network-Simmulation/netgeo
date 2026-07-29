@@ -11,6 +11,8 @@ import type { NodeModel } from '@/api/types';
 import type { NodeKind } from '@/api/types';
 import { useTopologyStore } from '@/store/topologyStore';
 import { haversineM } from '@/store/mapStore';
+import { useRfStore } from '@/store/rfStore';
+import { useUiStore } from '@/store/uiStore';
 
 // ponytail: haversine already in mapStore — reuse, don't copy
 
@@ -127,6 +129,52 @@ export async function ensureRackPlacement(projectId: string, node: NodeModel): P
 }
 
 /**
+ * Auto-open the RF workspace when a just-placed node is something the RF
+ * panel can genuinely use — every real placement path (right-click catalog
+ * picker, SitePopup's Add AP/Fiber, the toolbar Deploy Device tool) routes
+ * through this one `deployAt`, so gating here — on the node's real `kind`,
+ * never on which menu/category the user clicked — covers all of them at once
+ * (root cause, not per-caller).
+ *
+ * - kind 'ap': the only kind RfLinkBar/pickEndpoint accept as a PtP/PtMP
+ *   endpoint (rfStore.ts:207-209) — select it and open RF.
+ * - kind 'cpe' or 'host': RfAnalysisPanel's PtMP CPE picker already treats
+ *   both as the CPE role (RfAnalysisPanel.tsx:440-445, mirroring backend
+ *   wireless.py `_ROLE_BY_KIND`) — including the fiber-pack ONU/ONT catalog
+ *   devices, which deploy with kind='host'. Add it as a CPE and open RF in
+ *   PtMP mode so it's visibly selected, not just a panel switch.
+ * - everything else (router, switch, olt, firewall, server, cloud) has no
+ *   RF-workspace support today: 'olt' is never matched by any RF endpoint
+ *   filter (only backend wireless.py's engine-role table mentions it — no
+ *   frontend selector ever offers it), and 'router' is the generic kind the
+ *   cell-site and optical-transport catalog packs actually deploy (no radio/
+ *   optical metadata). Left alone, no navigation.
+ *
+ * Fiber workspace is deliberately NOT wired here: `fiberStore.ts`'s
+ * `FiberPath`/`FiberElement` model has no field referencing a topology Node
+ * at all (grepped — zero occurrences of node ids in fiber components/store),
+ * so no placed device can ever be "visible" there. Auto-opening it would
+ * just show an unrelated, unaffected GPON planner — the same kind of fake
+ * feature this function exists to avoid.
+ */
+function autoOpenRf(node: NodeModel): void {
+  const rf = useRfStore.getState();
+  if (node.kind === 'ap') {
+    // RfAnalysisPanel renders per `mode` (ptp/ptmp/product_select) — without
+    // forcing 'ptp' here, a session left in 'ptmp' would assign aId/bId (this
+    // pickEndpoint call) but keep showing the PtMP body, so the just-placed
+    // AP would never actually be visible. Mirrors the explicit setMode below.
+    rf.setMode('ptp');
+    rf.pickEndpoint(node.id);
+    useUiStore.getState().setViewMode('rf');
+  } else if (node.kind === 'cpe' || node.kind === 'host') {
+    rf.addCpeFromDevice(node.id);
+    rf.setMode('ptmp');
+    useUiStore.getState().setViewMode('rf');
+  }
+}
+
+/**
  * Full deploy orchestration:
  *  1. Name the node
  *  2. Compute canvas position relative to upstream
@@ -134,6 +182,7 @@ export async function ensureRackPlacement(projectId: string, node: NodeModel): P
  *  4. Link to upstream (tolerates 409 — iface already taken)
  *  5. Rack placement for cabled infrastructure nodes
  *  6. Upsert into topologyStore so the map refreshes immediately
+ *  7. Auto-open RF if the placed kind is real RF material (see autoOpenRf)
  */
 export async function deployAt(
   projectId: string,
@@ -147,7 +196,7 @@ export async function deployAt(
    *  straight through to NodeCreate.intent, which the backend already
    *  round-trips generically (backend/app/api/nodes.py). */
   intent?: Record<string, unknown>,
-): Promise<void> {
+): Promise<NodeModel> {
   const { nodes, upsertNode, upsertLink } = useTopologyStore.getState();
   const nodeList = Array.from(nodes.values());
 
@@ -198,4 +247,7 @@ export async function deployAt(
       // rack placement is best-effort; don't crash the deploy flow
     });
   }
+
+  autoOpenRf(created);
+  return created;
 }
