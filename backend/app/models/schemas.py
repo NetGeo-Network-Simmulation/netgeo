@@ -139,6 +139,10 @@ class Radio(_Base):
     rx_sensitivity_dbm: float = -85.0
     misc_loss_db: float = 2.0
     max_range_m: float | None = None
+    # Antenna height above ground level, metres (NG-N3.1). Stored only —
+    # engine.wireless still takes height as an explicit per-call parameter
+    # (tx_height_m/rx_height_m), so this field is not yet read by the engine.
+    height_agl_m: float = 6.0
 
 
 class Node(_Base):

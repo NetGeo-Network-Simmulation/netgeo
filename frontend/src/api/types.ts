@@ -73,6 +73,8 @@ export interface Radio {
   rx_sensitivity_dbm: number;
   misc_loss_db: number;
   max_range_m: number | null;
+  /** Antenna height above ground level, metres (NG-N3.1). */
+  height_agl_m: number;
 }
 
 export interface NodeModel {

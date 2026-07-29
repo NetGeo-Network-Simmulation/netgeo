@@ -165,6 +165,35 @@ async def test_wireless_plan_endpoint(client):
     assert plan["links"][0]["feasible"] is True
 
 
+async def test_radio_height_agl_m_defaults_and_round_trips(client):
+    pr = await client.post("/api/projects", json={"name": "height-test", "description": ""})
+    pid = pr.json()["id"]
+
+    # default: no radio given at all -> Node.radio stays None, not applicable.
+    # explicit radio without height_agl_m -> defaults to 6.0.
+    created = await client.post("/api/nodes", json={
+        "project_id": pid, "name": "AP-default", "kind": "ap", "nos": "forgeos",
+        "lat": -6.20, "lon": 106.80,
+        "radio": {"tx_power_dbm": 23, "frequency_ghz": 5.8},
+    })
+    assert created.status_code == 201, created.text
+    assert created.json()["radio"]["height_agl_m"] == 6.0
+
+    # explicit value round-trips through POST -> GET.
+    created2 = await client.post("/api/nodes", json={
+        "project_id": pid, "name": "AP-tall", "kind": "ap", "nos": "forgeos",
+        "lat": -6.21, "lon": 106.81,
+        "radio": {"tx_power_dbm": 27, "frequency_ghz": 5.8, "height_agl_m": 30.0},
+    })
+    assert created2.status_code == 201, created2.text
+    node_id = created2.json()["id"]
+    assert created2.json()["radio"]["height_agl_m"] == 30.0
+
+    fetched = await client.get(f"/api/nodes/{node_id}")
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["radio"]["height_agl_m"] == 30.0
+
+
 async def test_geo_fields_round_trip_on_node(client):
     pr = await client.post("/api/projects", json={"name": "geo", "description": ""})
     pid = pr.json()["id"]
