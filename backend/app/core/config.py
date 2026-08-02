@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # stale value overrode the code default forever — self-updated installs kept
 # reporting the version they were first installed at (e.g. "0.1"), so the
 # updater always saw an update available. The env var is now ignored.
-APP_VERSION = "1.2.62"
+APP_VERSION = "1.2.63"
 # Release channel (alpha/beta/stable). Kept out of APP_VERSION so the updater's
 # numeric version comparison against GitHub releases keeps working.
 APP_CHANNEL = "beta"
@@ -72,6 +72,9 @@ class Settings(BaseSettings):
     # JSON file where password hashes set via the UI (first-run setup /
     # change-password) are persisted across restarts. Empty = disabled.
     NETGEO_AUTH_STORE: str = "~/.config/netgeo/auth.json"
+    # JSON file where MemoryRepository state (projects/nodes/links/...) is
+    # persisted across restarts (S2 PERSIST-01). Empty = disabled (in-memory only).
+    NETGEO_STATE_STORE: str = "~/.config/netgeo/state.json"
 
     # In-app self-update (see app/services/updater.py + scripts/self-update.sh).
     # GITHUB_REPO is the "owner/name" slug whose releases we compare against.

@@ -12,9 +12,14 @@ Thread-safety: guarded by a single ``asyncio.Lock`` — adequate for the single
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
+import os
 import re
 from collections import defaultdict
+from pathlib import Path
 
+from app.core.config import get_settings
 from app.models import (
     Activity,
     ConfigArtifact,
@@ -34,12 +39,33 @@ from app.models import (
 from app.services.physical import apply_physical
 from app.utils.ids import new_id
 
+logger = logging.getLogger(__name__)
+
 
 class NotFound(KeyError):
     """Raised when a resource id does not resolve. Mapped to HTTP 404."""
 
 
 _TRAILING_DIGITS = re.compile(r"^(.*?)(\d+)$")
+
+# (attribute, model class, dict key field) — drives disk load/save (S2 PERSIST-01).
+# Every entry is a pure-data pydantic model; MemoryRepository never holds an
+# engine/Network/LabManager object, so there is nothing else to persist.
+_PERSISTED: list[tuple[str, type, str]] = [
+    ("_projects", Project, "id"),
+    ("_nodes", Node, "id"),
+    ("_links", Link, "id"),
+    ("_scenarios", Scenario, "id"),
+    ("_configs", ConfigArtifact, "id"),
+    ("_sites", Site, "id"),
+    ("_racks", Rack, "id"),
+    ("_cables", Cable, "id"),
+    ("_fiber_paths", FiberPath, "id"),
+    ("_rf_studies", RfStudy, "id"),
+    ("_activities", Activity, "id"),
+    ("_grade_results", GradeResult, "id"),
+    ("_import_snapshots", ImportSnapshot, "node_id"),  # keyed by node, not its own id
+]
 
 
 def _unique_node_name(proposed: str, taken: set[str]) -> str:
@@ -73,7 +99,7 @@ def _unique_node_name(proposed: str, taken: set[str]) -> str:
 
 
 class MemoryRepository:
-    def __init__(self) -> None:
+    def __init__(self, state_path: str | Path | None = None) -> None:
         self._lock = asyncio.Lock()
         self._projects: dict[str, Project] = {}
         self._nodes: dict[str, Node] = {}
@@ -95,6 +121,47 @@ class MemoryRepository:
         self._grade_results: dict[str, GradeResult] = {}
         # Import snapshots (NG-TW-03): latest snapshot per node_id (re-import overwrites).
         self._import_snapshots: dict[str, ImportSnapshot] = {}
+        # Disk persistence (S2 PERSIST-01). state_path=None -> configured default;
+        # "" (e.g. NETGEO_STATE_STORE="") disables it — same convention as auth store.
+        raw = get_settings().NETGEO_STATE_STORE if state_path is None else state_path
+        self._state_path = Path(raw).expanduser() if raw else None
+        self._load()
+
+    def _load(self) -> None:
+        if self._state_path is None or not self._state_path.is_file():
+            return
+        try:
+            data = json.loads(self._state_path.read_text(encoding="utf-8"))
+            for attr, model, key in _PERSISTED:
+                for raw in data.get(attr, []):
+                    obj = model.model_validate(raw)
+                    getattr(self, attr)[getattr(obj, key)] = obj
+            for cfg in self._configs.values():
+                self._configs_by_node[cfg.node_id].append(cfg.id)
+            logger.info("Loaded state from %s", self._state_path)
+        except Exception:
+            logger.warning(
+                "State store %s is corrupt — starting empty.", self._state_path, exc_info=True
+            )
+
+    def _save(self) -> None:
+        # ponytail: synchronous write on every mutation per the S2 PERSIST-01
+        # brief; revisit with a debounce/background task only if profiling on a
+        # real project shows this write is actually slow.
+        if self._state_path is None:
+            return
+        try:
+            self._state_path.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                attr: [obj.model_dump(mode="json") for obj in getattr(self, attr).values()]
+                for attr, _, _ in _PERSISTED
+            }
+            tmp = self._state_path.with_suffix(".tmp")
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            tmp.replace(self._state_path)
+        except Exception:
+            logger.error("Failed to persist state to %s", self._state_path, exc_info=True)
 
     # --- projects -----------------------------------------------------------
     async def list_projects(self) -> list[Project]:
@@ -110,6 +177,7 @@ class MemoryRepository:
         async with self._lock:
             proj = Project(id=new_id(), name=name, description=description)
             self._projects[proj.id] = proj
+            self._save()
             return proj
 
     async def export_project(self, pid: str) -> dict:
@@ -167,6 +235,7 @@ class MemoryRepository:
             if unique != node.name:
                 node = node.model_copy(update={"name": unique})
             self._nodes[node.id] = node
+            self._save()
             return node
 
     # Node fields whose value may legitimately be None (i.e. "clear this field"),
@@ -205,6 +274,7 @@ class MemoryRepository:
                     filtered["site_id"] = rack.site_id
             updated = node.model_copy(update=filtered)
             self._nodes[nid] = updated
+            self._save()
             return updated
 
     async def delete_node(self, nid: str) -> None:
@@ -220,6 +290,7 @@ class MemoryRepository:
             # cascade: drop import snapshot for this node (NG-TW-03)
             self._import_snapshots.pop(nid, None)
             del self._nodes[nid]
+            self._save()
 
     # --- links --------------------------------------------------------------
     async def add_link(self, link: Link) -> Link:
@@ -238,6 +309,7 @@ class MemoryRepository:
                     f"interface(s) already in use by another link: {', '.join(busy)}"
                 )
             self._links[link.id] = link
+            self._save()
             return link
 
     async def get_link(self, lid: str) -> Link:
@@ -251,6 +323,7 @@ class MemoryRepository:
             link = await self.get_link(lid)
             updated = link.model_copy(update={k: v for k, v in patch.items() if v is not None})
             self._links[lid] = updated
+            self._save()
             return updated
 
     async def delete_link(self, lid: str) -> None:
@@ -258,6 +331,7 @@ class MemoryRepository:
             await self.get_link(lid)
             del self._links[lid]
             self._drop_cables_for_link(lid)
+            self._save()
 
     # --- physical plant (NG-PH-01/02) ---------------------------------------
     def _drop_cables_for_link(self, lid: str) -> None:
@@ -269,6 +343,7 @@ class MemoryRepository:
     async def add_site(self, site: Site) -> Site:
         async with self._lock:
             self._sites[site.id] = site
+            self._save()
             return site
 
     async def list_sites(self, pid: str) -> list[Site]:
@@ -291,6 +366,7 @@ class MemoryRepository:
                 {**site.model_dump(), **{k: v for k, v in patch.items() if v is not None}}
             )
             self._sites[sid] = updated
+            self._save()
             return updated
 
     async def delete_site(self, sid: str) -> None:
@@ -306,10 +382,12 @@ class MemoryRepository:
             for nid, node in self._nodes.items():
                 if node.site_id == sid:
                     self._nodes[nid] = node.model_copy(update={"site_id": None})
+            self._save()
 
     async def add_rack(self, rack: Rack) -> Rack:
         async with self._lock:
             self._racks[rack.id] = rack
+            self._save()
             return rack
 
     async def add_cable(self, cable: Cable) -> Cable:
@@ -317,6 +395,7 @@ class MemoryRepository:
             if cable.link_id not in self._links:
                 raise NotFound(cable.link_id)
             self._cables[cable.id] = cable
+            self._save()
             return cable
 
     async def get_cable(self, cid: str) -> Cable:
@@ -334,6 +413,7 @@ class MemoryRepository:
                 update={k: v for k, v in patch.items() if v is not None}
             )
             self._cables[cid] = updated
+            self._save()
             return updated
 
     async def delete_cable(self, cid: str) -> None:
@@ -341,6 +421,7 @@ class MemoryRepository:
             if cid not in self._cables:
                 raise NotFound(cid)
             del self._cables[cid]
+            self._save()
 
     # --- scenarios ----------------------------------------------------------
     async def list_scenarios(self, pid: str) -> list[Scenario]:
@@ -349,6 +430,7 @@ class MemoryRepository:
     async def add_scenario(self, scenario: Scenario) -> Scenario:
         async with self._lock:
             self._scenarios[scenario.id] = scenario
+            self._save()
             return scenario
 
     # --- education activities (NG-EDU-01) -----------------------------------
@@ -364,6 +446,7 @@ class MemoryRepository:
     async def add_activity(self, activity: Activity) -> Activity:
         async with self._lock:
             self._activities[activity.id] = activity
+            self._save()
             return activity
 
     async def delete_activity(self, aid: str) -> None:
@@ -371,11 +454,13 @@ class MemoryRepository:
             if aid not in self._activities:
                 raise NotFound(aid)
             del self._activities[aid]
+            self._save()
 
     # --- graded attempts (NG-EDU-03) ----------------------------------------
     async def add_grade_result(self, result: GradeResult) -> GradeResult:
         async with self._lock:
             self._grade_results[result.id] = result
+            self._save()
             return result
 
     async def list_grade_results(self, activity_id: str) -> list[GradeResult]:
@@ -396,6 +481,7 @@ class MemoryRepository:
     async def add_fiber_path(self, path: FiberPath) -> FiberPath:
         async with self._lock:
             self._fiber_paths[path.id] = path
+            self._save()
             return path
 
     async def update_fiber_path(self, fid: str, patch: dict) -> FiberPath:
@@ -409,6 +495,7 @@ class MemoryRepository:
                 {**path.model_dump(), **{k: v for k, v in patch.items() if v is not None}}
             )
             self._fiber_paths[fid] = updated
+            self._save()
             return updated
 
     async def delete_fiber_path(self, fid: str) -> None:
@@ -416,6 +503,7 @@ class MemoryRepository:
             if fid not in self._fiber_paths:
                 raise NotFound(fid)
             del self._fiber_paths[fid]
+            self._save()
 
     # --- RF study persistence (R4 cross-cutting) ----------------------------
     async def list_rf_studies(self, pid: str) -> list[RfStudy]:
@@ -430,6 +518,7 @@ class MemoryRepository:
     async def add_rf_study(self, study: RfStudy) -> RfStudy:
         async with self._lock:
             self._rf_studies[study.id] = study
+            self._save()
             return study
 
     async def delete_rf_study(self, sid: str) -> None:
@@ -437,11 +526,13 @@ class MemoryRepository:
             if sid not in self._rf_studies:
                 raise NotFound(sid)
             del self._rf_studies[sid]
+            self._save()
 
     # --- import snapshots (NG-TW-03) ----------------------------------------
     async def save_import_snapshot(self, snap: ImportSnapshot) -> ImportSnapshot:
         async with self._lock:
             self._import_snapshots[snap.node_id] = snap
+            self._save()
             return snap
 
     async def get_import_snapshot(self, node_id: str) -> ImportSnapshot | None:
@@ -450,12 +541,14 @@ class MemoryRepository:
     async def delete_import_snapshot(self, node_id: str) -> None:
         async with self._lock:
             self._import_snapshots.pop(node_id, None)
+            self._save()
 
     # --- config artifacts (append-only history) -----------------------------
     async def add_config(self, artifact: ConfigArtifact) -> ConfigArtifact:
         async with self._lock:
             self._configs[artifact.id] = artifact
             self._configs_by_node[artifact.node_id].append(artifact.id)
+            self._save()
             return artifact
 
     async def configs_for_node(self, nid: str) -> list[ConfigArtifact]:

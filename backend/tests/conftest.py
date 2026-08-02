@@ -18,6 +18,10 @@ import os
 # lifespan yang memanggil configure_auth_store(); tanpa ini test bisa menulis
 # ke ~/.config/netgeo/auth.json milik developer.
 os.environ.setdefault("NETGEO_AUTH_STORE", "")
+# Sama untuk state store (S2 PERSIST-01) — get_repo() singleton dibuat di test
+# pertama yang jalan; tanpa ini test bisa menulis ke ~/.config/netgeo/state.json
+# milik developer.
+os.environ.setdefault("NETGEO_STATE_STORE", "")
 
 import pytest
 import pytest_asyncio
