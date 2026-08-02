@@ -132,16 +132,25 @@ class MemoryRepository:
             return
         try:
             data = json.loads(self._state_path.read_text(encoding="utf-8"))
+            loaded: dict[str, dict] = {attr: {} for attr, _, _ in _PERSISTED}
             for attr, model, key in _PERSISTED:
                 for raw in data.get(attr, []):
                     obj = model.model_validate(raw)
-                    getattr(self, attr)[getattr(obj, key)] = obj
+                    loaded[attr][getattr(obj, key)] = obj
+            # All-or-nothing: only commit to self once every entity parsed clean,
+            # so a partial failure never leaves a half-loaded, falsely-logged state.
+            for attr, values in loaded.items():
+                getattr(self, attr).update(values)
             for cfg in self._configs.values():
                 self._configs_by_node[cfg.node_id].append(cfg.id)
             logger.info("Loaded state from %s", self._state_path)
         except Exception:
+            # Corrupt file would otherwise be silently overwritten by the next
+            # _save() with an empty state — rescue it first so nothing is lost.
+            corrupt = self._state_path.with_suffix(".corrupt")
+            self._state_path.replace(corrupt)
             logger.warning(
-                "State store %s is corrupt — starting empty.", self._state_path, exc_info=True
+                "State store was corrupt — moved to %s and starting empty.", corrupt, exc_info=True
             )
 
     def _save(self) -> None:

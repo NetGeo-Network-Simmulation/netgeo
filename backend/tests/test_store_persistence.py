@@ -52,8 +52,44 @@ async def test_corrupt_state_file_starts_empty_and_warns(tmp_path, caplog):
 
     assert await repo.list_projects() == []
     assert any("corrupt" in r.message for r in caplog.records)
-    # original (corrupt) file is left untouched, not deleted
-    assert state_file.read_text(encoding="utf-8") == "{not valid json"
+    # corrupt file is rescued to <state>.corrupt, not silently overwritten later
+    corrupt_file = state_file.with_suffix(".corrupt")
+    assert not state_file.exists()
+    assert corrupt_file.read_text(encoding="utf-8") == "{not valid json"
+
+    # A later mutation writes a fresh state.json without touching the rescue copy.
+    await repo.create_project("P")
+    assert state_file.is_file()
+    assert corrupt_file.read_text(encoding="utf-8") == "{not valid json"
+
+
+async def test_corrupt_state_file_rescue_overwrites_stale_corrupt_copy(tmp_path):
+    state_file = tmp_path / "state.json"
+    corrupt_file = state_file.with_suffix(".corrupt")
+    corrupt_file.write_text("stale leftover", encoding="utf-8")
+    state_file.write_text("{also not valid", encoding="utf-8")
+
+    MemoryRepository(state_path=state_file)
+
+    assert corrupt_file.read_text(encoding="utf-8") == "{also not valid"
+
+
+async def test_partial_load_failure_discards_everything(tmp_path):
+    """One bad entity in an otherwise-valid file must not leave a half-loaded repo."""
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "_projects": [{"id": "p1", "name": "Lab", "description": ""}],
+                "_nodes": [{"id": "n1", "not_a_real_field": "boom"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repo = MemoryRepository(state_path=state_file)
+
+    assert await repo.list_projects() == []
 
 
 async def test_missing_state_file_starts_empty_silently(tmp_path, caplog):
