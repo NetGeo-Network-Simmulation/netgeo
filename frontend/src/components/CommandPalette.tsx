@@ -13,7 +13,6 @@ import { Search, CornerDownLeft } from 'lucide-react';
 import { useUiStore, type DrawerTab } from '@/store/uiStore';
 import { useTopoUiStore } from '@/store/topoUiStore';
 import { useTopologyStore } from '@/store/topologyStore';
-import { GROUPS, activateMember } from '@/components/shell/NavigationRail';
 import { simApi } from '@/api/client';
 import type { NodeModel } from '@/api/types';
 import { cn } from '@/lib/cn';
@@ -75,21 +74,15 @@ export function CommandPalette() {
 
   const close = () => closeModal();
 
-  // RF/Fiber commands derive their label + navigation from NavigationRail's
-  // GROUPS (single source of truth for the IA) instead of a second copy —
-  // these are the two rail-group members not reachable via a rail click at
-  // all (their group's primary is 'map'), so a palette entry is their only
-  // door back in once the top-bar mode tabs are gone (S7 NAV-01).
-  const mapGroup = GROUPS.find((g) => g.key === 'map')!;
-  const rfMember = mapGroup.members.find((m) => m.key === 'rf')!;
-  const fiberMember = mapGroup.members.find((m) => m.key === 'fiber')!;
-
   const commands: Command[] = useMemo(() => {
     const nav: Command[] = [
       { id: 'go-topology', title: 'Go to Topology', hint: 'Navigate', run: () => setViewMode('topology') },
       { id: 'go-map', title: 'Go to Map', hint: 'Navigate', run: () => setViewMode('map') },
-      { id: 'go-rf', title: `Go to ${rfMember.label}`, hint: 'Navigate', run: () => activateMember(rfMember) },
-      { id: 'go-fiber', title: `Go to ${fiberMember.label}`, hint: 'Navigate', run: () => activateMember(fiberMember) },
+      // RF/Fiber have no rail/sub-nav entry (S8 NAV-02 — map is the single
+      // rail surface); this palette entry plus auto-open-on-deploy and the
+      // /rf, /fiber deep links are their only doors in.
+      { id: 'go-rf', title: 'Go to RF Planning', hint: 'Navigate', run: () => setViewMode('rf') },
+      { id: 'go-fiber', title: 'Go to Fiber / FTTH', hint: 'Navigate', run: () => setViewMode('fiber') },
       { id: 'go-plant', title: 'Go to Physical Plant', hint: 'Navigate', run: () => setViewMode('plant') },
       { id: 'add-device', title: 'Add device…', hint: 'Action', run: () => openPicker() },
       {

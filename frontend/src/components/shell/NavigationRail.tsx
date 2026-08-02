@@ -1,14 +1,18 @@
 /**
  * NavigationRail — floating device-rail, the app's primary navigation
  * (design §3.2; visual approved in docs/design/stitch-html/clay/
- * shell-device-rail/). 13 destinations collapse into 5 groups + Settings;
- * every destination the rail used to expose 1:1 is still reachable — the
- * non-primary members of a group show up in TopBar's contextual sub-nav
- * strip (see GROUPS export) when that group is active, so nothing here was
- * deleted, only regrouped.
+ * shell-device-rail/). 11 destinations collapse into 5 groups + Settings;
+ * every non-primary member of a group shows up in TopBar's contextual
+ * sub-nav strip (see GROUPS export) when that group is active.
+ *
+ * RF Planning and Fiber/FTTH are deliberately NOT members here (S8 NAV-02):
+ * the map is the single surface the rail/sub-nav exposes, and those two
+ * workspaces open contextually instead — auto-open on device deploy
+ * (mapDeploy.ts), the command palette (CommandPalette.tsx), or their /rf
+ * and /fiber deep links (uiStore.ts VIEW_PATHS, unaffected by this list).
  *
  * Groups (fixed IA, do not redesign): Projects · Design(topology/plant/
- * config) · Map(map/rf/fiber) · Simulate(twin/edu/scenarios/diagnostics) ·
+ * config) · Map(map) · Simulate(twin/edu/scenarios/diagnostics) ·
  * Operate(problems/reports). Settings stays a separate bottom button.
  */
 import {
@@ -16,8 +20,6 @@ import {
   Network,
   Map as MapIcon,
   Boxes,
-  RadioTower,
-  Cable,
   Server,
   FileCode2,
   Siren,
@@ -67,11 +69,7 @@ export const GROUPS: RailGroup[] = [
     key: 'map',
     label: 'Map',
     icon: MapIcon,
-    members: [
-      { key: 'map', label: 'Map', icon: MapIcon, view: 'map' },
-      { key: 'rf', label: 'RF Planning', icon: RadioTower, view: 'rf' },
-      { key: 'fiber', label: 'Fiber / FTTH', icon: Cable, view: 'fiber' },
-    ],
+    members: [{ key: 'map', label: 'Map', icon: MapIcon, view: 'map' }],
   },
   {
     key: 'simulate',
