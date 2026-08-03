@@ -1,10 +1,14 @@
 """Layered protocol data units (PDUs).
 
 Every frame that moves through the netstack is an :class:`EthernetFrame`
-carrying one of the L3+ payloads defined here. Sizes are modelled on real
-wire formats so serialization delay, MTU checks and queueing behave like the
-real thing. Frames are plain dataclasses — cheap to construct, easy to
-inspect, and each knows how to summarise itself for packet capture.
+carrying an L3+ payload — some (ARP, IPv4/IPv6, TCP/UDP, ICMP) are defined
+here; others (OSPF, BGP, VRRP, ...) are defined in their own protocol module
+under ``engine/netstack/protocols/`` and just duck-type as ``payload``: any
+object works as long as consumers only rely on the attributes they read.
+Sizes are modelled on real wire formats so serialization delay, MTU checks
+and queueing behave like the real thing. Frames are plain dataclasses —
+cheap to construct, easy to inspect, and each knows how to summarise itself
+for packet capture.
 """
 from __future__ import annotations
 

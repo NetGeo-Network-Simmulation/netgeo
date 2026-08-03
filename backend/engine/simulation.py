@@ -160,14 +160,3 @@ class Simulation:
                 "pending_events": len(self.scheduler.queue),
             }
         self.result.sim_time = self.scheduler.now
-
-    # ----- checkpoint ---------------------------------------------------
-    def snapshot(self) -> dict:
-        """Minimal serializable state for checkpoint/resume & reporting."""
-        return {
-            "sim_time": self.scheduler.now,
-            "queue": self.scheduler.queue.stats,
-            "model": self.model.stats,
-            "result": self.result.as_dict(),
-            "node_counters": {nid: rt.counters for nid, rt in self.runtimes.items()},
-        }

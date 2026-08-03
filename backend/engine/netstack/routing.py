@@ -673,6 +673,11 @@ class Router(L3Device):
 
     # ----- local delivery ------------------------------------------------------------
     def _local_deliver(self, net: "Network", iface: Interface, pkt: Ipv4Packet) -> None:
+        # Local import: engine.netstack.protocols/__init__ pulls in ospf.py et al,
+        # which import Route/Router from this module — a module-level import here
+        # would deadlock on the partially-initialized routing module.
+        from engine.netstack.protocols.vrrp import PROTO_VRRP
+
         if pkt.proto == PROTO_ICMP:
             icmp = pkt.payload
             if isinstance(icmp, IcmpMessage) and icmp.type == 0:
@@ -688,7 +693,7 @@ class Router(L3Device):
                 if getattr(proc, "proto", "") == "ospf":
                     proc.on_packet(net, iface, pkt)
             return
-        if pkt.proto == 112:  # VRRP
+        if pkt.proto == PROTO_VRRP:
             for proc in self.processes:
                 if getattr(proc, "proto", "") == "vrrp":
                     proc.on_packet(net, iface, pkt)

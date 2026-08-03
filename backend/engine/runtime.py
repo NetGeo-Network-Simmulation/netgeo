@@ -3,8 +3,8 @@
 A ``NodeRuntime`` is the control+data plane of a node when it is simulated
 (``mode="sim"``) rather than emulated. The default implementation does L3
 shortest-path forwarding using the model graph, which is enough to make small
-scenarios actually move packets end-to-end. Protocol-specific runtimes (BGP,
-OSPF, ...) subclass this and live under ``engine/protocols/``.
+scenarios actually move packets end-to-end. Dynamic routing protocols (BGP,
+OSPF, ...) instead attach as processes under ``engine/netstack/protocols/``.
 
 Emulated nodes (``mode="emul"``) do **not** use a ``NodeRuntime`` — their
 forwarding happens inside a real container via an :class:`EmulationAdaptor`.

@@ -98,8 +98,8 @@ shard→worker dikoordinasikan via Redis (job queue / state realtime).
 
 ### d. Pemisahan compute vs serving
 Run berat dijalankan oleh **run-manager** terpisah (proses/worker), bukan di
-request handler. API hanya enqueue job + relay hasil. `Simulation.snapshot()`
-menyediakan state minimal untuk **checkpoint/resume** dan migrasi worker.
+request handler. API hanya enqueue job + relay hasil. Checkpoint/resume
+belum diimplementasikan — `Simulation` tidak menyerialkan antrean/RNG saat ini.
 
 ### e. Hemat alokasi pada hot-path
 `SimEvent`/`Packet`/model memakai `dataclass(slots=True)`; lookup id via dict

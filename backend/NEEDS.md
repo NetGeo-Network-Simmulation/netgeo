@@ -27,7 +27,7 @@ lain agar integrasi penuh berjalan. Orchestrator yang menyatukan.
   bila ada konvensi bersama (`infra/redis-design.md`).
 
 ## 3. Spec protokol & skenario  → `network-engineer` / `network-backbone-datacenter-advisor`
-- **Dipakai oleh**: `engine/protocols/` (subclass `NodeRuntime`).
+- **Dipakai oleh**: `engine/netstack/protocols/` (proses per-Router: OSPF/BGP/IS-IS/MPLS/VRRP).
 - **Diminta**: daftar protokol prioritas (OSPFv3, IS-IS, BGP, EVPN-VXLAN) +
   skenario uji skala besar (spine-leaf, ISP/FTTH, backbone) untuk validasi
   engine pada ribuan node.

@@ -51,7 +51,7 @@ envelope respons `{success,data,message}` / `{success,error}`, settings via
 │  model.py       NetworkModel (networkx) ── NodeModel/LinkModel/InterfaceModel│
 │  runtime.py     NodeRuntime (forwarding shortest-path, loss, MTU, TTL) │
 │  packet.py      Packet                                                 │
-│  protocols/     StaticRoutingRuntime (+ OSPF/BGP menyusul)             │
+│  netstack/protocols/  OSPF/BGP/IS-IS/MPLS/VRRP proses per-Router       │
 │  emulation/     EmulationAdaptor (ABC) + NullEmulationAdaptor          │
 │                 → containerlab/Docker untuk node mode="emul"           │
 └────────────────────────────────────────────────────────────────────────┘
