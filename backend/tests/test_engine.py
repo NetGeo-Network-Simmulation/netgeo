@@ -75,7 +75,16 @@ def test_run_is_deterministic():
 
 
 def test_seed_changes_loss_outcome():
-    """Seed berbeda boleh menghasilkan pola drop berbeda (RNG benar dipakai)."""
+    """RNG ber-seed benar-benar mempengaruhi jalur loss.
+
+    Dua properti yang keduanya deterministik (nol flaky):
+      1. seed sama -> delivered count identik (jaminan keras).
+      2. di antara banyak seed yang dicoba, setidaknya ada satu pasang yang
+         beda hasil -- membuktikan RNG memang dipakai di jalur loss, bukan
+         seluruh loss=0.5 diabaikan/di-hardcode. Memakai banyak seed (bukan
+         cuma 1 vs 999) supaya assert tidak bergantung pada satu pasangan
+         seed yang kebetulan sama.
+    """
     def delivered_for(seed: int) -> int:
         model = _line_topology(5, loss=0.5)
         sim = Simulation(model, SimulationConfig(seed=seed))
@@ -83,8 +92,18 @@ def test_seed_changes_loss_outcome():
             sim.inject(Packet(src="n0", dst="n4", id=2000 + k))
         return sim.run().delivered
 
-    # sangat kecil kemungkinannya dua seed memberi angka identik pada 50 paket
-    assert delivered_for(1) != delivered_for(999) or True  # toleran, tak flaky
+    # 1. seed sama -> hasil identik, tak pernah flaky.
+    assert delivered_for(7) == delivered_for(7)
+
+    # 2. RNG benar mempengaruhi hasil: seed sama dua kali dulu untuk jangkar,
+    # lalu cari sepasang seed berbeda di antara banyak kandidat yang hasilnya
+    # beda. Kalau jalur RNG dicabut (loss jadi deterministik), semua seed
+    # akan memberi delivered count yang sama dan assert ini gagal.
+    outcomes = {seed: delivered_for(seed) for seed in range(20)}
+    assert len(set(outcomes.values())) > 1, (
+        f"20 seed berbeda semuanya memberi delivered count sama: {outcomes} "
+        "-- RNG sepertinya tidak lagi mempengaruhi jalur loss"
+    )
 
 
 def test_down_link_breaks_delivery():
