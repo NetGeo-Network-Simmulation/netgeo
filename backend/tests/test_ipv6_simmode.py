@@ -59,7 +59,7 @@ def test_ndp_and_same_link_ping6():
     assert rep.received == 3 and rep.loss_pct == 0.0
     # NDP resolved and cached on both ends.
     assert IPv6Address("2001:db8:1::2") in h1.nd_cache
-    assert any(str(ip).startswith("fe80::") or True for ip in h2.nd_cache)
+    assert any(str(ip).startswith("fe80::") for ip in h2.nd_cache)
 
 
 def test_link_local_ping6():
