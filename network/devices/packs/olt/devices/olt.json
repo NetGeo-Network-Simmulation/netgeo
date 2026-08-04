@@ -40,12 +40,12 @@
     },
     {
       "id": "zte-c320-pizzabox",
-      "display_name": "ZTE ZXA10 C320 (OLT Pizzabox GPON/XGS-PON)",
+      "display_name": "ZTE ZXA10 C320 (OLT Pizzabox GPON)",
       "vendor": "ZTE",
       "vendor_options": ["ZTE"],
       "kind": "olt",
       "subcategory": "pizzabox",
-      "tags": ["ftth", "gpon", "xgs-pon", "compact", "isp", "metro"],
+      "tags": ["ftth", "gpon", "compact", "isp", "metro"],
       "icon": { "name": "olt-pizzabox", "emoji": "🍕" },
       "nos": ["zxr-os", "forgeos"],
       "default_mode": "sim",
@@ -70,7 +70,7 @@
         "max_subscribers_estimate": 1024,
         "tx_power_dbm": { "gpon_class_c+": 5.0 }
       },
-      "datasheet_note": "C320 pizzabox 2-slot; cocok metro/POP kecil; sangat populer di ISP regional."
+      "datasheet_note": "C320 pizzabox 2-slot; cocok metro/POP kecil; sangat populer di ISP regional. Pack ini memodelkan kartu GTGH/GTGO GPON saja; kartu XG-PON (GTXO) tidak dimodelkan dan XG-PON != XGS-PON."
     },
     {
       "id": "nokia-isam-fx-olt",

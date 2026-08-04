@@ -76,8 +76,8 @@
       "datasheet_note": "ONT HGU residential populer; AX Wi-Fi 6; 4x GE LAN."
     },
     {
-      "id": "zte-f6600p-xgs-ont",
-      "display_name": "ZTE F6600P (ONT XGS-PON, Wi-Fi 6)",
+      "id": "zte-f6600p-ont",
+      "display_name": "ZTE ZXHN F6600P (ONT GPON, Wi-Fi 6 AX3000)",
       "vendor": "ZTE",
       "vendor_options": [
         "ZTE"
@@ -87,10 +87,8 @@
       "tags": [
         "ftth",
         "ont",
-        "xgs-pon",
-        "10g",
-        "wifi6",
-        "premium"
+        "gpon",
+        "wifi6"
       ],
       "icon": {
         "name": "ont",
@@ -111,19 +109,13 @@
           "pattern": "pon0",
           "count": 1,
           "type": "gpon",
-          "speed_mbps": 9953,
-          "pon_standard": "XGS-PON",
+          "speed_mbps": 2488,
+          "pon_standard": "GPON",
           "role": "uplink"
         },
         {
-          "pattern": "lan10g",
-          "count": 1,
-          "type": "eth",
-          "speed_mbps": 10000
-        },
-        {
           "pattern": "lan{n}",
-          "count": 3,
+          "count": 4,
           "type": "eth",
           "speed_mbps": 1000
         },
@@ -137,7 +129,7 @@
       ],
       "power": {
         "typical_w": 12,
-        "max_w": 20,
+        "max_w": 18,
         "psu": "single",
         "feed": "AC-adapter"
       },
@@ -147,11 +139,11 @@
       },
       "ftth": {
         "rx_sensitivity_dbm": -28.0,
-        "rx_overload_dbm": -9.0,
-        "tx_power_dbm": 4.0,
-        "pon_class": "XGS-PON N1/N2"
+        "rx_overload_dbm": -8.0,
+        "tx_power_dbm": 2.0,
+        "pon_class": "GPON Class B+/C+ (typical ITU-T G.984.2 range; ZTE datasheet has no per-unit optical table)"
       },
-      "datasheet_note": "ONT XGS-PON 10G premium; 1x10GE + 3xGE; layanan gigabit+."
+      "datasheet_note": "ONT GPON AX3000 Wi-Fi 6, bukan XGS-PON; 4x GE LAN (tidak ada port 10GE); juga 1x FXS + 1x USB2.0 (belum dimodelkan)."
     },
     {
       "id": "fiberhome-sfu-onu",
