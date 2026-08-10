@@ -211,8 +211,17 @@ class Network:
     def set_device_power(self, ref: str, on: bool) -> None:
         dev = self.find_device(ref)
         if dev is not None:
+            was_on = dev.powered_on
             dev.powered_on = on
             self.log_event("device.up" if on else "device.down", device=dev.name)
+            if was_on and not on:
+                # F47: let processes shed state a power loss invalidates
+                # (e.g. VRRP's master claim) — duck-typed, most protocols
+                # don't need this hook and just self-heal their tick loop.
+                for proc in getattr(dev, "processes", ()):
+                    hook = getattr(proc, "on_power_off", None)
+                    if hook is not None:
+                        hook(self)
 
     # ----- accounting ----------------------------------------------------------------
     def record_drop(self, reason: str) -> None:

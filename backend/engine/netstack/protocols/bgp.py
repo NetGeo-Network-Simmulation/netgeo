@@ -232,16 +232,18 @@ class BgpProcess:
         self._tick(net)
 
     def _tick(self, net: "Network") -> None:
-        if not self.router.powered_on:
-            return
-        for peer in self.peers.values():
-            if peer.state == "established":
-                if net.now - peer.last_keepalive > peer.hold_time:
-                    self._session_down(net, peer)
-                else:
-                    self._send(net, peer, BgpKeepalive())
-            elif peer.state == "idle":
-                self._try_open(net, peer)   # automatic retry
+        # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
+        # the work, not the reschedule, so a power-on self-heals within one
+        # interval instead of needing an explicit restart.
+        if self.router.powered_on:
+            for peer in self.peers.values():
+                if peer.state == "established":
+                    if net.now - peer.last_keepalive > peer.hold_time:
+                        self._session_down(net, peer)
+                    else:
+                        self._send(net, peer, BgpKeepalive())
+                elif peer.state == "idle":
+                    self._try_open(net, peer)   # automatic retry
         net.scheduler.schedule_after(
             self.keepalive_interval,
             SimEvent(

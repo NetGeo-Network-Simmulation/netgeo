@@ -117,6 +117,68 @@ def test_preemption_on_recovery():
     assert str(virtual_mac(10)) not in r2.mac_aliases
 
 
+def test_power_off_relinquishes_master_state():
+    """F47 kelas B: powering off the master must not leave it internally
+    claiming state=="master" (with the VIP/vmac still aliased) through the
+    outage — before the fix, only the advert *send* was guarded, so the
+    state/aliases were stale and a power-on made it reclaim mastership
+    instantly, unvalidated, opening a dual-master window against whatever
+    took over meanwhile."""
+    net, r1, r2, _h1 = _fhrp_lab()
+    net.run_for(15.0)
+    r1_vrrp = _vrrp(r1)
+    assert r1_vrrp.state == "master"
+
+    net.set_device_power("r1", False)
+    # No sim time elapsed — this isolates the state change from any timer
+    # racing, and proves the transition is synchronous with power-off, not
+    # something a stale master would only discover on its next advert tick.
+    assert r1_vrrp.state != "master", (
+        "state stayed 'master' straight through power-off — the resume "
+        "path will reclaim mastership without ever validating it"
+    )
+    assert str(virtual_mac(10)) not in r1.mac_aliases
+    assert IPv4Address(VIP) not in r1.ip_aliases
+
+    # Drive it through a full power-cycle and check for a duplicate timer
+    # chain, which is the risk the fix has to avoid: relinquishing on
+    # power-off must not leave an old timer alive alongside the fresh one
+    # armed on resume.
+    net.run_for(10.0)   # r2 takes over while r1 stays off
+    r2_vrrp = _vrrp(r2)
+    assert r2_vrrp.state == "master"
+
+    net.set_device_power("r1", True)
+    net.run_for(10.0)   # r1 must re-earn mastership, not assume it
+    assert r1_vrrp.state == "master"
+    assert r2_vrrp.state == "backup"
+
+    # Exactly one "master" transition per side across the whole cycle — a
+    # duplicate chain would show up as extra racing become_master() calls.
+    r1_masters = [s for _t, s in r1_vrrp.transitions if s == "master"]
+    r2_masters = [s for _t, s in r2_vrrp.transitions if s == "master"]
+    assert len(r1_masters) == 2, r1_vrrp.transitions   # initial + reclaim
+    assert len(r2_masters) == 1, r2_vrrp.transitions   # the one takeover
+
+    # And a duplicate chain would double the on-wire advert cadence —
+    # confirm r1 (now master again) still sends at exactly one per
+    # adv_interval, not two.
+    def _r1_adverts() -> int:
+        return sum(
+            1 for r in net.capture.records(link_id="l-r1", limit=5000)
+            if r.iface.startswith("r1:") and r.direction == "tx"
+            and "VRRPv3 advertisement" in r.info
+        )
+
+    before = _r1_adverts()
+    net.run_for(5.0)
+    sent = _r1_adverts() - before
+    assert 3 <= sent <= 6, (
+        f"expected ~5 adverts in 5s at adv_interval=1.0, got {sent} "
+        "— looks like a duplicate tick chain"
+    )
+
+
 def test_vrrp_deterministic_and_on_wire():
     def build():
         n, *_ = _fhrp_lab()

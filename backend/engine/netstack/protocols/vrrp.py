@@ -103,6 +103,14 @@ class VrrpProcess:
     def on_iface_change(self, net: "Network") -> None:  # duck-typed hook
         pass
 
+    def on_power_off(self, net: "Network") -> None:  # duck-typed hook
+        """F47: a power loss must not leave a stale master claim behind —
+        relinquish so mastership is re-earned via the normal listen/promote
+        path on resume instead of being assumed the instant power returns
+        (that gap is the dual-master window)."""
+        if self.state == "master":
+            self._enter_backup(net)
+
     # ----- state transitions -------------------------------------------------
     def _log(self, net: "Network", state: str) -> None:
         self.state = state
@@ -143,6 +151,11 @@ class VrrpProcess:
 
     def _master_down_fired(self, net: "Network", seq: int) -> None:
         if seq != self._timer_seq or self.state == "master":
+            return
+        if not self.router.powered_on:
+            # Still off — don't claim mastership (and transmit) blind; keep
+            # listening so a later power-on is caught by the next expiry.
+            self._arm_master_down(net, self.master_down_interval)
             return
         self._become_master(net)
 

@@ -196,10 +196,12 @@ class OspfProcess:
         self._tick(net)
 
     def _tick(self, net: "Network") -> None:
-        if not self.router.powered_on:
-            return
-        self._expire_neighbors(net)
-        self._send_hellos(net)
+        # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
+        # the work, not the reschedule, so a power-on self-heals within one
+        # interval instead of needing an explicit restart.
+        if self.router.powered_on:
+            self._expire_neighbors(net)
+            self._send_hellos(net)
         net.scheduler.schedule_after(
             self.hello_interval,
             SimEvent(

@@ -107,9 +107,11 @@ class VxlanProcess:
         self._tick(net)
 
     def _tick(self, net: "Network") -> None:
-        if not self.router.powered_on:
-            return
-        self._advertise(net)
+        # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
+        # the work, not the reschedule, so a power-on self-heals within one
+        # interval instead of needing an explicit restart.
+        if self.router.powered_on:
+            self._advertise(net)
         _schedule(net, self.interval, self.router.node_id, lambda: self._tick(net))
 
     def _bgp(self):

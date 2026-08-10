@@ -151,3 +151,48 @@ def test_netlab_intent_areas(client_less_build=None):
     net.start()
     net.run(until=10.0)
     assert _route(net, "r1", "0.0.0.0/0") is not None
+
+
+def test_adjacency_recovers_after_power_cycle():
+    """F36/F47 kelas A: set_device_power() only flips a flag — nothing used
+    to reschedule the hello tick. Before the fix, _tick()'s `if not
+    powered_on: return` dropped the timer chain forever, so a router that
+    came back up never sent another hello and the adjacency stayed dead."""
+    net = Network(seed=7)
+    r1 = net.add_device(Router("r1"))
+    r2 = net.add_device(Router("r2"))
+    net.connect("l", net.add_iface(r1, "eth0", ["10.0.0.1/30"]),
+                net.add_iface(r2, "eth0", ["10.0.0.2/30"]))
+    OspfProcess(r1, router_id="1.1.1.1", hello_interval=1.0, areas={"eth0": 0})
+    OspfProcess(r2, router_id="2.2.2.2", hello_interval=1.0, areas={"eth0": 0})
+    net.start()
+    net.run(until=5.0)
+    p1 = _proc(net, "r1")
+    assert p1.neighbors and all(n.state == "full" for n in p1.neighbors.values())
+
+    net.set_device_power("r2", on=False)
+    net.run_for(10.0)   # past dead_interval (4s) — adjacency must drop
+    assert not p1.neighbors
+
+    net.set_device_power("r2", on=True)
+    net.run_for(10.0)   # several hello cycles after power-on
+    assert p1.neighbors and any(n.state == "full" for n in p1.neighbors.values()), (
+        "adjacency did not recover after power-on — hello tick stayed dead"
+    )
+
+    # No duplicate tick chain: the fix must gate the *work*, not spawn a
+    # second reschedule — r2's hello cadence should stay at one every
+    # hello_interval, not double from a parallel chain.
+    def _r2_hellos() -> int:
+        return sum(
+            1 for r in net.capture.records(link_id="l", limit=5000)
+            if r.iface.startswith("r2:") and r.direction == "tx" and "Hello" in r.info
+        )
+
+    before = _r2_hellos()
+    net.run_for(5.0)
+    sent = _r2_hellos() - before
+    assert 3 <= sent <= 6, (
+        f"expected ~5 hellos in 5s at hello_interval=1.0, got {sent} "
+        "— looks like a duplicate tick chain"
+    )
