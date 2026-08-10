@@ -5,7 +5,7 @@
  * useShortcuts) or its close button. ~360px, resizing is deferred to a later
  * phase. The panel body is the untouched PropertiesPanel component.
  */
-import { Pin, PinOff, X } from 'lucide-react';
+import { Pin, PinOff, Trash2, X } from 'lucide-react';
 import { PropertiesPanel } from '@/components/PropertiesPanel';
 import { useTopologyStore } from '@/store/topologyStore';
 import { useTopoUiStore } from '@/store/topoUiStore';
@@ -18,6 +18,7 @@ export function ContextInspector() {
   const select = useTopologyStore((s) => s.select);
   const pinned = useTopoUiStore((s) => s.inspectorPinned);
   const togglePin = useTopoUiStore((s) => s.togglePin);
+  const deleteSelected = useTopoUiStore((s) => s.deleteSelected);
 
   const hasSelection = Boolean(selectedNodeId || selectedLinkId);
   const visible = hasSelection || pinned;
@@ -45,6 +46,16 @@ export function ContextInspector() {
       <div className="flex shrink-0 items-center justify-between border-b border-fg/10 px-3 py-2">
         <span className="text-xs font-semibold uppercase tracking-wider text-fg/50">Inspector</span>
         <div className="flex items-center gap-1">
+          {hasSelection && (
+            <button
+              onClick={() => deleteSelected?.()}
+              aria-label={selectedNodeId ? 'Delete device' : 'Delete link'}
+              title={selectedNodeId ? 'Delete device' : 'Delete link'}
+              className="grid h-6 w-6 place-items-center rounded text-fg/50 transition-colors hover:bg-danger/10 hover:text-danger"
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </button>
+          )}
           <button
             onClick={togglePin}
             aria-label={pinned ? 'Unpin inspector' : 'Pin inspector'}

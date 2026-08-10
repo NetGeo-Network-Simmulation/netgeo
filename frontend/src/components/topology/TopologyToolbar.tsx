@@ -5,8 +5,9 @@
  * links are drawn by dragging between device ports). Group is reserved for a
  * later phase and is disabled so it never reads as a dead control.
  */
-import { MousePointer2, Spline, Group as GroupIcon, Plus } from 'lucide-react';
+import { MousePointer2, Spline, Group as GroupIcon, Plus, Trash2 } from 'lucide-react';
 import { useTopoUiStore } from '@/store/topoUiStore';
+import { useTopologyStore } from '@/store/topologyStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
 
@@ -14,6 +15,11 @@ export function TopologyToolbar() {
   const tool = useTopoUiStore((s) => s.tool);
   const setTool = useTopoUiStore((s) => s.setTool);
   const openPicker = useTopoUiStore((s) => s.openPicker);
+  const deleteSelected = useTopoUiStore((s) => s.deleteSelected);
+  const selectedNodeId = useTopologyStore((s) => s.selectedNodeId);
+  const selectedLinkId = useTopologyStore((s) => s.selectedLinkId);
+  const hasSelection = Boolean(selectedNodeId || selectedLinkId);
+  const deleteLabel = selectedNodeId ? 'Delete device' : selectedLinkId ? 'Delete link' : 'Delete';
 
   return (
     <div className={cn('pointer-events-auto absolute bottom-4 left-4 flex items-center gap-1', zc.workspace)}>
@@ -33,6 +39,24 @@ export function TopologyToolbar() {
         <ToolButton active={tool === 'select'} onClick={() => setTool('select')} icon={MousePointer2} label="Select" hint="Select (V)" />
         <ToolButton active={tool === 'link'} onClick={() => setTool('link')} icon={Spline} label="Link" hint="Link mode (L) — drag between device ports" />
         <ToolButton active={false} onClick={() => {}} icon={GroupIcon} label="Group" hint="Grouping — coming in a later phase" disabled />
+
+        <span className="mx-0.5 h-6 w-px bg-fg/10" aria-hidden />
+
+        <button
+          onClick={() => deleteSelected?.()}
+          disabled={!hasSelection}
+          aria-label={deleteLabel}
+          title={hasSelection ? `${deleteLabel} (Delete/Backspace)` : 'Select a device or link to delete'}
+          className={cn(
+            'flex items-center gap-1.5 rounded-full px-2.5 py-2 text-xs transition-colors',
+            hasSelection
+              ? 'text-danger/80 hover:bg-danger/10 hover:text-danger'
+              : 'cursor-not-allowed opacity-40',
+          )}
+        >
+          <Trash2 className="h-4 w-4" />
+          <span className="hidden md:inline">Delete</span>
+        </button>
       </div>
     </div>
   );

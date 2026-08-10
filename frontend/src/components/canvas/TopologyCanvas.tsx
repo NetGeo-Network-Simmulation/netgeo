@@ -65,12 +65,14 @@ export function TopologyCanvas() {
   const selectedLinkId = useTopologyStore((s) => s.selectedLinkId);
   const moveNode = useTopologyStore((s) => s.moveNode);
   const upsertLink = useTopologyStore((s) => s.upsertLink);
+  const removeNode = useTopologyStore((s) => s.removeNode);
   const removeLink = useTopologyStore((s) => s.removeLink);
   const select = useTopologyStore((s) => s.select);
   const projectId = useUiStore((s) => s.projectId);
   const openPicker = useTopoUiStore((s) => s.openPicker);
   const setFit = useTopoUiStore((s) => s.setFit);
   const setCenterOn = useTopoUiStore((s) => s.setCenterOn);
+  const setDeleteSelected = useTopoUiStore((s) => s.setDeleteSelected);
   const overlays = useTopoUiStore((s) => s.overlays);
   const inspectorPinned = useTopoUiStore((s) => s.inspectorPinned);
   const protoActive = overlays.ospf || overlays.bgp || overlays.vlan;
@@ -230,6 +232,65 @@ export function TopologyCanvas() {
     (_e, node) => select({ nodeId: node.id }),
     [select],
   );
+
+  /* --- Delete: confirm (nodes cascade their links), call the API, only then
+   * touch the store — a failed DELETE must leave the object in place. -------- */
+  const deleteNode = useCallback(
+    (id: string) => {
+      const node = nodesMap.get(id);
+      if (!node) return;
+      const ifaceIds = new Set(node.interfaces.map((i) => i.id));
+      const linkCount = Array.from(linksMap.values()).filter(
+        (l) => ifaceIds.has(l.a_iface) || ifaceIds.has(l.b_iface),
+      ).length;
+      const msg =
+        linkCount > 0
+          ? `Delete "${node.name}"? Its ${linkCount} connected link${linkCount === 1 ? '' : 's'} will be deleted too. This can't be undone.`
+          : `Delete "${node.name}"? This can't be undone.`;
+      if (!window.confirm(msg)) return;
+      void nodesApi
+        .remove(id)
+        .then(() => removeNode(id))
+        .catch(() => window.alert(`Failed to delete "${node.name}". It was not removed — try again.`));
+    },
+    [nodesMap, linksMap, removeNode],
+  );
+
+  const deleteLink = useCallback(
+    (id: string) => {
+      if (!linksMap.has(id)) return;
+      void linksApi
+        .remove(id)
+        .then(() => removeLink(id))
+        .catch(() => window.alert('Failed to delete link. It was not removed — try again.'));
+    },
+    [linksMap, removeLink],
+  );
+
+  // Shared by the toolbar button, the Inspector's delete button, and the
+  // Delete/Backspace key below — one entry point, one confirm/error path.
+  useEffect(() => {
+    const run = () => {
+      if (selectedNodeId) deleteNode(selectedNodeId);
+      else if (selectedLinkId) deleteLink(selectedLinkId);
+    };
+    setDeleteSelected(run);
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      const el = e.target as HTMLElement | null;
+      // Never hijack Delete/Backspace while typing (Inspector's hostname field etc).
+      if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT' || el.isContentEditable)) return;
+      if (!selectedNodeId && !selectedLinkId) return;
+      e.preventDefault();
+      run();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      setDeleteSelected(null);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [selectedNodeId, selectedLinkId, deleteNode, deleteLink, setDeleteSelected]);
 
   /* --- Link creation ------------------------------------------------------- */
   // A completed handle→handle drag is the ONLY thing that creates a link. We

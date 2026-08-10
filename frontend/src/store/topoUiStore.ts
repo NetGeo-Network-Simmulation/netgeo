@@ -30,6 +30,9 @@ interface TopoUiState {
   fit: (() => void) | null;
   /** Registered by TopologyCanvas.onInit; centers the viewport on a point. */
   centerOn: ((x: number, y: number) => void) | null;
+  /** Registered by TopologyCanvas; deletes the current selection (confirms,
+   *  calls the API, then updates the store). Null while the canvas isn't mounted. */
+  deleteSelected: (() => void) | null;
 
   setTool: (t: TopoTool) => void;
   openPicker: (pos?: FlowPos) => void;
@@ -38,6 +41,7 @@ interface TopoUiState {
   toggleOverlay: (k: OverlayKey) => void;
   setFit: (fn: (() => void) | null) => void;
   setCenterOn: (fn: ((x: number, y: number) => void) | null) => void;
+  setDeleteSelected: (fn: (() => void) | null) => void;
 }
 
 export const useTopoUiStore = create<TopoUiState>((set) => ({
@@ -47,6 +51,7 @@ export const useTopoUiStore = create<TopoUiState>((set) => ({
   overlays: { ospf: false, bgp: false, vlan: false, l3: false },
   fit: null,
   centerOn: null,
+  deleteSelected: null,
 
   setTool: (tool) => set({ tool }),
   // Device picker is one of the exclusive modals; its open state is the shared
@@ -65,4 +70,5 @@ export const useTopoUiStore = create<TopoUiState>((set) => ({
     set((s) => ({ overlays: { ...s.overlays, [k]: !s.overlays[k] } })),
   setFit: (fit) => set({ fit }),
   setCenterOn: (centerOn) => set({ centerOn }),
+  setDeleteSelected: (deleteSelected) => set({ deleteSelected }),
 }));
