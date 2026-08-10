@@ -177,6 +177,24 @@ def test_show_segment_routing_commands():
     assert "10.255.0.3/32" in fwd            # LDP FEC entry (same table)
 
 
+def test_stale_node_sid_swap_withdrawn_when_source_powered_off():
+    """F44: pe1's node-SID swap toward pe2 must be retracted once OSPF has
+    withdrawn the route to pe2's loopback (pe2 powered off) — otherwise a
+    node-SID-tagged packet keeps getting swapped toward a next hop that no
+    longer leads anywhere."""
+    net = _lab()
+    pe1 = net.devices["pe1"]
+    assert (SRGB + 102) in pe1.lfib   # sanity: swap entry present while pe2 is up
+
+    net.set_device_power("pe2", on=False)
+    net.run_for(30.0)   # dead_interval (4s) + several OSPF/LDP/SR tick cycles
+
+    # OSPF must have withdrawn the route to pe2's loopback by now.
+    assert pe1.lookup(IPv4Address("10.255.0.3")) is None
+    # The SR swap entry for pe2's node-SID must be retracted along with it.
+    assert (SRGB + 102) not in pe1.lfib, pe1.lfib.get(SRGB + 102)
+
+
 def test_replay_determinism():
     a, b = _lab(), _lab()
     assert a.ledger.seq == b.ledger.seq

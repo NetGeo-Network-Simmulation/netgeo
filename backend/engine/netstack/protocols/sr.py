@@ -105,10 +105,6 @@ class SrProcess:
         if self._started:
             return
         self._started = True
-        # Our own node-SID is the LSP egress for our loopback: pop (UHP).
-        self.router.lfib[self.srgb_base + self.node_sid] = LfibEntry(
-            str(self.loopback), "pop", None, None, None, None
-        )
         self._tick(net)
 
     def _tick(self, net: "Network") -> None:
@@ -116,6 +112,7 @@ class SrProcess:
             return
         self._alloc_adj_sids()
         self._advertise(net)
+        self._rebuild()
         _schedule(net, self.interval, self.router.node_id, lambda: self._tick(net))
 
     def _alloc_adj_sids(self) -> None:
@@ -175,22 +172,47 @@ class SrProcess:
         if self.sid_db.get(advert.router_id) == advert:
             return                       # unchanged: newer-wins by content diff
         self.sid_db[advert.router_id] = advert.copy()
-        self._install_node_sid(advert)
+        self._rebuild()
         self._flood(net, advert, exclude_iface=iface.name)   # reflood, not to sender
 
-    def _install_node_sid(self, advert: SrSidAdvert) -> None:
+    def _rebuild(self) -> None:
+        """Full replace of our node-SID label range, mirroring
+        ``LdpProcess._rebuild``: every swap entry is re-derived from the
+        *current* OSPF route + ldp.adj rather than written once and kept
+        forever, so a source that's no longer reachable (powered off, no
+        longer advertising) has its entry retracted instead of going stale
+        (F44)."""
+        mine = {self.srgb_base + a.node_sid for a in self.sid_db.values()}
+        mine.add(self.srgb_base + self.node_sid)
+        lfib: dict[int, LfibEntry] = {
+            k: v for k, v in self.router.lfib.items() if k not in mine
+        }
+        # Our own node-SID is the LSP egress for our loopback: pop (UHP).
+        lfib[self.srgb_base + self.node_sid] = LfibEntry(
+            str(self.loopback), "pop", None, None, None, None
+        )
+        for rid, advert in sorted(self.sid_db.items()):
+            if rid == self.router_id:
+                continue
+            entry = self._node_sid_entry(advert)
+            if entry is not None:
+                lfib[self.srgb_base + advert.node_sid] = entry
+        self.router.lfib = lfib
+
+    def _node_sid_entry(self, advert: SrSidAdvert) -> LfibEntry | None:
         """Node-SID swap toward a remote loopback: label unchanged (uniform
-        SRGB), next hop from the OSPF route, L2 rewrite from ldp.adj."""
+        SRGB), next hop from the OSPF route, L2 rewrite from ldp.adj. Returns
+        None (no entry) once the route or adjacency is no longer live."""
         prefix = IPv4Network(advert.prefix)
         route = self.router.lookup(IPv4Address(prefix.network_address))
         if route is None or route.next_hop is None:
-            return
+            return None
         adj = self.ldp.adj.get(route.next_hop)
         if adj is None:
-            return
+            return None
         mac, ifn = adj
         label = self.srgb_base + advert.node_sid
-        self.router.lfib[label] = LfibEntry(str(prefix), "swap", label, route.next_hop, mac, ifn)
+        return LfibEntry(str(prefix), "swap", label, route.next_hop, mac, ifn)
 
     # ----- ops / test hook ---------------------------------------------------
     def install_policy(self, net: "Network", sid_list: list[int], inner) -> None:
