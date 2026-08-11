@@ -63,6 +63,17 @@ async def _topo(r: MemoryRepository, project_id: str):
         raise translate_not_found(exc) from exc
 
 
+async def _locked(project_id: str, fn):
+    """Run ``fn`` in the threadpool while holding the project's lab lock.
+
+    Every lab endpoint below mutates the same cached ``Lab``/``Network`` on a
+    real OS worker thread (``run_in_threadpool``), which isn't thread-safe —
+    two concurrent requests on one project can interleave inside the engine
+    and corrupt shared state such as the ledger's seq counter (F62).
+    """
+    return await run_in_threadpool(netlab.get_lab_manager().call_locked, project_id, fn)
+
+
 def _lab_for(topo):
     return netlab.get_lab_manager().get(topo)
 
@@ -104,7 +115,7 @@ async def lab_ping(project_id: str, body: PingRequest, r: MemoryRepository = Dep
         }
 
     try:
-        return await run_in_threadpool(work)
+        return await _locked(project_id, work)
     except NotFound:
         raise
     except ValueError as exc:
@@ -124,7 +135,7 @@ async def lab_traceroute(
         return {**report.as_dict(), "mode": lab.mode}
 
     try:
-        return await run_in_threadpool(work)
+        return await _locked(project_id, work)
     except NotFound:
         raise
     except ValueError as exc:
@@ -144,7 +155,7 @@ async def lab_cli(project_id: str, body: CliRequest, r: MemoryRepository = Depen
         return {"node": body.node, "output": output, "prompt": session.prompt}
 
     try:
-        return await run_in_threadpool(work)
+        return await _locked(project_id, work)
     except NotFound:
         raise
     except ValueError as exc:
@@ -175,7 +186,7 @@ async def lab_ledger(
             "records": led.tail(from_seq, min(limit, 2000), type_prefix, node),
         }
 
-    return await run_in_threadpool(work)
+    return await _locked(project_id, work)
 
 
 @router.post("/{project_id}/mode")
@@ -190,7 +201,7 @@ async def lab_mode(project_id: str, body: ModeRequest, r: MemoryRepository = Dep
         lab.do_mode(body.mode)
         return {"project_id": project_id, "mode": lab.mode, "seq": lab.net.ledger.seq}
 
-    return await run_in_threadpool(work)
+    return await _locked(project_id, work)
 
 
 @router.post("/{project_id}/step")
@@ -216,7 +227,7 @@ async def lab_step(project_id: str, body: StepRequest, r: MemoryRepository = Dep
             "records": led.tail(led.seq - dispatched, min(dispatched, 500)),
         }
 
-    return await run_in_threadpool(work)
+    return await _locked(project_id, work)
 
 
 @router.post("/{project_id}/seek")
@@ -238,7 +249,7 @@ async def lab_seek(project_id: str, body: SeekRequest, r: MemoryRepository = Dep
             "pending_events": len(lab.net.scheduler.queue),
         }
 
-    return await run_in_threadpool(work)
+    return await _locked(project_id, work)
 
 
 @router.get("/{project_id}/captures")
@@ -274,7 +285,7 @@ async def lab_captures(
             "records": rows,
         }
 
-    return await run_in_threadpool(work)
+    return await _locked(project_id, work)
 
 
 @router.get("/{project_id}/pcapng")
@@ -294,7 +305,7 @@ async def lab_pcapng(
         records = lab.net.capture.records(link_id=link_id, limit=1000)
         return write_pcapng(records)
 
-    data = await run_in_threadpool(work)
+    data = await _locked(project_id, work)
     name = f"netgeo-{project_id[:8]}{('-' + link_id[:8]) if link_id else ''}.pcapng"
     return Response(
         content=data,
@@ -372,7 +383,7 @@ async def lab_tables(project_id: str, node_ref: str, r: MemoryRepository = Depen
         out["qos"] = qos_rows
         return out
 
-    return await run_in_threadpool(work)
+    return await _locked(project_id, work)
 
 
 @router.get("/{project_id}/status")
@@ -387,7 +398,7 @@ async def lab_status(project_id: str, r: MemoryRepository = Depends(repo)):
             "events": lab.net.events_log[-50:],
         }
 
-    return await run_in_threadpool(work)
+    return await _locked(project_id, work)
 
 
 @router.post("/{project_id}/rebuild")
@@ -400,7 +411,7 @@ async def lab_rebuild(project_id: str, r: MemoryRepository = Depends(repo)):
         lab = _lab_for(topo)
         return {"project_id": project_id, "stats": lab.net.stats()}
 
-    return await run_in_threadpool(work)
+    return await _locked(project_id, work)
 
 
 @router.post("/{project_id}/auto-address")

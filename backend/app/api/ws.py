@@ -179,7 +179,10 @@ async def ws_console(
         when nothing changed and a transparent rebuild after any edit.
         """
         topo = await repo.topology(node.project_id)
-        lab = await run_in_threadpool(netlab_service.get_lab_manager().get, topo)
+        # F62: same lock the /api/lab/* endpoints use — this console shares
+        # the project's Lab/Network with them and is just as non-thread-safe.
+        manager = netlab_service.get_lab_manager()
+        lab = await run_in_threadpool(manager.call_locked, node.project_id, lambda: manager.get(topo))
         return lab.session_for(node_id)
 
     try:
@@ -220,7 +223,11 @@ async def ws_console(
                 if session is None:
                     output, prompt = "% node not present in lab\n", f"{node.name}> "
                 else:
-                    output = await run_in_threadpool(session.execute, cmd)
+                    output = await run_in_threadpool(
+                        netlab_service.get_lab_manager().call_locked,
+                        node.project_id,
+                        lambda: session.execute(cmd),
+                    )
                     prompt = session.prompt
             except Exception:
                 logger.exception("console command failed for node=%s", node_id)

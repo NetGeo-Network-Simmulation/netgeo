@@ -50,6 +50,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
+from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import lru_cache
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
@@ -520,10 +522,40 @@ class Lab:
 
 
 class LabManager:
-    """At most one live lab per project, invalidated by topology fingerprint."""
+    """At most one live lab per project, invalidated by topology fingerprint.
+
+    ``Lab``/``Network`` mutation is synchronous, non-thread-safe Python state
+    (event scheduler heap, ledger seq counter, journal). The API layer runs
+    every lab endpoint via ``run_in_threadpool`` — real OS worker threads, not
+    coroutines — so two concurrent requests against the *same* project can
+    otherwise interleave inside the engine and corrupt it (F62). ``lock()``
+    hands out one :class:`threading.Lock` per project id (not a single global
+    lock, so unrelated projects never block each other) for callers to hold
+    for the duration of any Lab/Network access.
+    """
 
     def __init__(self) -> None:
         self._labs: dict[str, Lab] = {}
+        self._locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
+
+    def lock(self, project_id: str) -> threading.Lock:
+        """Per-project lock guarding Lab/Network mutation (F62).
+
+        ``defaultdict.__getitem__`` creates-or-fetches the lock in one atomic
+        C call, so this needs no extra guard lock under the GIL.
+        """
+        return self._locks[project_id]
+
+    def call_locked(self, project_id: str, fn):
+        """Run synchronous ``fn()`` while holding ``project_id``'s lock.
+
+        Callers run this via ``run_in_threadpool`` (it does blocking engine
+        work); the lock is a plain ``threading.Lock`` for that reason — it
+        must be visible to whichever OS worker thread gets the call, not just
+        the event loop, so ``asyncio.Lock`` would not do here.
+        """
+        with self.lock(project_id):
+            return fn()
 
     def get(self, topo: Topology, seed: int = 0) -> Lab:
         pid = topo.project.id

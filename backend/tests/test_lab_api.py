@@ -7,6 +7,8 @@ auto-addressing wizard.
 """
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from app.services.netlab import get_lab_manager
@@ -290,3 +292,91 @@ async def test_lab_unknown_project_is_404(client):
         "/api/lab/nope/ping", json={"src": "a", "dst": "10.0.0.1"}
     )
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# F62 — /api/lab/* runs each request's engine work on a real OS thread via
+# run_in_threadpool. Two concurrent requests against the *same* project's
+# Lab share one Network/Ledger with no synchronization, so their dispatch
+# loops can interleave and corrupt the shared ledger seq counter.
+#
+# The race window is forced deterministically (no timing luck): the first
+# ledger event dispatched after warm-up captures the pre-increment seq, then
+# sleeps — long enough for a genuinely concurrent second request to run its
+# whole ping (many ledger events) if nothing serializes the two requests.
+# Resuming with the *stale* seq reproduces the classic lost-update. With the
+# per-project lock in place, the second request can't even enter its work()
+# closure during that sleep (blocked acquiring the lock), so nothing races
+# and the sleep just costs wall-clock time — deterministically green.
+# ---------------------------------------------------------------------------
+
+def _install_ledger_race(lab):
+    """Replace the ledger's dispatch observer (registered once at Network
+    build time, so a class-level monkeypatch can't reach the already-bound
+    callback the scheduler holds) with one that stalls its first invocation.
+
+    Mutating ``scheduler._observers`` in place — not ``Ledger``/``engine``
+    source — keeps this a test-only injection, not an engine change.
+    """
+    import threading
+    import time
+
+    ledger = lab.net.ledger
+    observers = lab.net.scheduler._observers
+
+    PAUSE_S = 0.5
+    state = {"paused": False}
+    guard = threading.Lock()
+
+    def patched(now, event):
+        with guard:
+            first = not state["paused"]
+            state["paused"] = True
+        record_seq = ledger.seq
+        if first:
+            time.sleep(PAUSE_S)  # let a real concurrent request run freely here
+        # Reproduce Ledger._on_event's `self.seq += 1` — for the stalled
+        # call this uses the seq captured *before* sleeping, exactly what
+        # two racing OS threads can produce on an unsynchronized
+        # read-modify-write.
+        ledger.seq = record_seq + 1
+        ledger.records.append({
+            "seq": ledger.seq,
+            "t": round(now, 9),
+            "type": event.type.name,
+            "node": event.node_id or "",
+        })
+
+    for i, obs in enumerate(observers):
+        if getattr(obs, "__self__", None) is ledger:
+            observers[i] = patched
+
+
+async def test_concurrent_pings_on_same_project_do_not_corrupt_ledger(client):
+    """Two /lab/{id}/ping calls racing on one project must not desync the
+    shared ledger's seq counter (F62) — proves the per-project lock actually
+    serializes engine mutation, not just API-layer bookkeeping."""
+    pid = await _routed_topology(client)
+
+    # Build + settle the lab *before* installing the race hook, so this test
+    # isolates the do_ping race from the separate first-build race.
+    warm = await client.post(
+        f"/api/lab/{pid}/ping", json={"src": "h1", "dst": "h2", "count": 1}
+    )
+    assert warm.status_code == 200, warm.text
+
+    _install_ledger_race(get_lab_manager().peek(pid))
+
+    r1, r2 = await asyncio.gather(
+        client.post(f"/api/lab/{pid}/ping", json={"src": "h1", "dst": "h2", "count": 3}),
+        client.post(f"/api/lab/{pid}/ping", json={"src": "h1", "dst": "h2", "count": 3}),
+    )
+    assert r1.status_code == 200, r1.text
+    assert r2.status_code == 200, r2.text
+
+    lab = get_lab_manager().peek(pid)
+    seqs = [rec["seq"] for rec in lab.net.ledger.records]
+    assert len(seqs) == len(set(seqs)), (
+        f"ledger seq corrupted by concurrent /lab/ping on one project (F62): "
+        f"duplicate seq values in {seqs}"
+    )

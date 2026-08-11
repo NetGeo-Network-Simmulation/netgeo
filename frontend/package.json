@@ -1,7 +1,7 @@
 {
   "name": "netgeo-frontend",
   "private": true,
-  "version": "1.2.74",
+  "version": "1.2.75",
   "type": "module",
   "description": "NetGeo — network simulation, planning, GIS digital-twin & AI workspace (React 18 + Vite + Tailwind + React Flow + MapLibre GL).",
   "scripts": {
