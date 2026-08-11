@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from enum import Enum
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -704,6 +705,11 @@ class ElevationProfile(_Base):
     samples: int
     total_distance_m: float
     points: list[ElevationPoint] = Field(default_factory=list)
+    # F67: honest terrain provenance. "dem" = real elevation data from the
+    # provider; "flat_fallback" = the provider was unreachable and every point
+    # was flattened to elevation_m=0 — callers MUST surface this, never treat
+    # a flat-fallback result as if it were real terrain.
+    terrain_source: Literal["dem", "flat_fallback"] = "dem"
 
 
 class LosCheckRequest(_Base):

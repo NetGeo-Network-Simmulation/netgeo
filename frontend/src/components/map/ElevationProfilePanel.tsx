@@ -15,7 +15,7 @@ import { useEffect, useState } from 'react';
 import { Mountain, X, Check, AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
 import { useMapStore, type ProfileData } from '@/store/mapStore';
 import { zc } from '@/theme/z';
-import { ProfileChart, verdictOf, fmtKm } from './ProfileChart';
+import { ProfileChart, TerrainSourceNotice, verdictOf, fmtKm } from './ProfileChart';
 
 /* -------------------------------------------------------------------------- */
 /* Verdict chips                                                               */
@@ -156,6 +156,7 @@ export function ElevationProfilePanel() {
             </div>
           ) : data ? (
             <div className="space-y-2.5">
+              <TerrainSourceNotice source={data.terrainSource} />
               <ProfileChart
                 points={data.points}
                 totalDistanceM={data.totalDistanceM}

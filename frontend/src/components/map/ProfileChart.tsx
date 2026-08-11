@@ -39,6 +39,25 @@ export function fmtKm(m: number): string {
   return km >= 10 ? `${km.toFixed(1)} km` : `${km.toFixed(2)} km`;
 }
 
+/**
+ * F67 — honest terrain provenance. The backend degrades to a flat-terrain
+ * profile (elevation_m=0 everywhere) when its DEM provider is unreachable, so
+ * offline/homelab installs keep working — but that result must never look
+ * like a real terrain measurement. A visible (not shouty) reliability notice,
+ * shown wherever a `terrain_source` profile is rendered.
+ */
+export function TerrainSourceNotice({ source }: { source: 'dem' | 'flat_fallback' }) {
+  if (source !== 'flat_fallback') return null;
+  return (
+    <div className="flex items-start gap-1.5 rounded-lg border border-warning/25 bg-warning/10 px-2.5 py-1.5 text-[11px] text-fg/70">
+      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-warning" />
+      <span>
+        Flat-terrain estimate — the elevation provider is unreachable, so this result assumes flat ground instead of real terrain.
+      </span>
+    </div>
+  );
+}
+
 export function ProfileChart({
   points,
   totalDistanceM,

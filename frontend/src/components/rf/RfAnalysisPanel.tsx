@@ -16,7 +16,7 @@ import { useMapStore } from '@/store/mapStore';
 import { useTopologyStore } from '@/store/topologyStore';
 import { useRfStore, RF_ANT_GAIN_DBI, type RfTab, type RfMode, type PtmpCpeInput } from '@/store/rfStore';
 import { zc } from '@/theme/z';
-import { ProfileChart, type ChartPoint } from '@/components/map/ProfileChart';
+import { ProfileChart, TerrainSourceNotice, type ChartPoint } from '@/components/map/ProfileChart';
 import {
   marginStatus,
   reliabilityPct,
@@ -195,16 +195,19 @@ function SummaryTab({ res }: { res: PtpResult }) {
       {res.profile && (
         <div>
           <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wider text-fg/50">Elevation Profile</p>
-          <ProfileChart
-            points={chartPoints(res)}
-            totalDistanceM={res.profile.total_distance_m}
-            losClear={res.los_clear}
-            fresnelClear={res.fresnel_clear}
-            txH={a?.radio?.height_agl_m ?? 10}
-            rxH={b?.radio?.height_agl_m ?? 5}
-            freqGhz={freqGhz}
-            fresnelBand
-          />
+          <TerrainSourceNotice source={res.profile.terrain_source} />
+          <div className="mt-1.5">
+            <ProfileChart
+              points={chartPoints(res)}
+              totalDistanceM={res.profile.total_distance_m}
+              losClear={res.los_clear}
+              fresnelClear={res.fresnel_clear}
+              txH={a?.radio?.height_agl_m ?? 10}
+              rxH={b?.radio?.height_agl_m ?? 5}
+              freqGhz={freqGhz}
+              fresnelBand
+            />
+          </div>
           <FresnelLegend />
         </div>
       )}
@@ -250,6 +253,7 @@ function TerrainTab({ res }: { res: PtpResult }) {
       <div className="flex flex-wrap items-center gap-2">
         <VerdictBadge ok={res.los_clear} okLabel="Line of sight clear" badLabel="LoS blocked" />
       </div>
+      <TerrainSourceNotice source={res.profile.terrain_source} />
       <ProfileChart
         points={chartPoints(res)}
         totalDistanceM={res.profile.total_distance_m}
@@ -289,6 +293,7 @@ function FresnelTab({ res }: { res: PtpResult }) {
       </div>
       {res.profile && (
         <>
+          <TerrainSourceNotice source={res.profile.terrain_source} />
           <ProfileChart
             points={chartPoints(res)}
             totalDistanceM={res.profile.total_distance_m}

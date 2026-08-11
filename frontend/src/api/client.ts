@@ -523,9 +523,14 @@ export const labApi = {
 /* ------------------------------ Wireless / RF ---------------------------- */
 /**
  * Terrain LoS/Fresnel check (backend `app/api/wireless.py`). When no `profile`
- * is supplied the server fetches a real DEM elevation profile from its pinned,
- * SSRF-safe provider and returns it alongside the verdict — the map elevation-
- * profile tool consumes exactly this. 503 if the DEM provider is unreachable.
+ * is supplied the server tries to fetch a real DEM elevation profile from its
+ * pinned, SSRF-safe provider and returns it alongside the verdict — the map
+ * elevation-profile tool consumes exactly this. If the provider is offline,
+ * `/wireless/elevation` (the raw proxy) returns 503, but `/los-check` and
+ * `/rf/ptp` degrade gracefully to a flat-terrain profile instead (so RF
+ * planning still works on air-gapped installs) — check `terrain_source`
+ * (F67) before trusting the numbers: `"flat_fallback"` means every elevation
+ * in `points` is 0 m, not measured.
  */
 export interface ElevationSample {
   lat: number;
@@ -537,6 +542,7 @@ export interface ElevationProfile {
   samples: number;
   total_distance_m: number;
   points: ElevationSample[];
+  terrain_source: 'dem' | 'flat_fallback';
 }
 export interface LosCheckResult {
   los_clear: boolean;
@@ -602,9 +608,11 @@ export interface CoverageRasterResult {
 /**
  * PtP link planning (NG-RF-03). `models` lists the propagation registry; `ptp`
  * runs a full link budget + terrain LoS/Fresnel verdict for one link. When
- * `profile` is omitted the server fetches a real DEM profile and returns it, so
- * the RF workspace gets the elevation chart from the same call. 422 on an
- * unknown model / out-of-range frequency; 503 if the DEM provider is offline.
+ * `profile` is omitted the server fetches a DEM profile and returns it, so the
+ * RF workspace gets the elevation chart from the same call — but if the DEM
+ * provider is offline it degrades to flat terrain rather than failing (F67:
+ * check `result.profile.terrain_source`, see `ElevationProfile` above). 422 on
+ * an unknown model / out-of-range frequency.
  */
 export interface PropagationParam {
   name: string;

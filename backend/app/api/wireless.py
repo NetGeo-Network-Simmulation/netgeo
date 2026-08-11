@@ -60,7 +60,7 @@ async def elevation_profile(
     """Sampled terrain elevation profile between two points (proxy to the
     elevation provider). 503 if the provider is unreachable."""
     try:
-        pts = await esvc.fetch_profile(a_lat, a_lon, b_lat, b_lon, samples)
+        pts, terrain_source = await esvc.fetch_profile(a_lat, a_lon, b_lat, b_lon, samples)
     except esvc.ElevationUnavailable as exc:
         raise HTTPException(status_code=503, detail=f"elevation provider: {exc}") from exc
     total = pts[-1]["distance_m"] if pts else 0.0
@@ -68,6 +68,7 @@ async def elevation_profile(
         samples=len(pts),
         total_distance_m=total,
         points=[ElevationPoint(**p) for p in pts],
+        terrain_source=terrain_source,
     )
 
 
@@ -84,9 +85,12 @@ async def los_check(body: LosCheckRequest):
         out_profile = None
     else:
         # fallback_to_flat=True: LoS check degrades gracefully when the elevation
-        # provider is offline by treating terrain as flat (elevation_m=0).  This
-        # allows the RF planner to keep working in air-gapped / offline deployments.
-        profile = await esvc.fetch_profile(
+        # provider is offline by treating terrain as flat (elevation_m=0). This
+        # allows the RF planner to keep working in air-gapped / offline
+        # deployments — but the result MUST say so (F67): terrain_source below,
+        # surfaced by the frontend as a visible "flat terrain" notice rather
+        # than presented as real DEM data.
+        profile, terrain_source = await esvc.fetch_profile(
             body.a_lat, body.a_lon, body.b_lat, body.b_lon, body.samples,
             fallback_to_flat=True,
         )
@@ -94,6 +98,7 @@ async def los_check(body: LosCheckRequest):
             samples=len(profile),
             total_distance_m=profile[-1]["distance_m"] if profile else 0.0,
             points=[ElevationPoint(**p) for p in profile],
+            terrain_source=terrain_source,
         )
 
     res = esvc.analyse_los(

@@ -140,7 +140,11 @@ async def plan_ptp(body: PtpRequest):
         profile = [p.model_dump() for p in body.profile]
         out_profile = None
     else:
-        profile = await esvc.fetch_profile(
+        # F67: fallback_to_flat=True keeps PtP planning usable on air-gapped /
+        # offline installs when the DEM provider is unreachable, but the result
+        # must say so — terrain_source below, surfaced by the frontend as a
+        # visible "flat terrain" notice rather than presented as real DEM data.
+        profile, terrain_source = await esvc.fetch_profile(
             body.a_lat, body.a_lon, body.b_lat, body.b_lon, body.samples,
             fallback_to_flat=True,
         )
@@ -148,6 +152,7 @@ async def plan_ptp(body: PtpRequest):
             samples=len(profile),
             total_distance_m=profile[-1]["distance_m"] if profile else 0.0,
             points=[ElevationPoint(**p) for p in profile],
+            terrain_source=terrain_source,
         )
 
     los = esvc.analyse_los(

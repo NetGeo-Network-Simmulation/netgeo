@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import math
 
+import httpx
 import pytest
 
 from app.models import CoverageRasterRequest, CoverageSite
+from app.services import elevation as esvc
 from app.services import wireless as wsvc
 from engine import wireless as rf
 
@@ -93,6 +95,48 @@ async def test_ptp_endpoint_obstructed_is_nlos(client):
     assert body["verdict"] == "obstructed"
     assert body["link_ok"] is False
     assert body["worst_obstruction_m"] > 0
+
+
+class _DeadProviderClient:
+    """Fakes the elevation provider being unreachable (F67 regression guard) —
+    no real network call, no `httpx` mutation: only ``app.services.elevation``'s
+    own module-local ``httpx`` name is swapped for the duration of the test."""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, *a, **kw):
+        raise httpx.ConnectError("simulated provider outage")
+
+
+class _FakeHttpxModule:
+    AsyncClient = _DeadProviderClient
+    HTTPError = httpx.HTTPError
+
+
+async def test_ptp_endpoint_flags_flat_fallback_when_provider_down(client, monkeypatch):
+    """F67: when no ``profile`` is supplied and the DEM provider is down, the
+    endpoint still returns 200 (offline-tolerant) but must mark the terrain as
+    ``flat_fallback`` — never presented as real DEM data."""
+    monkeypatch.setattr(esvc, "httpx", _FakeHttpxModule)
+    resp = await client.post(
+        "/api/rf/ptp",
+        json={
+            "a_lat": _A[0], "a_lon": _A[1], "b_lat": _B[0], "b_lon": _B[1],
+            "freq_mhz": 5000.0, "tx_power_dbm": 30.0, "tx_height_m": 10.0,
+            "rx_height_m": 5.0, "model_id": "fspl",
+        },
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["profile"]["terrain_source"] == "flat_fallback"
+    assert all(p["elevation_m"] == 0.0 for p in body["profile"]["points"])
 
 
 async def test_ptp_endpoint_unknown_model_422(client):

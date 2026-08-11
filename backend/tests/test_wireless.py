@@ -2,15 +2,19 @@
 
 Covers the pure RF physics (FSPL, Friis link budget, coverage radius, Fresnel,
 LoS, ITU-R P.838 rain fade, deterministic planner) and the HTTP surface
-(``/api/wireless/*``). Network-dependent paths (elevation provider) are exercised
-only via the offline ``profile`` input so the suite stays deterministic.
+(``/api/wireless/*``). Network-dependent paths (elevation provider) are
+exercised via the offline ``profile`` input, or — for the F67 flat-fallback
+regression guard — with the real DEM provider faked as unreachable, so the
+suite never makes an actual network call and stays deterministic.
 """
 from __future__ import annotations
 
 import math
 
+import httpx
 import pytest
 
+from app.services import elevation as esvc
 from engine import wireless as rf
 
 
@@ -139,6 +143,47 @@ async def test_los_check_with_offline_profile(client):
     )
     assert resp.status_code == 200, resp.text
     assert resp.json()["los_clear"] is True
+
+
+class _DeadProviderClient:
+    """Fakes the elevation provider being unreachable (F67 regression guard) —
+    no real network call, no `httpx` mutation: only ``app.services.elevation``'s
+    own module-local ``httpx`` name is swapped for the duration of the test."""
+
+    def __init__(self, *a, **kw):
+        pass
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *a):
+        return False
+
+    async def post(self, *a, **kw):
+        raise httpx.ConnectError("simulated provider outage")
+
+
+class _FakeHttpxModule:
+    AsyncClient = _DeadProviderClient
+    HTTPError = httpx.HTTPError
+
+
+async def test_los_check_flags_flat_fallback_when_provider_down(client, monkeypatch):
+    """F67: when no ``profile`` is supplied and the DEM provider is down,
+    ``/wireless/los-check`` still returns 200 (offline-tolerant) but must mark
+    the terrain as ``flat_fallback`` — never presented as real DEM data."""
+    monkeypatch.setattr(esvc, "httpx", _FakeHttpxModule)
+    resp = await client.post(
+        "/api/wireless/los-check",
+        json={
+            "a_lat": 0.0, "a_lon": 0.0, "b_lat": 0.0, "b_lon": 0.009,
+            "frequency_ghz": 5.8, "tx_height_m": 30, "rx_height_m": 30,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["profile"]["terrain_source"] == "flat_fallback"
+    assert all(p["elevation_m"] == 0.0 for p in body["profile"]["points"])
 
 
 async def test_wireless_plan_endpoint(client):

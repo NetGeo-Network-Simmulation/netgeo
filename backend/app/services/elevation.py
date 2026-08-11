@@ -13,10 +13,17 @@ sandboxed**:
 
 For fully offline / deterministic use, callers may pass a pre-fetched profile to
 the LoS endpoint and skip the network entirely.
+
+F67: ``fetch_profile`` reports *which* of those two things happened via its
+``TerrainSource`` return leg. Offline homelab installs still get a usable
+(flat-terrain) result when the provider is unreachable — but callers must
+propagate that leg into the response so the UI can flag the result as
+terrain-flattened rather than presenting it as real DEM data.
 """
 from __future__ import annotations
 
 import logging
+from typing import Literal
 
 import httpx
 
@@ -32,6 +39,9 @@ _MAX_SAMPLES = 128
 
 class ElevationUnavailable(RuntimeError):
     """The elevation provider could not be reached / returned bad data."""
+
+
+TerrainSource = Literal["dem", "flat_fallback"]
 
 
 def _interpolate_points(
@@ -65,14 +75,18 @@ def _flat_profile(pts: list[tuple[float, float, float]]) -> list[dict]:
 async def fetch_profile(
     a_lat: float, a_lon: float, b_lat: float, b_lon: float, samples: int = 24,
     *, fallback_to_flat: bool = False,
-) -> list[dict]:
-    """Return a list of ``{lat, lon, elevation_m, distance_m}`` along the path.
+) -> tuple[list[dict], TerrainSource]:
+    """Return ``([{lat, lon, elevation_m, distance_m}, ...], terrain_source)``.
 
     When ``fallback_to_flat=True`` (the default for offline-tolerant callers),
     a network or provider error silently returns a flat-terrain profile
-    (elevation_m=0.0) instead of raising.  When ``fallback_to_flat=False``
-    (the default for the elevation-proxy endpoint that must signal provider
-    unavailability explicitly), raises :class:`ElevationUnavailable`.
+    (elevation_m=0.0, ``terrain_source="flat_fallback"``) instead of raising.
+    When ``fallback_to_flat=False`` (the default for the elevation-proxy
+    endpoint that must signal provider unavailability explicitly), raises
+    :class:`ElevationUnavailable`.
+
+    Callers MUST propagate ``terrain_source`` into the response (F67) — a
+    flat-fallback result must never be presented to the user as real terrain.
     """
     pts = _interpolate_points(a_lat, a_lon, b_lat, b_lon, samples)
     locations = [{"latitude": lat, "longitude": lon} for lat, lon, _ in pts]
@@ -85,7 +99,7 @@ async def fetch_profile(
         logger.warning("elevation provider unavailable: %s", exc)
         if fallback_to_flat:
             logger.info("returning flat-terrain profile (elevation_m=0) as offline fallback")
-            return _flat_profile(pts)
+            return _flat_profile(pts), "flat_fallback"
         raise ElevationUnavailable(str(exc)) from exc
 
     if len(results) != len(pts):
@@ -95,7 +109,7 @@ async def fetch_profile(
                 "using flat-terrain fallback",
                 len(results), len(pts),
             )
-            return _flat_profile(pts)
+            return _flat_profile(pts), "flat_fallback"
         raise ElevationUnavailable("elevation provider returned mismatched length")
 
     return [
@@ -106,7 +120,7 @@ async def fetch_profile(
             "distance_m": round(pts[i][2], 2),
         }
         for i in range(len(pts))
-    ]
+    ], "dem"
 
 
 def analyse_los(
@@ -129,4 +143,6 @@ def analyse_los(
     )
 
 
-__all__ = ["fetch_profile", "analyse_los", "ElevationUnavailable", "_PROVIDER_URL"]
+__all__ = [
+    "fetch_profile", "analyse_los", "ElevationUnavailable", "TerrainSource", "_PROVIDER_URL",
+]

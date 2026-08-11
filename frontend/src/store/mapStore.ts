@@ -71,6 +71,10 @@ export interface ProfileData {
   fresnelClear: boolean;
   worstObstructionM: number;
   minClearanceRatio: number;
+  /** F67: "flat_fallback" means the DEM provider was unreachable and every
+   *  elevation was flattened to 0 m — the LoS/Fresnel verdict above is based
+   *  on flat terrain, not real elevation data. */
+  terrainSource: 'dem' | 'flat_fallback';
 }
 
 export interface MapDevice {
@@ -434,6 +438,7 @@ export const useMapStore = create<MapState>((set, get) => ({
           fresnelClear: res.fresnel_clear,
           worstObstructionM: res.worst_obstruction_m,
           minClearanceRatio: res.min_clearance_ratio,
+          terrainSource: res.profile?.terrain_source ?? 'dem',
         },
         profileLoading: false,
       });
