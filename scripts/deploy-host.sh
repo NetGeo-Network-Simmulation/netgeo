@@ -12,7 +12,10 @@ if [[ -z "${NETGEO_SUDO_PW:-}" ]]; then
   read -rsp "sudo password for ${SSH_USER}@${HOST}: " NETGEO_SUDO_PW; echo
 fi
 
-ping -c1 -W3 "$HOST" >/dev/null || { echo "host $HOST unreachable" >&2; exit 1; }
+# Reachability is probed on the SSH port, not ICMP: hosts on a tailnet (or
+# behind a firewall) routinely drop ping while SSH stays up.
+timeout 8 bash -c "cat < /dev/null > /dev/tcp/${HOST}/22" 2>/dev/null \
+  || { echo "host $HOST unreachable on ssh/22" >&2; exit 1; }
 
 # No key auth on the host; the account password doubles as the sudo password.
 # sshpass -e reads SSHPASS from env so it never appears in argv.
