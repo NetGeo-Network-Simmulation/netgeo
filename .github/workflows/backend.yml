@@ -3,11 +3,13 @@
 # =============================================================================
 name: backend-ci
 
+# Runs on every PR so the required "test" check always reports. The heavy steps
+# are gated on whether backend files actually changed -- a paths: filter here
+# would make the check never run, and a required check that never runs blocks
+# the PR forever.
 on:
   push:
-    paths: ["backend/**", "infra/db/**", ".github/workflows/backend.yml"]
   pull_request:
-    paths: ["backend/**", "infra/db/**", ".github/workflows/backend.yml"]
 
 jobs:
   test:
@@ -15,14 +17,35 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect backend changes
+        id: changed
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+            git fetch -q origin "${{ github.base_ref }}"
+            files=$(git diff --name-only "$base"...HEAD)
+          else
+            files=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo backend/)
+          fi
+          if echo "$files" | grep -qE '^(backend/|infra/db/|\.github/workflows/backend\.yml)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No backend changes; skipping lint+tests."
+          fi
 
       - uses: actions/setup-python@v5
+        if: steps.changed.outputs.run == 'true'
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: backend/requirements.txt
 
       - name: Install dependencies
+        if: steps.changed.outputs.run == 'true'
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
@@ -30,9 +53,11 @@ jobs:
           pip install ruff
 
       - name: Lint (ruff)
+        if: steps.changed.outputs.run == 'true'
         working-directory: backend
         run: ruff check .
 
       - name: Test (pytest)
+        if: steps.changed.outputs.run == 'true'
         working-directory: backend
         run: pytest -q
