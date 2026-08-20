@@ -8,9 +8,11 @@ RB-03: ``get_current_user_ws`` is the WebSocket variant — token comes as a
 query-string parameter because browsers cannot send Authorization headers in
 the WebSocket upgrade handshake.
 """
+
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
 from fastapi import Depends
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -39,7 +41,7 @@ def translate_not_found(exc: StoreNotFound) -> ApiNotFound:
 
 
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials | None = Depends(_bearer),
+    credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> dict:
     """FastAPI dependency: extract and verify a Bearer JWT from the Authorization header.
 

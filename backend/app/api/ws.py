@@ -9,6 +9,7 @@ Auth (RB-03):
   header in the WebSocket upgrade handshake.  An invalid or missing token causes
   the handler to close the connection with code 4401 without ever accepting it.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -36,6 +37,7 @@ router = APIRouter()
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _reject_ws(ws: WebSocket, code: int, reason: str) -> None:
     """Close a WebSocket before or after accept, swallowing transport errors."""
     with contextlib.suppress(Exception):
@@ -45,6 +47,7 @@ async def _reject_ws(ws: WebSocket, code: int, reason: str) -> None:
 # ---------------------------------------------------------------------------
 # /ws/topology
 # ---------------------------------------------------------------------------
+
 
 @router.websocket("/ws/topology")
 async def ws_topology(
@@ -87,7 +90,9 @@ async def ws_topology(
                 {"type": "snapshot", "topology": topo.model_dump(mode="json")}
             )
             plan = wsvc.plan_topology(topo)
-            await ws.send_json({"type": "wireless.plan", **plan.model_dump(mode="json")})
+            await ws.send_json(
+                {"type": "wireless.plan", **plan.model_dump(mode="json")}
+            )
         except NotFound:
             with contextlib.suppress(Exception):
                 await ws.send_json({"type": "error", "reason": "project not found"})
@@ -129,6 +134,7 @@ async def ws_topology(
 # ---------------------------------------------------------------------------
 # /ws/console/{node_id}
 # ---------------------------------------------------------------------------
+
 
 @router.websocket("/ws/console/{node_id}")
 async def ws_console(
@@ -181,7 +187,9 @@ async def ws_console(
         # F62: same lock the /api/lab/* endpoints use — this console shares
         # the project's Lab/Network with them and is just as non-thread-safe.
         manager = netlab_service.get_lab_manager()
-        lab = await run_in_threadpool(manager.call_locked, node.project_id, lambda: manager.get(topo))
+        lab = await run_in_threadpool(
+            manager.call_locked, node.project_id, lambda: manager.get(topo)
+        )
         return lab.session_for(node_id)
 
     try:
@@ -215,7 +223,7 @@ async def ws_console(
                 payload = json.loads(raw)
                 if isinstance(payload, dict) and payload.get("type") == "input":
                     cmd = str(payload.get("data", ""))
-            except Exception:
+            except json.JSONDecodeError:
                 pass
             try:
                 session = await _session()
@@ -225,7 +233,7 @@ async def ws_console(
                     output = await run_in_threadpool(
                         netlab_service.get_lab_manager().call_locked,
                         node.project_id,
-                        lambda: session.execute(cmd),
+                        lambda session=session, cmd=cmd: session.execute(cmd),
                     )
                     prompt = session.prompt
             except Exception:
@@ -298,7 +306,12 @@ async def ws_collab(
     username = str(user.get("sub") or "user")
     # uuid suffix so the same user in two tabs is two distinct peers.
     peer_id = f"{username}:{uuid.uuid4().hex[:8]}"
-    peer = {"id": peer_id, "name": username, "color": "", "lastSeen": int(time.time() * 1000)}
+    peer = {
+        "id": peer_id,
+        "name": username,
+        "color": "",
+        "lastSeen": int(time.time() * 1000),
+    }
 
     async with _collab_lock:
         room = _collab_rooms.setdefault(project_key, {})
@@ -321,7 +334,7 @@ async def ws_collab(
                 continue
             try:
                 msg = json.loads(raw)
-            except Exception:
+            except json.JSONDecodeError:
                 continue
             if not isinstance(msg, dict):
                 continue
@@ -329,13 +342,21 @@ async def ws_collab(
             if mtype == "presence.cursor":
                 await _collab_broadcast(
                     project_key,
-                    {"type": "presence.cursor", "peer_id": peer_id, "cursor": msg.get("cursor")},
+                    {
+                        "type": "presence.cursor",
+                        "peer_id": peer_id,
+                        "cursor": msg.get("cursor"),
+                    },
                     exclude=peer_id,
                 )
             elif mtype == "presence.selection":
                 await _collab_broadcast(
                     project_key,
-                    {"type": "presence.selection", "peer_id": peer_id, "selection": msg.get("selection")},
+                    {
+                        "type": "presence.selection",
+                        "peer_id": peer_id,
+                        "selection": msg.get("selection"),
+                    },
                     exclude=peer_id,
                 )
             elif mtype == "crdt.op":
@@ -358,5 +379,3 @@ async def ws_collab(
         await _collab_broadcast(
             project_key, {"type": "presence.leave", "peer_id": peer_id}
         )
-
-

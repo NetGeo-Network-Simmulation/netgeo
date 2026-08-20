@@ -97,26 +97,26 @@ class Interface:
     """A device port. Owns addressing, VLAN config and the egress queue."""
 
     __slots__ = (
-        "name",
-        "device",
-        "mac",
-        "ips",
-        "ips6",
-        "slaac",
-        "vlan_mode",
-        "access_vlan",
-        "trunk_vlans",
-        "enabled",
-        "attachment",
-        "counters",
         "_queues",
         "_transmitting",
-        "queue_depth",
-        # STP per-port state (used when the owning device is a Switch)
-        "stp_state",
-        "stp_role",
+        "access_vlan",
+        "attachment",
+        "counters",
+        "device",
+        "enabled",
+        "ips",
+        "ips6",
         # Link aggregation: member ports point at their logical port-channel.
         "lag_parent",
+        "mac",
+        "name",
+        "queue_depth",
+        "slaac",
+        "stp_role",
+        # STP per-port state (used when the owning device is a Switch)
+        "stp_state",
+        "trunk_vlans",
+        "vlan_mode",
     )
 
     def __init__(

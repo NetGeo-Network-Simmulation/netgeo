@@ -70,7 +70,7 @@ class CliSession:
             if self.dialect == "mikrotik":
                 return self._mikrotik(line)
             return self._cisco(line)
-        except Exception as exc:  # never crash a console
+        except Exception as exc:  # noqa: BLE001 - never crash the console REPL
             return f"% error: {exc}\n"
 
     # =========================== Cisco-like ==================================
@@ -198,14 +198,14 @@ class CliSession:
                 f"NetGeo ForgeOS Software, {dev.kind.upper()} platform "
                 f"(nos={dev.nos})\nDevice {dev.name}, uptime {self.net.now:.1f}s sim-time\n"
             )
-        if low.startswith("show ip interface brief") or low.startswith("show ip int br"):
+        if low.startswith(("show ip interface brief", "show ip int br")):
             rows = ["Interface        IP-Address         OK? Status"]
             for i in dev.interfaces.values():
                 ip = str(i.ips[0]) if i.ips else "unassigned"
                 status = "up" if i.is_up else ("admin-down" if not i.enabled else "down")
                 rows.append(f"{i.name:<16} {ip:<18} YES {status}")
             return "\n".join(rows) + "\n"
-        if low.startswith("show interfaces") or low.startswith("show interface"):
+        if low.startswith(("show interfaces", "show interface")):
             out = []
             for i in dev.interfaces.values():
                 c = i.counters
@@ -228,14 +228,14 @@ class CliSession:
                 dev_part = f", {r['iface']}" if r["iface"] else ""
                 rows.append(f"{code}    {r['prefix']} [{r['ad']}/{r['metric']}] {via}{dev_part}")
             return "\n".join(rows) + "\n"
-        if low.startswith("show ipv6 neighbors") or low.startswith("show ipv6 neighbor"):
+        if low.startswith(("show ipv6 neighbors", "show ipv6 neighbor")):
             if not isinstance(dev, (Host, Router)):
                 return "% No neighbor table on this device\n"
             rows = ["IPv6 Address                             Link-layer Addr      Interface"]
             for ip, (mac, ifname) in sorted(dev.nd_cache.items(), key=lambda kv: str(kv[0])):
                 rows.append(f"{ip!s:<40} {mac:<20} {ifname}")
             return "\n".join(rows) + "\n"
-        if low.startswith("show ipv6 interface brief") or low.startswith("show ipv6 int br"):
+        if low.startswith(("show ipv6 interface brief", "show ipv6 int br")):
             rows = ["Interface        Status  IPv6 Address(es)"]
             for i in dev.interfaces.values():
                 status = "up" if i.is_up else ("admin-down" if not i.enabled else "down")
@@ -257,7 +257,7 @@ class CliSession:
                 lbl = f" label {r['vpn_label']}" if r.get("vpn_label") is not None else ""
                 rows.append(f"{code}    {r['prefix']} [{r['ad']}/{r['metric']}] {via}{dev_part}{lbl}")
             return "\n".join(rows) + "\n"
-        if low.startswith("show mpls forwarding-table") or low.startswith("show mpls forwarding"):
+        if low.startswith(("show mpls forwarding-table", "show mpls forwarding")):
             if not isinstance(dev, Router):
                 return "% This device does not route\n"
             rows = ["Local  Outgoing   Prefix              Next Hop         Interface"]
@@ -268,7 +268,7 @@ class CliSession:
                     f"{(e['next_hop'] or '-'):<16} {e['out_iface'] or '-'}"
                 )
             return "\n".join(rows) + "\n"
-        if low.startswith("show segment-routing sid-database") or low.startswith("show sr sid-database"):
+        if low.startswith(("show segment-routing sid-database", "show sr sid-database")):
             if not isinstance(dev, Router):
                 return "% This device does not route\n"
             sr = self._proc("sr")
@@ -278,14 +278,14 @@ class CliSession:
             for r in sr.sid_rows():
                 rows.append(f"{r['router_id']:<16} {r['prefix']:<19} {r['sid']:<6} {r['label']}")
             return "\n".join(rows) + "\n"
-        if low.startswith("show segment-routing adjacency-sid") or low.startswith("show sr adjacency-sid"):
+        if low.startswith(("show segment-routing adjacency-sid", "show sr adjacency-sid")):
             if not isinstance(dev, Router):
                 return "% This device does not route\n"
             rows = ["Label   Peer             Interface"]
             for r in dev.sr_adj_rows():
                 rows.append(f"{r['label']:<7} {r['peer']:<16} {r['out_iface']}")
             return "\n".join(rows) + "\n"
-        if low.startswith("show bgp evpn") or low.startswith("show bgp l2vpn evpn"):
+        if low.startswith(("show bgp evpn", "show bgp l2vpn evpn")):
             vx = self._proc("vxlan")
             if vx is None:
                 return "% EVPN/VXLAN is not enabled\n"
@@ -296,7 +296,7 @@ class CliSession:
                     f"{r['vtep']:<16} {r['origin']}"
                 )
             return "\n".join(rows) + "\n"
-        if low.startswith("show vxlan vtep") or low.startswith("show nve peers"):
+        if low.startswith(("show vxlan vtep", "show nve peers")):
             vx = self._proc("vxlan")
             if vx is None:
                 return "% EVPN/VXLAN is not enabled\n"
@@ -321,7 +321,7 @@ class CliSession:
             for ip, (mac, ifname) in sorted(dev.arp_table.items()):
                 rows.append(f"{ip!s:<16} {mac:<20} {ifname}")
             return "\n".join(rows) + "\n"
-        if low.startswith("show mac address-table") or low.startswith("show mac-address-table"):
+        if low.startswith(("show mac address-table", "show mac-address-table")):
             if not isinstance(dev, Switch):
                 return "% Not a switch\n"
             rows = ["Vlan  Mac Address         Port"]
@@ -363,7 +363,7 @@ class CliSession:
                     f"{n['ip']:<16} {n['iface']}"
                 )
             return "\n".join(rows) + "\n"
-        if low.startswith("show isis neighbors") or low.startswith("show clns neighbors"):
+        if low.startswith(("show isis neighbors", "show clns neighbors")):
             proc = self._proc("isis")
             if proc is None:
                 return "% IS-IS is not running\n"
@@ -381,7 +381,7 @@ class CliSession:
             for l in proc.lsdb_rows():
                 rows.append(f"{l['system_id']:<21} {l['seq']:<4} {l['links']}")
             return "\n".join(rows) + "\n"
-        if low.startswith("show ip bgp summary") or low.startswith("show bgp summary"):
+        if low.startswith(("show ip bgp summary", "show bgp summary")):
             proc = self._proc("bgp")
             if proc is None:
                 return "% BGP is not running\n"
@@ -392,7 +392,7 @@ class CliSession:
                     f"{p['neighbor']:<16} {p['remote_as']:<7} {p['state']:<13} {p['prefixes_received']}"
                 )
             return "\n".join(rows) + "\n"
-        if low.startswith("show etherchannel") or low.startswith("show lacp"):
+        if low.startswith(("show etherchannel", "show lacp")):
             from engine.netstack.lag import LagInterface
 
             lags = [i for i in dev.interfaces.values() if isinstance(i, LagInterface)]
@@ -408,7 +408,7 @@ class CliSession:
                 rows.append(f"{r['name']:<6} {r['mode']:<7} {ports}")
             rows.append("(P) bundled  (D) up, not bundled  (s) link down")
             return "\n".join(rows) + "\n"
-        if low.startswith("show vrrp") or low.startswith("show standby"):
+        if low.startswith(("show vrrp", "show standby")):
             procs = [
                 p for p in getattr(dev, "processes", [])
                 if getattr(p, "proto", "") == "vrrp"
@@ -444,7 +444,7 @@ class CliSession:
                 rows.append(f"interface {ifname} out:")
                 rows += [f"  {r.as_dict()}" for r in rules]
             return ("\n".join(rows) or "no access lists configured") + "\n"
-        if low.startswith("show dhcp") or low.startswith("show ip dhcp binding"):
+        if low.startswith(("show dhcp", "show ip dhcp binding")):
             if not isinstance(dev, Router) or not dev.dhcp_pools:
                 return "% No DHCP service\n"
             rows = ["IP address       MAC address          Pool"]
@@ -572,7 +572,7 @@ class CliSession:
             for n, r in enumerate(vx.mac_vni_rows()):
                 rows.append(f"{n}  {r['vni']:<7} {r['mac']:<20} {r['location']}")
             return "\n".join(rows) + "\n"
-        if low.startswith("/queue print") or low.startswith("/queue simple print"):
+        if low.startswith(("/queue print", "/queue simple print")):
             rows = ["#  INTERFACE        QOS  CLASS  TX-FRAMES  DROPS"]
             _names = ("EF", "AF", "BE")
             for n, i in enumerate(dev.interfaces.values()):
@@ -596,7 +596,7 @@ class CliSession:
                 f"uptime: {self.net.now:.1f}s (simulated)\n"
                 f"board-name: NetGeo {dev.kind}\nversion: ForgeOS sim\n"
             )
-        if low.startswith("/ping ") or low.startswith("ping "):
+        if low.startswith(("/ping ", "ping ")):
             parts = line.split()
             target = parts[1]
             count = 4

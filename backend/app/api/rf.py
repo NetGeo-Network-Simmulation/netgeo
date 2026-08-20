@@ -10,11 +10,13 @@ registry (``engine.propagation``) dispatches to a closed-form path-loss model.
 frontend can prefill Auto-Select/PtMP candidate fields instead of the user
 typing tx power / antenna gain / rx sensitivity by hand.
 """
+
 from __future__ import annotations
 
 import json
 from functools import lru_cache
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -145,7 +147,11 @@ async def plan_ptp(body: PtpRequest):
         # must say so — terrain_source below, surfaced by the frontend as a
         # visible "flat terrain" notice rather than presented as real DEM data.
         profile, terrain_source = await esvc.fetch_profile(
-            body.a_lat, body.a_lon, body.b_lat, body.b_lon, body.samples,
+            body.a_lat,
+            body.a_lon,
+            body.b_lat,
+            body.b_lon,
+            body.samples,
             fallback_to_flat=True,
         )
         out_profile = ElevationProfile(
@@ -219,18 +225,23 @@ async def select_product(body: ProductSelectRequest):
 # Re-opening returns the stored result verbatim (PtP's elevation fetch can
 # drift, so this is the only way a saved study "re-opens identically").
 
+
 @router.post("/studies", response_model=RfStudy, status_code=201)
-async def create_rf_study(body: RfStudyCreate, r: MemoryRepository = Depends(repo)):
+async def create_rf_study(
+    body: RfStudyCreate, r: Annotated[MemoryRepository, Depends(repo)]
+):
     return await r.add_rf_study(RfStudy(id=new_id(), **body.model_dump()))
 
 
 @router.get("/studies", response_model=list[RfStudy])
-async def list_rf_studies(project_id: str, r: MemoryRepository = Depends(repo)):
+async def list_rf_studies(
+    project_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+):
     return await r.list_rf_studies(project_id)
 
 
 @router.get("/studies/{study_id}", response_model=RfStudy)
-async def get_rf_study(study_id: str, r: MemoryRepository = Depends(repo)):
+async def get_rf_study(study_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         return await r.get_rf_study(study_id)
     except StoreNotFound as exc:
@@ -238,7 +249,9 @@ async def get_rf_study(study_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.delete("/studies/{study_id}", status_code=200)
-async def delete_rf_study(study_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def delete_rf_study(
+    study_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     try:
         await r.delete_rf_study(study_id)
     except StoreNotFound as exc:

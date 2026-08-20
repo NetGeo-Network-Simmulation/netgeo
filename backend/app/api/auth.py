@@ -15,9 +15,11 @@ The authenticated endpoints apply get_current_user at the handler level, which
 lets the auth contract file and the frontend clearly see that every call must
 carry a valid Bearer token.
 """
+
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
@@ -43,6 +45,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # ---------------------------------------------------------------------------
 # Request / response schemas
 # ---------------------------------------------------------------------------
+
 
 class LoginRequest(BaseModel):
     username: str
@@ -74,6 +77,7 @@ class ChangePasswordRequest(BaseModel):
 # Endpoints
 # ---------------------------------------------------------------------------
 
+
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, request: Request) -> TokenResponse:
     """Exchange username + password for a signed HS256 JWT access token.
@@ -98,7 +102,9 @@ async def login(body: LoginRequest, request: Request) -> TokenResponse:
 
     user = authenticate_user(body.username, body.password)
     if user is None:
-        logger.warning("Failed login attempt for username=%r from %s", body.username, client_ip)
+        logger.warning(
+            "Failed login attempt for username=%r from %s", body.username, client_ip
+        )
         # Generic message — never reveal whether it's the username or password.
         raise Unauthorized("Invalid username or password")
 
@@ -147,7 +153,9 @@ async def setup(body: SetupRequest, request: Request) -> TokenResponse:
     except ValueError as exc:
         raise ValidationError(str(exc))
 
-    logger.info("First-run setup completed: admin user %r created from %s", username, client_ip)
+    logger.info(
+        "First-run setup completed: admin user %r created from %s", username, client_ip
+    )
     expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60
     token = create_access_token(
         sub=user["sub"],
@@ -162,7 +170,7 @@ async def setup(body: SetupRequest, request: Request) -> TokenResponse:
 async def change_own_password(
     body: ChangePasswordRequest,
     request: Request,
-    current_user: dict = Depends(get_current_user),
+    current_user: Annotated[dict, Depends(get_current_user)],
 ) -> dict:
     """Change the authenticated user's password.
 
@@ -180,7 +188,9 @@ async def change_own_password(
         # Wrong current password → 401; policy violations → 422.
         if "incorrect" in str(exc).lower():
             logger.warning(
-                "Failed password change for username=%r from %s", current_user["sub"], client_ip
+                "Failed password change for username=%r from %s",
+                current_user["sub"],
+                client_ip,
             )
             raise Unauthorized(str(exc))
         raise ValidationError(str(exc))
@@ -189,7 +199,7 @@ async def change_own_password(
 
 
 @router.get("/me")
-async def me(current_user: dict = Depends(get_current_user)) -> dict:
+async def me(current_user: Annotated[dict, Depends(get_current_user)]) -> dict:
     """Return the identity of the currently authenticated user.
 
     Requires:  Authorization: Bearer <access_token>

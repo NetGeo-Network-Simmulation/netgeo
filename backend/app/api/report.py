@@ -1,5 +1,8 @@
 """Project report + BOM endpoints (NG-CFG-02 / NG-FI-04)."""
+
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import HTMLResponse
@@ -14,7 +17,7 @@ router = APIRouter(tags=["report"])
 
 
 @router.get("/projects/{project_id}/bom", response_model=list[BomItem])
-async def project_bom(project_id: str, r: MemoryRepository = Depends(repo)):
+async def project_bom(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         topo = await r.topology(project_id)
     except StoreNotFound as exc:
@@ -23,7 +26,9 @@ async def project_bom(project_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.get("/projects/{project_id}/report", response_class=HTMLResponse)
-async def project_html_report(project_id: str, r: MemoryRepository = Depends(repo)):
+async def project_html_report(
+    project_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+):
     """Print-ready project report (NG-CFG-02)."""
     try:
         project = await r.get_project(project_id)

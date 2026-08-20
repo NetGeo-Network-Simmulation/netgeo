@@ -9,7 +9,10 @@ The physical *effect* on a link (added delay, ``errored`` state) is computed at
 read time in the store, so ``GET /projects/{id}/plant`` returns the same verdict
 the simulation and the canvas see.
 """
+
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -35,17 +38,17 @@ router = APIRouter(tags=["physical"])
 
 # --- sites & racks (NG-PH-01) ----------------------------------------------
 @router.post("/sites", response_model=Site, status_code=201)
-async def create_site(body: SiteCreate, r: MemoryRepository = Depends(repo)):
+async def create_site(body: SiteCreate, r: Annotated[MemoryRepository, Depends(repo)]):
     return await r.add_site(Site(id=new_id(), **body.model_dump()))
 
 
 @router.get("/sites", response_model=list[Site])
-async def list_sites(project_id: str, r: MemoryRepository = Depends(repo)):
+async def list_sites(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     return await r.list_sites(project_id)
 
 
 @router.get("/sites/{site_id}", response_model=Site)
-async def get_site(site_id: str, r: MemoryRepository = Depends(repo)):
+async def get_site(site_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         return await r.get_site(site_id)
     except StoreNotFound as exc:
@@ -54,7 +57,7 @@ async def get_site(site_id: str, r: MemoryRepository = Depends(repo)):
 
 @router.patch("/sites/{site_id}", response_model=Site)
 async def update_site(
-    site_id: str, body: SiteUpdate, r: MemoryRepository = Depends(repo)
+    site_id: str, body: SiteUpdate, r: Annotated[MemoryRepository, Depends(repo)]
 ):
     try:
         patch = body.model_dump(exclude_unset=True)
@@ -66,7 +69,9 @@ async def update_site(
 
 
 @router.delete("/sites/{site_id}", status_code=200)
-async def delete_site(site_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def delete_site(
+    site_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     # Racks/nodes keep working without a site — clear the back-reference
     # rather than cascading a delete the user did not ask for.
     try:
@@ -77,13 +82,15 @@ async def delete_site(site_id: str, r: MemoryRepository = Depends(repo)) -> dict
 
 
 @router.post("/racks", response_model=Rack, status_code=201)
-async def create_rack(body: RackCreate, r: MemoryRepository = Depends(repo)):
+async def create_rack(body: RackCreate, r: Annotated[MemoryRepository, Depends(repo)]):
     return await r.add_rack(Rack(id=new_id(), **body.model_dump()))
 
 
 # --- cables (NG-PH-02) ------------------------------------------------------
 @router.post("/cables", response_model=Cable, status_code=201)
-async def create_cable(body: CableCreate, r: MemoryRepository = Depends(repo)):
+async def create_cable(
+    body: CableCreate, r: Annotated[MemoryRepository, Depends(repo)]
+):
     try:
         cable = await r.add_cable(Cable(id=new_id(), **body.model_dump()))
     except StoreNotFound as exc:  # unknown link_id
@@ -93,7 +100,7 @@ async def create_cable(body: CableCreate, r: MemoryRepository = Depends(repo)):
 
 
 @router.get("/cables/{cable_id}", response_model=Cable)
-async def get_cable(cable_id: str, r: MemoryRepository = Depends(repo)):
+async def get_cable(cable_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         return await r.get_cable(cable_id)
     except StoreNotFound as exc:
@@ -102,7 +109,7 @@ async def get_cable(cable_id: str, r: MemoryRepository = Depends(repo)):
 
 @router.patch("/cables/{cable_id}", response_model=Cable)
 async def update_cable(
-    cable_id: str, patch: CableUpdate, r: MemoryRepository = Depends(repo)
+    cable_id: str, patch: CableUpdate, r: Annotated[MemoryRepository, Depends(repo)]
 ):
     try:
         cable = await r.update_cable(cable_id, patch.model_dump(exclude_unset=True))
@@ -113,7 +120,9 @@ async def update_cable(
 
 
 @router.delete("/cables/{cable_id}", status_code=200)
-async def delete_cable(cable_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def delete_cable(
+    cable_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     try:
         cable = await r.get_cable(cable_id)
         await r.delete_cable(cable_id)
@@ -125,7 +134,9 @@ async def delete_cable(cable_id: str, r: MemoryRepository = Depends(repo)) -> di
 
 # --- diagnostics (NG-PH-03) -------------------------------------------------
 @router.get("/projects/{project_id}/plant")
-async def project_plant(project_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def project_plant(
+    project_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     """Per-link physical verdicts: total length, added propagation delay, and
     whether a run is over its rated max length (the teachable failure)."""
     try:

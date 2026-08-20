@@ -7,7 +7,10 @@ runner executes synchronously, so they return the current run state. A
 distributed run-manager (Redis-backed job queue, see infra/redis-design.md) is
 the production target.
 """
+
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
@@ -30,7 +33,9 @@ async def _topo_or_404(r: MemoryRepository, project_id: str):
 
 
 @router.post("/simulate")
-async def start_simulation(body: SimulateRequest, r: MemoryRepository = Depends(repo)):
+async def start_simulation(
+    body: SimulateRequest, r: Annotated[MemoryRepository, Depends(repo)]
+):
     topo = await _topo_or_404(r, body.project_id)
 
     if body.realtime:
@@ -66,7 +71,7 @@ async def resume(project_id: str):
 
 
 @router.post("/simulate/{project_id}/step")
-async def step(project_id: str, r: MemoryRepository = Depends(repo)):
+async def step(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     topo = await _topo_or_404(r, project_id)
     try:
         return await sim_service.get_manager().step(topo)

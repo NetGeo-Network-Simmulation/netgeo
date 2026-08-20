@@ -5,7 +5,10 @@ FSPL estimate while dragging, but these endpoints — backed by the engine's ful
 Friis link budget (antenna gain, misc loss, receiver sensitivity, noise floor) —
 are the source of truth that gets persisted and broadcast over ``/ws/topology``.
 """
+
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -60,9 +63,13 @@ async def elevation_profile(
     """Sampled terrain elevation profile between two points (proxy to the
     elevation provider). 503 if the provider is unreachable."""
     try:
-        pts, terrain_source = await esvc.fetch_profile(a_lat, a_lon, b_lat, b_lon, samples)
+        pts, terrain_source = await esvc.fetch_profile(
+            a_lat, a_lon, b_lat, b_lon, samples
+        )
     except esvc.ElevationUnavailable as exc:
-        raise HTTPException(status_code=503, detail=f"elevation provider: {exc}") from exc
+        raise HTTPException(
+            status_code=503, detail=f"elevation provider: {exc}"
+        ) from exc
     total = pts[-1]["distance_m"] if pts else 0.0
     return ElevationProfile(
         samples=len(pts),
@@ -91,7 +98,11 @@ async def los_check(body: LosCheckRequest):
         # surfaced by the frontend as a visible "flat terrain" notice rather
         # than presented as real DEM data.
         profile, terrain_source = await esvc.fetch_profile(
-            body.a_lat, body.a_lon, body.b_lat, body.b_lon, body.samples,
+            body.a_lat,
+            body.a_lon,
+            body.b_lat,
+            body.b_lon,
+            body.samples,
             fallback_to_flat=True,
         )
         out_profile = ElevationProfile(
@@ -112,7 +123,7 @@ async def los_check(body: LosCheckRequest):
 
 
 @router.get("/plan/{project_id}", response_model=WirelessPlanResult)
-async def plan_project(project_id: str, r: MemoryRepository = Depends(repo)):
+async def plan_project(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     """Compute the full wireless plan (links + coverage) for a project's
     geo-placed nodes."""
     try:
@@ -123,7 +134,7 @@ async def plan_project(project_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.get("/coverage/{node_id}", response_model=CoverageResult)
-async def node_coverage(node_id: str, r: MemoryRepository = Depends(repo)):
+async def node_coverage(node_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     """Theoretical coverage radius (m) for a single serving node."""
     try:
         node = await r.get_node(node_id)

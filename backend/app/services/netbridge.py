@@ -17,7 +17,7 @@ import time
 
 try:  # psutil gives rich per-NIC data; optional so we never hard-depend on it.
     import psutil  # type: ignore
-except Exception:  # pragma: no cover - psutil is listed in requirements
+except ImportError:  # pragma: no cover - psutil is listed in requirements
     psutil = None  # type: ignore
 
 # NIC name fragments that are almost always virtual/internal, not a real uplink.

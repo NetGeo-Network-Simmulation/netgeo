@@ -5,7 +5,10 @@ Every endpoint operates on the project's living lab (built and cached by
 network the device consoles are attached to. Engine work is CPU-bound and
 synchronous — it is offloaded to a worker thread to keep the event loop live.
 """
+
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
@@ -26,8 +29,8 @@ class _Body(BaseModel):
 
 
 class PingRequest(_Body):
-    src: str                    # node id or name
-    dst: str                    # IPv4 address, or node id/name (first IP used)
+    src: str  # node id or name
+    dst: str  # IPv4 address, or node id/name (first IP used)
     count: int = 4
 
 
@@ -38,21 +41,21 @@ class TracerouteRequest(_Body):
 
 
 class CliRequest(_Body):
-    node: str                   # node id or name
+    node: str  # node id or name
     command: str
 
 
 class ModeRequest(_Body):
-    mode: str                   # "realtime" | "simulation"
+    mode: str  # "realtime" | "simulation"
 
 
 class StepRequest(_Body):
-    events: int | None = None       # dispatch at most N events
-    duration: float | None = None   # or advance the clock this many sim-seconds
+    events: int | None = None  # dispatch at most N events
+    duration: float | None = None  # or advance the clock this many sim-seconds
 
 
 class SeekRequest(_Body):
-    seq: int                    # ledger cursor (0 = pristine lab)
+    seq: int  # ledger cursor (0 = pristine lab)
 
 
 async def _topo(r: MemoryRepository, project_id: str):
@@ -99,7 +102,9 @@ def _resolve_dst(lab: netlab.Lab, ref: str) -> str:
 
 
 @router.post("/{project_id}/ping")
-async def lab_ping(project_id: str, body: PingRequest, r: MemoryRepository = Depends(repo)):
+async def lab_ping(
+    project_id: str, body: PingRequest, r: Annotated[MemoryRepository, Depends(repo)]
+):
     topo = await _topo(r, project_id)
 
     def work():
@@ -123,7 +128,9 @@ async def lab_ping(project_id: str, body: PingRequest, r: MemoryRepository = Dep
 
 @router.post("/{project_id}/traceroute")
 async def lab_traceroute(
-    project_id: str, body: TracerouteRequest, r: MemoryRepository = Depends(repo)
+    project_id: str,
+    body: TracerouteRequest,
+    r: Annotated[MemoryRepository, Depends(repo)],
 ):
     topo = await _topo(r, project_id)
 
@@ -142,7 +149,9 @@ async def lab_traceroute(
 
 
 @router.post("/{project_id}/cli")
-async def lab_cli(project_id: str, body: CliRequest, r: MemoryRepository = Depends(repo)):
+async def lab_cli(
+    project_id: str, body: CliRequest, r: Annotated[MemoryRepository, Depends(repo)]
+):
     topo = await _topo(r, project_id)
 
     def work():
@@ -164,11 +173,11 @@ async def lab_cli(project_id: str, body: CliRequest, r: MemoryRepository = Depen
 @router.get("/{project_id}/ledger")
 async def lab_ledger(
     project_id: str,
+    r: Annotated[MemoryRepository, Depends(repo)],
     from_seq: int = 0,
     limit: int = 500,
     type_prefix: str | None = None,
     node: str | None = None,
-    r: MemoryRepository = Depends(repo),
 ):
     """Event ledger of the living lab (NG-SIM-01): replay hash + recent records."""
     topo = await _topo(r, project_id)
@@ -189,7 +198,9 @@ async def lab_ledger(
 
 
 @router.post("/{project_id}/mode")
-async def lab_mode(project_id: str, body: ModeRequest, r: MemoryRepository = Depends(repo)):
+async def lab_mode(
+    project_id: str, body: ModeRequest, r: Annotated[MemoryRepository, Depends(repo)]
+):
     """Switch realtime <-> simulation mode (NG-SIM-01, PT parity)."""
     if body.mode not in ("realtime", "simulation"):
         raise SimulationError("mode must be 'realtime' or 'simulation'")
@@ -204,7 +215,9 @@ async def lab_mode(project_id: str, body: ModeRequest, r: MemoryRepository = Dep
 
 
 @router.post("/{project_id}/step")
-async def lab_step(project_id: str, body: StepRequest, r: MemoryRepository = Depends(repo)):
+async def lab_step(
+    project_id: str, body: StepRequest, r: Annotated[MemoryRepository, Depends(repo)]
+):
     """Advance the simulation: N events (default 1) or a sim-time slice."""
     topo = await _topo(r, project_id)
 
@@ -230,7 +243,9 @@ async def lab_step(project_id: str, body: StepRequest, r: MemoryRepository = Dep
 
 
 @router.post("/{project_id}/seek")
-async def lab_seek(project_id: str, body: SeekRequest, r: MemoryRepository = Depends(repo)):
+async def lab_seek(
+    project_id: str, body: SeekRequest, r: Annotated[MemoryRepository, Depends(repo)]
+):
     """Move the ledger cursor to event ``seq`` — step-back included.
 
     Determinism makes this cheap: the lab is rebuilt and the stimulus journal
@@ -254,10 +269,10 @@ async def lab_seek(project_id: str, body: SeekRequest, r: MemoryRepository = Dep
 @router.get("/{project_id}/captures")
 async def lab_captures(
     project_id: str,
+    r: Annotated[MemoryRepository, Depends(repo)],
     link_id: str | None = None,
     limit: int = 100,
     filter: str | None = None,
-    r: MemoryRepository = Depends(repo),
 ):
     """Capture records, optionally narrowed by a Wireshark-style display
     filter (NG-CAP-02), e.g. ``icmp && ip.addr==10.0.0.1``."""
@@ -275,7 +290,7 @@ async def lab_captures(
         rows = [rec.as_dict() for rec in records]
         if filter:
             rows = [row for row in rows if predicate(row)]
-        rows = rows[-min(limit, 1000):]
+        rows = rows[-min(limit, 1000) :]
         return {
             "project_id": project_id,
             "link_id": link_id,
@@ -290,8 +305,8 @@ async def lab_captures(
 @router.get("/{project_id}/pcapng")
 async def lab_pcapng(
     project_id: str,
+    r: Annotated[MemoryRepository, Depends(repo)],
     link_id: str | None = None,
-    r: MemoryRepository = Depends(repo),
 ):
     """Export captured frames as a real .pcapng (NG-CAP-01) — opens in
     Wireshark/tshark with native protocol decode."""
@@ -314,7 +329,9 @@ async def lab_pcapng(
 
 
 @router.get("/{project_id}/tables/{node_ref}")
-async def lab_tables(project_id: str, node_ref: str, r: MemoryRepository = Depends(repo)):
+async def lab_tables(
+    project_id: str, node_ref: str, r: Annotated[MemoryRepository, Depends(repo)]
+):
     """Live control-plane state of one device: RIB, ARP, MAC, protocols, NAT."""
     topo = await _topo(r, project_id)
 
@@ -323,9 +340,11 @@ async def lab_tables(project_id: str, node_ref: str, r: MemoryRepository = Depen
         dev = lab.net.find_device(node_ref)
         if dev is None:
             raise NotFound(f"node '{node_ref}' not found in lab")
-        out: dict = {"node": dev.name, "kind": dev.kind, "interfaces": [
-            i.brief() for i in dev.interfaces.values()
-        ]}
+        out: dict = {
+            "node": dev.name,
+            "kind": dev.kind,
+            "interfaces": [i.brief() for i in dev.interfaces.values()],
+        }
         arp = getattr(dev, "arp_table", None)
         if arp is not None:
             out["arp"] = [
@@ -355,7 +374,9 @@ async def lab_tables(project_id: str, node_ref: str, r: MemoryRepository = Depen
             elif proto == "ldp":
                 out["mpls_forwarding"] = dev.mpls_forwarding_rows()
             elif proto == "l3vpn":
-                out["vrfs"] = {name: dev.vrf_route_rows(name) for name in dev.vrf_names()}
+                out["vrfs"] = {
+                    name: dev.vrf_route_rows(name) for name in dev.vrf_names()
+                }
             elif proto == "vxlan":
                 out["vxlan"] = {
                     "mac_vni": proc.mac_vni_rows(),
@@ -367,18 +388,20 @@ async def lab_tables(project_id: str, node_ref: str, r: MemoryRepository = Depen
         qos_rows = []
         for i in dev.interfaces.values():
             enabled = i.attachment is not None and i.attachment.qos.enabled
-            qos_rows.append({
-                "iface": i.name,
-                "qos_enabled": enabled,
-                "classes": [
-                    {
-                        "class": _cls[ci],
-                        "tx_frames": i.counters.tx_by_class[ci],
-                        "drops": i.counters.drops_queue_by_class[ci],
-                    }
-                    for ci in range(3)
-                ],
-            })
+            qos_rows.append(
+                {
+                    "iface": i.name,
+                    "qos_enabled": enabled,
+                    "classes": [
+                        {
+                            "class": _cls[ci],
+                            "tx_frames": i.counters.tx_by_class[ci],
+                            "drops": i.counters.drops_queue_by_class[ci],
+                        }
+                        for ci in range(3)
+                    ],
+                }
+            )
         out["qos"] = qos_rows
         return out
 
@@ -386,7 +409,7 @@ async def lab_tables(project_id: str, node_ref: str, r: MemoryRepository = Depen
 
 
 @router.get("/{project_id}/status")
-async def lab_status(project_id: str, r: MemoryRepository = Depends(repo)):
+async def lab_status(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     topo = await _topo(r, project_id)
 
     def work():
@@ -401,7 +424,7 @@ async def lab_status(project_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.post("/{project_id}/rebuild")
-async def lab_rebuild(project_id: str, r: MemoryRepository = Depends(repo)):
+async def lab_rebuild(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     """Force a fresh lab (drops live CLI state and captures)."""
     topo = await _topo(r, project_id)
     netlab.get_lab_manager().invalidate(project_id)
@@ -415,7 +438,9 @@ async def lab_rebuild(project_id: str, r: MemoryRepository = Depends(repo)):
 
 @router.post("/{project_id}/auto-address")
 async def lab_auto_address(
-    project_id: str, dry_run: bool = False, r: MemoryRepository = Depends(repo)
+    project_id: str,
+    r: Annotated[MemoryRepository, Depends(repo)],
+    dry_run: bool = False,
 ):
     """Auto-assign dual-stack (IPv4 + IPv6 ULA) addressing to the whole
     topology and persist it (NG-TD-03).
@@ -452,7 +477,11 @@ async def lab_auto_address(
         interfaces = []
         for iface in node.interfaces:
             # v4 first so callers reading ip[0] keep seeing the IPv4 CIDR.
-            ips = [ip for ip in (node_assign.get(iface.id), node_assign6.get(iface.id)) if ip]
+            ips = [
+                ip
+                for ip in (node_assign.get(iface.id), node_assign6.get(iface.id))
+                if ip
+            ]
             interfaces.append(iface.model_copy(update={"ip": ips}) if ips else iface)
         patch: dict = {"interfaces": interfaces}
         if gateway or gateway6:

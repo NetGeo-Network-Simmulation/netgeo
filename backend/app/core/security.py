@@ -83,7 +83,7 @@ def decode_access_token(token: str, secret: str) -> dict:
     # Verify algorithm declared in header.
     try:
         header = json.loads(_b64url_decode(header_b64))
-    except Exception:
+    except ValueError:
         raise ValueError("Malformed token: cannot decode header")
     if header.get("alg") != "HS256":
         raise ValueError(f"Unsupported algorithm: {header.get('alg')!r}")
@@ -97,7 +97,7 @@ def decode_access_token(token: str, secret: str) -> dict:
     ).digest()
     try:
         provided_sig = _b64url_decode(sig_b64)
-    except Exception:
+    except ValueError:
         raise ValueError("Malformed token: cannot decode signature")
     if not hmac.compare_digest(expected_sig, provided_sig):
         raise ValueError("Invalid token signature")
@@ -105,7 +105,7 @@ def decode_access_token(token: str, secret: str) -> dict:
     # Decode payload.
     try:
         claims: dict = json.loads(_b64url_decode(payload_b64))
-    except Exception:
+    except ValueError:
         raise ValueError("Malformed token: cannot decode payload")
 
     # Check expiry before returning claims.
@@ -154,7 +154,7 @@ def verify_password(password: str, hashed: str) -> bool:
             hash_algo, password.encode("utf-8"), salt, iterations
         )
         return hmac.compare_digest(stored_dk, candidate_dk)
-    except Exception:
+    except (ValueError, TypeError):
         return False
 
 

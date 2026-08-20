@@ -1,8 +1,10 @@
 """Projects + topology endpoints."""
+
 from __future__ import annotations
 
 import gzip
 import json
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -18,12 +20,14 @@ router = APIRouter(tags=["projects"])
 
 
 @router.get("/projects", response_model=list[Project])
-async def list_projects(r: MemoryRepository = Depends(repo)):
+async def list_projects(r: Annotated[MemoryRepository, Depends(repo)]):
     return await r.list_projects()
 
 
 @router.post("/projects", response_model=Project, status_code=201)
-async def create_project(body: ProjectCreate, r: MemoryRepository = Depends(repo)):
+async def create_project(
+    body: ProjectCreate, r: Annotated[MemoryRepository, Depends(repo)]
+):
     return await r.create_project(body.name, body.description)
 
 
@@ -31,7 +35,7 @@ async def create_project(body: ProjectCreate, r: MemoryRepository = Depends(repo
 # Declared before the ``/projects/{project_id}`` catch-all so ``/projects/import``
 # is not swallowed by it (POST anyway, but keep intent obvious).
 @router.post("/projects/import", response_model=Project, status_code=201)
-async def import_archive(body: dict, r: MemoryRepository = Depends(repo)):
+async def import_archive(body: dict, r: Annotated[MemoryRepository, Depends(repo)]):
     """Create a brand-new project from an archive envelope, minting fresh ids
     for every entity so it cannot collide with an existing copy. Rejects a
     malformed / unknown-format envelope with a 422 before touching the store."""
@@ -57,7 +61,7 @@ async def import_archive(body: dict, r: MemoryRepository = Depends(repo)):
 
 
 @router.get("/projects/{project_id}", response_model=Project)
-async def get_project(project_id: str, r: MemoryRepository = Depends(repo)):
+async def get_project(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         return await r.get_project(project_id)
     except StoreNotFound as exc:
@@ -65,7 +69,7 @@ async def get_project(project_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.get("/projects/{project_id}/topology", response_model=Topology)
-async def get_topology(project_id: str, r: MemoryRepository = Depends(repo)):
+async def get_topology(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         return await r.topology(project_id)
     except StoreNotFound as exc:
@@ -73,7 +77,9 @@ async def get_topology(project_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.get("/projects/{project_id}/archive")
-async def export_archive(project_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def export_archive(
+    project_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     """Return the whole project as a versioned JSON archive envelope (NG-WS-03)."""
     try:
         bundle = await r.export_project(project_id)
@@ -84,7 +90,7 @@ async def export_archive(project_id: str, r: MemoryRepository = Depends(repo)) -
 
 @router.post("/projects/{project_id}/backup-to-storagehub")
 async def backup_to_storagehub(
-    project_id: str, r: MemoryRepository = Depends(repo)
+    project_id: str, r: Annotated[MemoryRepository, Depends(repo)]
 ) -> dict:
     """Export the project archive (reusing the same builder as the plain
     ``/archive`` endpoint) and push it, gzip-compressed, into StorageHub

@@ -100,9 +100,9 @@ class _Parser:
             op = self.next()
             right = self.term()
             if op in ("&&", "and"):
-                left = (lambda a, b: lambda r: a(r) and b(r))(left, right)
+                left = lambda r, a=left, b=right: a(r) and b(r)
             else:
-                left = (lambda a, b: lambda r: a(r) or b(r))(left, right)
+                left = lambda r, a=left, b=right: a(r) or b(r)
         return left
 
     def term(self) -> Predicate:

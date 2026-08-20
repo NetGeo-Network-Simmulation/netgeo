@@ -67,7 +67,7 @@ class CaptureManager:
 
         try:
             wire = frame_bytes(frame)
-        except Exception:  # never let export cosmetics break the sim
+        except Exception:  # noqa: BLE001 - never let export cosmetics break the sim
             wire = bytes(frame.size_bytes)
         buf.append(
             CaptureRecord(

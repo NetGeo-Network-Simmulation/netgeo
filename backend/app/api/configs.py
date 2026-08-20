@@ -1,5 +1,8 @@
 """Config generation endpoints — the multi-vendor / ForgeOS output surface."""
+
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query
 
@@ -19,7 +22,9 @@ class ConfigGenFailed(AppException):
 
 
 @router.post("/configs/generate", response_model=ConfigArtifact, status_code=201)
-async def generate_config(body: GenerateConfigRequest, r: MemoryRepository = Depends(repo)):
+async def generate_config(
+    body: GenerateConfigRequest, r: Annotated[MemoryRepository, Depends(repo)]
+):
     try:
         node = await r.get_node(body.node_id)
     except StoreNotFound as exc:
@@ -35,15 +40,17 @@ async def generate_config(body: GenerateConfigRequest, r: MemoryRepository = Dep
 
 
 @router.get("/configs", response_model=list[ConfigArtifact])
-async def list_configs(node_id: str = Query(...), r: MemoryRepository = Depends(repo)):
+async def list_configs(
+    r: Annotated[MemoryRepository, Depends(repo)], node_id: str = Query(...)
+):
     return await r.configs_for_node(node_id)
 
 
 @router.get("/nodes/{node_id}/config/diff")
 async def node_config_diff(
     node_id: str,
+    r: Annotated[MemoryRepository, Depends(repo)],
     vendor: str | None = Query(None),
-    r: MemoryRepository = Depends(repo),
 ) -> dict:
     """Unified diff of a node's stored config vs a freshly regenerated one
     (NG-CFG-03) — preview before overwrite."""
@@ -72,8 +79,8 @@ async def node_config_diff(
 @router.get("/projects/{project_id}/configs/export")
 async def export_project_configs(
     project_id: str,
+    r: Annotated[MemoryRepository, Depends(repo)],
     vendor: str | None = Query(None),
-    r: MemoryRepository = Depends(repo),
 ) -> dict:
     """Whole-project vendor export (NG-CFG-01): every device's config, rendered
     to ``vendor`` (or each node's native NOS when omitted)."""

@@ -18,6 +18,7 @@ from ipaddress import (
     ip_address,
     ip_interface,
 )
+from typing import Self
 
 BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
 STP_MULTICAST_MAC = "01:80:c2:00:00:00"
@@ -40,7 +41,7 @@ class MacAddr(str):
 
     __slots__ = ()
 
-    def __new__(cls, value: str) -> MacAddr:
+    def __new__(cls, value: str) -> Self:
         v = value.strip().lower().replace("-", ":")
         parts = v.split(":")
         if len(parts) != 6 or not all(len(p) == 2 and _is_hex(p) for p in parts):

@@ -21,7 +21,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address, IPv4Network
-from typing import TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 from engine.events import EventType, SimEvent
 from engine.netstack.frames import ETH_IPV4, PROTO_OSPF, EthernetFrame, Ipv4Packet
@@ -101,7 +101,7 @@ class SummaryLsa:
         return SummaryLsa(self.router_id, self.seq, self.prefix, self.metric)
 
 
-Lsa = Union[RouterLsa, SummaryLsa]
+Lsa = RouterLsa | SummaryLsa
 
 
 @dataclass(slots=True)
@@ -443,7 +443,7 @@ class OspfProcess:
                     for ip in iface.ips:
                         intra[str(ip.network)] = self._iface_cost(iface)
 
-            def nbr_for(rid: str):
+            def nbr_for(rid: str, first_hop=first_hop, area=area):
                 fh = first_hop.get(rid)
                 return self.neighbors.get((fh, area)) if fh else None
 

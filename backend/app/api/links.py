@@ -6,7 +6,10 @@ backend mints the next free ``ethN`` interface on that node, persists it, and
 wires the link to it. Both endpoint interfaces get ``peer_link_id`` set so the
 UI and the lab engine always see real ports; deletion clears it again.
 """
+
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -30,7 +33,9 @@ async def _find_iface_owner(r: MemoryRepository, project_id: str, iface_id: str)
     return None
 
 
-async def _resolve_endpoint(r: MemoryRepository, project_id: str, ref: str, link_id: str) -> str:
+async def _resolve_endpoint(
+    r: MemoryRepository, project_id: str, ref: str, link_id: str
+) -> str:
     """Return a real interface id for a link endpoint reference.
 
     ``ref`` may be an existing interface id (marked attached) or a node id
@@ -62,7 +67,9 @@ async def _resolve_endpoint(r: MemoryRepository, project_id: str, ref: str, link
     return iface.id
 
 
-async def _detach_endpoint(r: MemoryRepository, project_id: str, iface_id: str, link_id: str) -> None:
+async def _detach_endpoint(
+    r: MemoryRepository, project_id: str, iface_id: str, link_id: str
+) -> None:
     hit = await _find_iface_owner(r, project_id, iface_id)
     if hit is None:
         return
@@ -74,11 +81,15 @@ async def _detach_endpoint(r: MemoryRepository, project_id: str, iface_id: str, 
 
 
 @router.post("/links", response_model=Link, status_code=201)
-async def create_link(body: LinkCreate, r: MemoryRepository = Depends(repo)):
+async def create_link(body: LinkCreate, r: Annotated[MemoryRepository, Depends(repo)]):
     link_id = new_id()
     payload = body.model_dump()
-    payload["a_iface"] = await _resolve_endpoint(r, body.project_id, body.a_iface, link_id)
-    payload["b_iface"] = await _resolve_endpoint(r, body.project_id, body.b_iface, link_id)
+    payload["a_iface"] = await _resolve_endpoint(
+        r, body.project_id, body.a_iface, link_id
+    )
+    payload["b_iface"] = await _resolve_endpoint(
+        r, body.project_id, body.b_iface, link_id
+    )
     link = Link(id=link_id, **payload)
     created = await r.add_link(link)
     await notify.link_changed(r, created)
@@ -86,7 +97,7 @@ async def create_link(body: LinkCreate, r: MemoryRepository = Depends(repo)):
 
 
 @router.get("/links/{link_id}", response_model=Link)
-async def get_link(link_id: str, r: MemoryRepository = Depends(repo)):
+async def get_link(link_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         return await r.get_link(link_id)
     except StoreNotFound as exc:
@@ -94,7 +105,9 @@ async def get_link(link_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.patch("/links/{link_id}", response_model=Link)
-async def update_link(link_id: str, patch: LinkUpdate, r: MemoryRepository = Depends(repo)):
+async def update_link(
+    link_id: str, patch: LinkUpdate, r: Annotated[MemoryRepository, Depends(repo)]
+):
     try:
         updated = await r.update_link(link_id, patch.model_dump(exclude_unset=True))
     except StoreNotFound as exc:
@@ -104,7 +117,9 @@ async def update_link(link_id: str, patch: LinkUpdate, r: MemoryRepository = Dep
 
 
 @router.delete("/links/{link_id}", status_code=200)
-async def delete_link(link_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def delete_link(
+    link_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     try:
         link = await r.get_link(link_id)
         await r.delete_link(link_id)

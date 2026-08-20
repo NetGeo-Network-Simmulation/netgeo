@@ -5,10 +5,12 @@ answer (both NG-WS-03 archive envelopes) plus a tree of weighted grading checks.
 ``/activities/{id}/grade`` runs those checks against a student's live project
 and returns a per-item report with a live completion %.
 """
+
 from __future__ import annotations
 
 import csv
 import io
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
 from fastapi.concurrency import run_in_threadpool
@@ -38,17 +40,19 @@ class GradeRequest(BaseModel):
 
 
 @router.post("/activities", response_model=Activity, status_code=201)
-async def create_activity(body: ActivityCreate, r: MemoryRepository = Depends(repo)):
+async def create_activity(
+    body: ActivityCreate, r: Annotated[MemoryRepository, Depends(repo)]
+):
     return await r.add_activity(Activity(id=new_id(), **body.model_dump()))
 
 
 @router.get("/activities", response_model=list[Activity])
-async def list_activities(r: MemoryRepository = Depends(repo)):
+async def list_activities(r: Annotated[MemoryRepository, Depends(repo)]):
     return await r.list_activities()
 
 
 @router.get("/activities/{activity_id}", response_model=Activity)
-async def get_activity(activity_id: str, r: MemoryRepository = Depends(repo)):
+async def get_activity(activity_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         return await r.get_activity(activity_id)
     except StoreNotFound as exc:
@@ -56,7 +60,9 @@ async def get_activity(activity_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.delete("/activities/{activity_id}", status_code=200)
-async def delete_activity(activity_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def delete_activity(
+    activity_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     try:
         await r.delete_activity(activity_id)
     except StoreNotFound as exc:
@@ -66,7 +72,7 @@ async def delete_activity(activity_id: str, r: MemoryRepository = Depends(repo))
 
 @router.post("/activities/{activity_id}/grade", response_model=GradeReport)
 async def grade_activity(
-    activity_id: str, body: GradeRequest, r: MemoryRepository = Depends(repo)
+    activity_id: str, body: GradeRequest, r: Annotated[MemoryRepository, Depends(repo)]
 ):
     """Grade a student's project against this activity's checks (NG-EDU-02)."""
     try:
@@ -78,9 +84,11 @@ async def grade_activity(
     return await run_in_threadpool(grading.grade, topo, activity.checks)
 
 
-@router.post("/activities/{activity_id}/submit", response_model=GradeResult, status_code=201)
+@router.post(
+    "/activities/{activity_id}/submit", response_model=GradeResult, status_code=201
+)
 async def submit_activity(
-    activity_id: str, body: GradeSubmit, r: MemoryRepository = Depends(repo)
+    activity_id: str, body: GradeSubmit, r: Annotated[MemoryRepository, Depends(repo)]
 ):
     """Grade a student's project and **persist** the attempt (NG-EDU-03).
 
@@ -112,7 +120,9 @@ async def submit_activity(
 
 
 @router.get("/activities/{activity_id}/results.csv")
-async def export_results_csv(activity_id: str, r: MemoryRepository = Depends(repo)):
+async def export_results_csv(
+    activity_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+):
     """Download all graded attempts for this activity as CSV (NG-EDU-03)."""
     try:
         await r.get_activity(activity_id)  # 404 if the activity is unknown
@@ -125,16 +135,28 @@ async def export_results_csv(activity_id: str, r: MemoryRepository = Depends(rep
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow(
-        ["student", "score_pct", "earned_weight", "total_weight",
-         "elapsed_s", "within_time", "graded_at"]
+        [
+            "student",
+            "score_pct",
+            "earned_weight",
+            "total_weight",
+            "elapsed_s",
+            "within_time",
+            "graded_at",
+        ]
     )
     for g in results:
-        w.writerow([
-            g.student, g.score_pct, g.earned_weight, g.total_weight,
-            "" if g.elapsed_s is None else g.elapsed_s,
-            "" if g.within_time is None else g.within_time,
-            g.graded_at.isoformat(),
-        ])
+        w.writerow(
+            [
+                g.student,
+                g.score_pct,
+                g.earned_weight,
+                g.total_weight,
+                "" if g.elapsed_s is None else g.elapsed_s,
+                "" if g.within_time is None else g.within_time,
+                g.graded_at.isoformat(),
+            ]
+        )
     return Response(
         content=buf.getvalue(),
         media_type="text/csv",
@@ -145,7 +167,9 @@ async def export_results_csv(activity_id: str, r: MemoryRepository = Depends(rep
 
 
 @router.get("/activities/{activity_id}/export")
-async def export_activity(activity_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def export_activity(
+    activity_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     """Export one activity as a sharable ``.netgeo-lab`` envelope (NG-EDU-03)."""
     try:
         activity = await r.get_activity(activity_id)
@@ -155,15 +179,19 @@ async def export_activity(activity_id: str, r: MemoryRepository = Depends(repo))
 
 
 @router.post("/activities/import", response_model=Activity, status_code=201)
-async def import_activity(body: dict, r: MemoryRepository = Depends(repo)):
+async def import_activity(body: dict, r: Annotated[MemoryRepository, Depends(repo)]):
     """Create a brand-new activity from a ``.netgeo-lab`` envelope, minting a
     fresh id (NG-EDU-03). Raises 422 on a malformed/wrong-format envelope."""
     activity = archive_svc.parse_activity_archive(body)  # ValidationError -> 422
     return await r.add_activity(activity.model_copy(update={"id": new_id()}))
 
 
-@router.post("/activities/{activity_id}/instantiate", response_model=Project, status_code=201)
-async def instantiate_activity(activity_id: str, r: MemoryRepository = Depends(repo)):
+@router.post(
+    "/activities/{activity_id}/instantiate", response_model=Project, status_code=201
+)
+async def instantiate_activity(
+    activity_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+):
     """Import the activity's ``initial`` network as a fresh project so a student
     gets the starting topology (reuses the NG-WS-03 archive import path)."""
     try:
@@ -171,7 +199,9 @@ async def instantiate_activity(activity_id: str, r: MemoryRepository = Depends(r
     except StoreNotFound as exc:
         raise translate_not_found(exc) from exc
     parsed = archive_svc.parse_archive(activity.initial)  # 422 on a bad envelope
-    project = await r.create_project(f"{activity.name} (attempt)", parsed["project"].description)
+    project = await r.create_project(
+        f"{activity.name} (attempt)", parsed["project"].description
+    )
     remapped = archive_svc.remap(parsed, project.id)
     for site in remapped["sites"]:
         await r.add_site(site)

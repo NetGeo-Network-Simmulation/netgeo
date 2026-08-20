@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from ipaddress import IPv4Address, IPv6Address
-from typing import Any
+from typing import Any, ClassVar
 
 from engine.netstack.addr import BROADCAST_MAC
 
@@ -100,7 +100,7 @@ class Icmpv6Message:
     orig_ident: int = 0
     orig_seq: int = 0
 
-    NAMES = {
+    NAMES: ClassVar[dict[int, str]] = {
         128: "echo-request",
         129: "echo-reply",
         1: "unreachable",

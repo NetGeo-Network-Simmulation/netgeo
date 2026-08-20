@@ -1,6 +1,9 @@
 """Node endpoints. Interfaces are created with the node (ids minted here if
 the client did not supply them)."""
+
 from __future__ import annotations
+
+from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
@@ -15,7 +18,7 @@ router = APIRouter(tags=["nodes"])
 
 
 @router.post("/nodes", response_model=Node, status_code=201)
-async def create_node(body: NodeCreate, r: MemoryRepository = Depends(repo)):
+async def create_node(body: NodeCreate, r: Annotated[MemoryRepository, Depends(repo)]):
     nid = new_id()
     ifaces = [
         i if i.id else i.model_copy(update={"id": new_id(), "node_id": nid})
@@ -45,7 +48,7 @@ async def create_node(body: NodeCreate, r: MemoryRepository = Depends(repo)):
 
 
 @router.get("/nodes/{node_id}", response_model=Node)
-async def get_node(node_id: str, r: MemoryRepository = Depends(repo)):
+async def get_node(node_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
         return await r.get_node(node_id)
     except StoreNotFound as exc:
@@ -53,7 +56,9 @@ async def get_node(node_id: str, r: MemoryRepository = Depends(repo)):
 
 
 @router.patch("/nodes/{node_id}", response_model=Node)
-async def update_node(node_id: str, patch: NodeUpdate, r: MemoryRepository = Depends(repo)):
+async def update_node(
+    node_id: str, patch: NodeUpdate, r: Annotated[MemoryRepository, Depends(repo)]
+):
     try:
         updated = await r.update_node(node_id, patch.model_dump(exclude_unset=True))
     except StoreNotFound as exc:
@@ -63,7 +68,9 @@ async def update_node(node_id: str, patch: NodeUpdate, r: MemoryRepository = Dep
 
 
 @router.delete("/nodes/{node_id}", status_code=200)
-async def delete_node(node_id: str, r: MemoryRepository = Depends(repo)) -> dict:
+async def delete_node(
+    node_id: str, r: Annotated[MemoryRepository, Depends(repo)]
+) -> dict:
     try:
         node = await r.get_node(node_id)
         await r.delete_node(node_id)
