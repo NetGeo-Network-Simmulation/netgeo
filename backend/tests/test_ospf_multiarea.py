@@ -10,12 +10,10 @@ Topology used throughout (hello=1s so convergence is fast in sim time):
 """
 from __future__ import annotations
 
-import pytest
-
 from app.models import Topology
 from engine.netstack import Network
-from engine.netstack.routing import Router
 from engine.netstack.protocols.ospf import OspfProcess
+from engine.netstack.routing import Router
 
 
 def _net(default_originate: bool = False) -> Network:

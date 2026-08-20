@@ -16,8 +16,7 @@ import logging
 from app.models import Link, Node
 from app.services import wireless as wsvc
 from app.services.events import get_bus
-from app.store import MemoryRepository
-from app.store import NotFound
+from app.store import MemoryRepository, NotFound
 
 logger = logging.getLogger("netgeo.notify")
 
@@ -86,9 +85,9 @@ async def cable_changed(repo: MemoryRepository, project_id: str) -> None:
 
 
 __all__ = [
-    "node_changed",
-    "node_removed",
+    "cable_changed",
     "link_changed",
     "link_removed",
-    "cable_changed",
+    "node_changed",
+    "node_removed",
 ]

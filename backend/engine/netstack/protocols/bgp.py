@@ -25,9 +25,10 @@ Not modelled: MED, confederations, MP-BGP, dynamic capability negotiation.
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from dataclasses import dataclass, field, replace
 from ipaddress import IPv4Address, IPv4Network
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
 from engine.events import EventType, SimEvent
 from engine.netstack.frames import PROTO_TCP, Ipv4Packet, TcpSegment
@@ -223,7 +224,7 @@ class BgpProcess:
         return any(p.rr_client for p in self.peers.values())
 
     # ----- lifecycle ------------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self._started:
             return
         self._started = True
@@ -231,7 +232,7 @@ class BgpProcess:
             self._try_open(net, peer)
         self._tick(net)
 
-    def _tick(self, net: "Network") -> None:
+    def _tick(self, net: Network) -> None:
         # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
         # the work, not the reschedule, so a power-on self-heals within one
         # interval instead of needing an explicit restart.
@@ -254,7 +255,7 @@ class BgpProcess:
             ),
         )
 
-    def _try_open(self, net: "Network", peer: _Peer) -> None:
+    def _try_open(self, net: Network, peer: _Peer) -> None:
         peer.state = "open-sent"
         self._send(
             net,
@@ -263,7 +264,7 @@ class BgpProcess:
             flags="SYN",
         )
 
-    def _session_down(self, net: "Network", peer: _Peer) -> None:
+    def _session_down(self, net: Network, peer: _Peer) -> None:
         logger.debug("%s: BGP session to %s down", self.router_id, peer.ip)
         peer.state = "idle"
         peer.rib_in.clear()
@@ -272,7 +273,7 @@ class BgpProcess:
         self._advertise_all(net)
 
     # ----- transport ---------------------------------------------------------------
-    def _send(self, net: "Network", peer: _Peer, msg, flags: str = "PSH") -> None:
+    def _send(self, net: Network, peer: _Peer, msg, flags: str = "PSH") -> None:
         route = self.router.egress_for(peer.ip)
         src_ip = route[0].ip.ip if route and route[0].ip else None
         if src_ip is None:
@@ -292,7 +293,7 @@ class BgpProcess:
         )
 
     # ----- message handling ------------------------------------------------------------
-    def on_packet(self, net: "Network", iface: Interface, pkt: Ipv4Packet) -> None:
+    def on_packet(self, net: Network, iface: Interface, pkt: Ipv4Packet) -> None:
         seg = pkt.payload
         if not isinstance(seg, TcpSegment):
             return
@@ -322,7 +323,7 @@ class BgpProcess:
             peer.last_keepalive = net.now
             self._on_update(net, peer, msg)
 
-    def _on_update(self, net: "Network", peer: _Peer, update: BgpUpdate) -> None:
+    def _on_update(self, net: Network, peer: _Peer, update: BgpUpdate) -> None:
         rib: dict[IPv4Network, BgpAttrs] = {}
         for prefix_s, attrs in update.routes.items():
             if self.asn in attrs.as_path:
@@ -365,7 +366,7 @@ class BgpProcess:
             return len(attrs.as_path) < len(cur_attrs.as_path)
         return peer_ip < cur_peer
 
-    def _decide_and_install(self, net: "Network") -> None:
+    def _decide_and_install(self, net: Network) -> None:
         local = {ip.network for ip in self.router.all_ips()}
         my_networks = {p for p, _c in self.networks}
         self.router.withdraw_routes("ebgp")
@@ -386,12 +387,12 @@ class BgpProcess:
             )
 
     # ----- advertisement ----------------------------------------------------------------------
-    def _advertise_all(self, net: "Network") -> None:
+    def _advertise_all(self, net: Network) -> None:
         for peer in self.peers.values():
             if peer.state == "established":
                 self._advertise(net, peer)
 
-    def _advertise(self, net: "Network", peer: _Peer) -> None:
+    def _advertise(self, net: Network, peer: _Peer) -> None:
         route = self.router.egress_for(peer.ip)
         my_nh = route[0].ip.ip if route and route[0].ip else None
         if my_nh is None:

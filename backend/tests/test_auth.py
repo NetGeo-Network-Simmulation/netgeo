@@ -166,18 +166,16 @@ async def test_health_is_public(anon):
 def test_ws_topology_rejects_missing_token():
     """WS connect without ?token → connection closed (4401 or generic error)."""
     client = TestClient(app, raise_server_exceptions=False)
-    with pytest.raises((WebSocketDisconnect, Exception)):
-        with client.websocket_connect("/ws/topology") as ws:
-            # If we ever get data after connecting, we fail the test.
-            ws.receive_text()
+    with pytest.raises((WebSocketDisconnect, Exception)), client.websocket_connect("/ws/topology") as ws:
+        # If we ever get data after connecting, we fail the test.
+        ws.receive_text()
 
 
 def test_ws_topology_rejects_invalid_token():
     """WS connect with garbage token → connection closed."""
     client = TestClient(app, raise_server_exceptions=False)
-    with pytest.raises((WebSocketDisconnect, Exception)):
-        with client.websocket_connect("/ws/topology?token=notvalid") as ws:
-            ws.receive_text()
+    with pytest.raises((WebSocketDisconnect, Exception)), client.websocket_connect("/ws/topology?token=notvalid") as ws:
+        ws.receive_text()
 
 
 def test_ws_topology_accepts_valid_token():
@@ -207,9 +205,8 @@ def test_ws_topology_accepts_valid_token():
 def test_ws_console_rejects_missing_token():
     """WS console without ?token → connection closed."""
     client = TestClient(app, raise_server_exceptions=False)
-    with pytest.raises((WebSocketDisconnect, Exception)):
-        with client.websocket_connect("/ws/console/fake-node-id") as ws:
-            ws.receive_text()
+    with pytest.raises((WebSocketDisconnect, Exception)), client.websocket_connect("/ws/console/fake-node-id") as ws:
+        ws.receive_text()
 
 
 # ---- First-run setup (/auth/setup) ------------------------------------------

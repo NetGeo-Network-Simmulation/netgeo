@@ -9,8 +9,6 @@ Acceptance gates per §1.7 of docs/design/14-ENGINE-WAVE2-ARCH.md:
 """
 from __future__ import annotations
 
-import pytest
-
 # ── fixture configs ──────────────────────────────────────────────────────────
 
 _IOS = """

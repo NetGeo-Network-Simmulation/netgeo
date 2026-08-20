@@ -208,7 +208,7 @@ def _persist_users() -> None:
         os.chmod(tmp, 0o600)
         tmp.replace(_auth_store_path)
     except Exception:
-        logger.error("Failed to persist auth store to %s", _auth_store_path, exc_info=True)
+        logger.exception("Failed to persist auth store to %s", _auth_store_path)
 
 
 def is_setup_required() -> bool:

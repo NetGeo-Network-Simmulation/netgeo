@@ -85,9 +85,7 @@ def list_interfaces() -> list[dict]:
                 ipv4.append(a.address)
             elif a.family == socket.AF_INET6:
                 ipv6.append(a.address.split("%")[0])  # strip zone id
-            elif getattr(socket, "AF_PACKET", None) and a.family == socket.AF_PACKET:
-                mac = a.address
-            elif getattr(psutil, "AF_LINK", None) and a.family == psutil.AF_LINK:
+            elif getattr(socket, "AF_PACKET", None) and a.family == socket.AF_PACKET or getattr(psutil, "AF_LINK", None) and a.family == psutil.AF_LINK:
                 mac = a.address
         st = stats.get(name)
         out.append(

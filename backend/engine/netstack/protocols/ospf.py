@@ -76,7 +76,7 @@ class RouterLsa:
     def wire_size(self) -> int:
         return 24 + 12 * len(self.links)
 
-    def copy(self) -> "RouterLsa":
+    def copy(self) -> RouterLsa:
         return RouterLsa(self.router_id, self.seq, list(self.links))
 
 
@@ -97,7 +97,7 @@ class SummaryLsa:
     def wire_size(self) -> int:
         return 28
 
-    def copy(self) -> "SummaryLsa":
+    def copy(self) -> SummaryLsa:
         return SummaryLsa(self.router_id, self.seq, self.prefix, self.metric)
 
 
@@ -187,7 +187,7 @@ class OspfProcess:
         return self.lsdb.setdefault(area, {})
 
     # ----- lifecycle ---------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self._started:
             return
         self._started = True
@@ -195,7 +195,7 @@ class OspfProcess:
             self._originate_lsa(net, area, flood=False)
         self._tick(net)
 
-    def _tick(self, net: "Network") -> None:
+    def _tick(self, net: Network) -> None:
         # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
         # the work, not the reschedule, so a power-on self-heals within one
         # interval instead of needing an explicit restart.
@@ -213,7 +213,7 @@ class OspfProcess:
         )
 
     # ----- hello protocol -------------------------------------------------------
-    def _send_hellos(self, net: "Network") -> None:
+    def _send_hellos(self, net: Network) -> None:
         for iface in self._enabled_ifaces():
             if not iface.is_up or not iface.ip:
                 continue
@@ -244,7 +244,7 @@ class OspfProcess:
                 ),
             )
 
-    def on_packet(self, net: "Network", iface: Interface, pkt: Ipv4Packet) -> None:
+    def on_packet(self, net: Network, iface: Interface, pkt: Ipv4Packet) -> None:
         payload = pkt.payload
         if isinstance(payload, OspfHello):
             self._on_hello(net, iface, pkt.src, payload)
@@ -252,7 +252,7 @@ class OspfProcess:
             self._on_lsu(net, iface, pkt.src, payload)
 
     def _on_hello(
-        self, net: "Network", iface: Interface, src: IPv4Address, hello: OspfHello
+        self, net: Network, iface: Interface, src: IPv4Address, hello: OspfHello
     ) -> None:
         if hello.router_id == self.router_id:
             return
@@ -282,7 +282,7 @@ class OspfProcess:
             # Database sync: give the new neighbor this area's entire LSDB.
             self._send_lsu(net, nbr, list(self._area_db(area).values()))
 
-    def _expire_neighbors(self, net: "Network") -> None:
+    def _expire_neighbors(self, net: Network) -> None:
         dead = [
             key
             for key, n in self.neighbors.items()
@@ -302,7 +302,7 @@ class OspfProcess:
         bw = att.bandwidth_bps if att else 1e9
         return max(1, int(REF_BANDWIDTH / max(bw, 1.0)))
 
-    def _originate_lsa(self, net: "Network", area: int, flood: bool = True) -> None:
+    def _originate_lsa(self, net: Network, area: int, flood: bool = True) -> None:
         self._seq += 1
         links: list[tuple[str, str, int]] = []
         for iface in self._enabled_ifaces():
@@ -325,14 +325,14 @@ class OspfProcess:
         self._schedule_spf(net)
 
     def _flood(
-        self, net: "Network", lsa: Lsa, area: int, exclude_rid: str | None
+        self, net: Network, lsa: Lsa, area: int, exclude_rid: str | None
     ) -> None:
         for nbr in self.neighbors.values():
             if nbr.area != area or nbr.state != "full" or nbr.router_id == exclude_rid:
                 continue
             self._send_lsu(net, nbr, [lsa])
 
-    def _send_lsu(self, net: "Network", nbr: _Neighbor, lsas: list[Lsa]) -> None:
+    def _send_lsu(self, net: Network, nbr: _Neighbor, lsas: list[Lsa]) -> None:
         if not lsas:
             return
         iface = self.router.interfaces.get(nbr.iface_name)
@@ -351,7 +351,7 @@ class OspfProcess:
         )
 
     def _on_lsu(
-        self, net: "Network", iface: Interface, src: IPv4Address, lsu: OspfLsu
+        self, net: Network, iface: Interface, src: IPv4Address, lsu: OspfLsu
     ) -> None:
         area = self.iface_area(iface.name)
         db = self._area_db(area)
@@ -371,7 +371,7 @@ class OspfProcess:
             self._schedule_spf(net)
 
     # ----- SPF ------------------------------------------------------------------------
-    def _schedule_spf(self, net: "Network") -> None:
+    def _schedule_spf(self, net: Network) -> None:
         """Debounce SPF: one run per burst of LSDB changes."""
         if self._spf_pending:
             return
@@ -425,7 +425,7 @@ class OspfProcess:
                     heapq.heappush(heap, (nd, nxt, fh if fh is not None else nxt))
         return dist, first_hop
 
-    def _run_spf(self, net: "Network") -> None:
+    def _run_spf(self, net: Network) -> None:
         self._spf_pending = False
         local_prefixes = {ip.network for ip in self.router.all_ips()}
         # prefix -> (next_hop, iface, metric, is_intra)
@@ -513,7 +513,7 @@ class OspfProcess:
     # ----- ABR summarization (type-3) ---------------------------------------------
     def _originate_summaries(
         self,
-        net: "Network",
+        net: Network,
         desired: dict[IPv4Network, tuple[IPv4Address, str, int, bool]],
         intra_by_area: dict[int, dict[str, int]],
     ) -> None:

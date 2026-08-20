@@ -19,9 +19,8 @@ def test_engine_has_no_unseeded_random():
     for py in ENGINE.rglob("*.py"):
         rel = py.relative_to(ENGINE).as_posix()
         text = py.read_text()
-        if re.search(r"^\s*(import random|from random import)", text, re.M):
-            if rel not in _ALLOWED:
-                offenders.append(rel)
+        if re.search(r"^\s*(import random|from random import)", text, re.MULTILINE) and rel not in _ALLOWED:
+            offenders.append(rel)
         # Even allowed files must only construct random.Random(seed) —
         # module-level draws (random.random(), random.choice...) are banned.
         for m in re.finditer(r"\brandom\.(\w+)", text):

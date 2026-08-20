@@ -6,8 +6,6 @@ verified through the ledger's incremental hash. Also covers the HTTP surface
 """
 from __future__ import annotations
 
-from ipaddress import IPv4Address
-
 from engine.netstack import Network
 from engine.netstack.device import Host
 from engine.netstack.switching import Switch

@@ -16,10 +16,10 @@ from ipaddress import IPv4Address
 
 from engine.netstack import Network
 from engine.netstack.device import Host
-from engine.netstack.routing import Router
 from engine.netstack.protocols.bgp import BgpProcess
 from engine.netstack.protocols.ospf import OspfProcess
 from engine.netstack.protocols.vxlan import VxlanProcess
+from engine.netstack.routing import Router
 
 
 def _lab() -> Network:

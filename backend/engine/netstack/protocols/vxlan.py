@@ -35,7 +35,7 @@ Deliberate simplifications (ponytail — each names its ceiling + upgrade path):
 """
 from __future__ import annotations
 
-from ipaddress import IPv4Address, IPv4Network
+from ipaddress import IPv4Address
 from typing import TYPE_CHECKING
 
 from engine.events import EventType, SimEvent
@@ -57,7 +57,7 @@ if TYPE_CHECKING:  # pragma: no cover
     from engine.netstack.network import Network
 
 
-def _schedule(net: "Network", after: float, node_id: str, fn) -> None:
+def _schedule(net: Network, after: float, node_id: str, fn) -> None:
     net.scheduler.schedule_after(
         after,
         SimEvent(time=0.0, type=EventType.TIMER, handler=lambda _c, _e: fn(), node_id=node_id),
@@ -99,14 +99,14 @@ class VxlanProcess:
         return max((i.ip for i in self.router.all_ips()), default=IPv4Address("0.0.0.0"))
 
     # ----- lifecycle ---------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self._started:
             return
         self._started = True
         self.vtep_ip = self._own_loopback_ip()
         self._tick(net)
 
-    def _tick(self, net: "Network") -> None:
+    def _tick(self, net: Network) -> None:
         # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
         # the work, not the reschedule, so a power-on self-heals within one
         # interval instead of needing an explicit restart.
@@ -131,7 +131,7 @@ class VxlanProcess:
                 routes.append(EvpnRoute(route_type=2, vni=vni, vtep=vtep, mac=mac))
         return routes
 
-    def _advertise(self, net: "Network") -> None:
+    def _advertise(self, net: Network) -> None:
         bgp = self._bgp()
         if bgp is None or self.vtep_ip is None:
             return
@@ -162,7 +162,7 @@ class VxlanProcess:
             )
 
     # ----- EVPN ingress ------------------------------------------------------
-    def on_packet(self, net: "Network", iface: Interface, pkt: Ipv4Packet) -> None:
+    def on_packet(self, net: Network, iface: Interface, pkt: Ipv4Packet) -> None:
         seg = pkt.payload
         if not isinstance(seg, TcpSegment) or not isinstance(seg.payload, EvpnUpdate):
             return
@@ -188,7 +188,7 @@ class VxlanProcess:
                 self.mac_vni[(r.vni, r.mac)] = vtep
 
     # ----- data plane: access -> overlay -------------------------------------
-    def on_access_frame(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_access_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         vni = self.access.get(iface.name)
         if vni is None:
             return
@@ -212,7 +212,7 @@ class VxlanProcess:
         # BUM (broadcast/multicast/unknown-unicast): ingress-replicate.
         self._flood(net, vni, iface.name, frame)
 
-    def _flood(self, net: "Network", vni: int, in_port: str | None, frame: EthernetFrame) -> None:
+    def _flood(self, net: Network, vni: int, in_port: str | None, frame: EthernetFrame) -> None:
         for name, avni in sorted(self.access.items()):
             if avni == vni and name != in_port:
                 out = self.router.interfaces.get(name)
@@ -221,7 +221,7 @@ class VxlanProcess:
         for vtep in sorted(self.remote_vteps.get(vni, ())):
             self._encap(net, vni, vtep, frame.clone())
 
-    def _encap(self, net: "Network", vni: int, vtep: IPv4Address, inner: EthernetFrame) -> None:
+    def _encap(self, net: Network, vni: int, vtep: IPv4Address, inner: EthernetFrame) -> None:
         if self.vtep_ip is None:
             return
         self.router.send_ip(
@@ -240,7 +240,7 @@ class VxlanProcess:
         )
 
     # ----- data plane: overlay -> access -------------------------------------
-    def on_overlay(self, net: "Network", pkt: Ipv4Packet, vx: VxlanPacket) -> None:
+    def on_overlay(self, net: Network, pkt: Ipv4Packet, vx: VxlanPacket) -> None:
         inner = vx.inner
         if inner is None:
             return

@@ -10,17 +10,22 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address, IPv6Address, IPv6Interface, ip_address
-from typing import Optional, Union
 
 from engine.events import EventType, SimEvent
+from engine.ledger import Ledger
 from engine.netstack.addr import mac_from_int
 from engine.netstack.capture import CaptureManager
 from engine.netstack.device import Device, Host
-from engine.netstack.frames import DnsMessage, IcmpMessage, Icmpv6Message, Ipv4Packet, Ipv6Packet
+from engine.netstack.frames import (
+    DnsMessage,
+    IcmpMessage,
+    Icmpv6Message,
+    Ipv4Packet,
+    Ipv6Packet,
+)
 from engine.netstack.iface import Interface, LinkAttachment
 from engine.netstack.routing import Router
 from engine.netstack.switching import Switch
-from engine.ledger import Ledger
 from engine.scheduler import Scheduler
 
 
@@ -168,7 +173,7 @@ class Network:
         self.attachments[link_id] = att
         return att
 
-    def find_device(self, ref: str) -> Optional[Device]:
+    def find_device(self, ref: str) -> Device | None:
         return self.devices.get(ref) or self.devices_by_id.get(ref)
 
     # ----- lifecycle -----------------------------------------------------------
@@ -326,7 +331,7 @@ class Network:
     def ping(
         self,
         src_ref: str,
-        dst_ip: Union[str, IPv4Address, IPv6Address],
+        dst_ip: str | IPv4Address | IPv6Address,
         count: int = 4,
         interval: float = 1.0,
         run_after: bool = True,
@@ -348,7 +353,7 @@ class Network:
     def traceroute(
         self,
         src_ref: str,
-        dst_ip: Union[str, IPv4Address, IPv6Address],
+        dst_ip: str | IPv4Address | IPv6Address,
         max_hops: int = 16,
         run_after: bool = True,
         settle: float = 0.0,

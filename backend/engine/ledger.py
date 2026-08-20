@@ -27,14 +27,14 @@ def _payload_fields(payload: Any) -> dict:
 class Ledger:
     """Ring-buffered event records + incremental replay hash."""
 
-    __slots__ = ("records", "seq", "_hash")
+    __slots__ = ("_hash", "records", "seq")
 
     def __init__(self, maxlen: int = 100_000) -> None:
         self.records: deque[dict] = deque(maxlen=maxlen)
         self.seq = 0
         self._hash = hashlib.sha256()
 
-    def attach(self, scheduler: Scheduler) -> "Ledger":
+    def attach(self, scheduler: Scheduler) -> Ledger:
         scheduler.add_observer(self._on_event)
         return self
 

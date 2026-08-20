@@ -11,7 +11,8 @@ up in :mod:`engine.simulation`; the scheduler itself runs as fast as possible.
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 from engine.events import EventQueue, SimEvent
 
@@ -26,13 +27,13 @@ class Scheduler:
     """Single-threaded discrete-event scheduler with a monotonic clock."""
 
     __slots__ = (
-        "queue",
-        "now",
+        "_dispatched",
         "_observers",
         "_stop",
-        "_dispatched",
         "context",
         "dispatch_cap",
+        "now",
+        "queue",
     )
 
     def __init__(self, context: Any = None) -> None:

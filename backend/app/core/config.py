@@ -108,13 +108,13 @@ class Settings(BaseSettings):
         "ENABLE_HSTS", "UPDATE_INPROC", "NETGEO_STORAGEHUB_VERIFY_TLS", mode="before"
     )
     @classmethod
-    def _parse_bool(cls, v):  # noqa: ANN001
+    def _parse_bool(cls, v):
         if isinstance(v, str):
             return v.strip().lower() in {"1", "true", "yes", "on"}
         return v
 
     @model_validator(mode="after")
-    def _check_secret_key(self) -> "Settings":
+    def _check_secret_key(self) -> Settings:
         """RB-07: Refuse to start in production with the default SECRET_KEY.
 
         In non-production environments, print a prominent warning to stderr so
@@ -151,7 +151,7 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.CORS_ORIGINS.split(",") if o.strip()]
 
     @property
-    def APP_VERSION(self) -> str:  # noqa: N802 — keeps the settings-style spelling
+    def APP_VERSION(self) -> str:
         """Running version — always the code constant, never the environment."""
         return APP_VERSION
 

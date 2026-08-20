@@ -12,12 +12,9 @@ pass bit-for-bit — the disabled-path parity gate (E-3 acceptance criterion).
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import IntEnum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:  # pragma: no cover
-    from engine.netstack.frames import Ipv4Packet, Ipv6Packet
+from typing import Any
 
 
 class QosClass(IntEnum):
@@ -87,10 +84,6 @@ def _rule_matches(match: dict, pkt: Any) -> bool:
     if "proto" in match and pkt.proto_name != match["proto"]:
         return False
     l4 = getattr(pkt, "payload", None)
-    if "dst_port" in match:
-        if getattr(l4, "dst_port", None) != match["dst_port"]:
-            return False
-    if "src_port" in match:
-        if getattr(l4, "src_port", None) != match["src_port"]:
-            return False
-    return True
+    if "dst_port" in match and getattr(l4, "dst_port", None) != match["dst_port"]:
+        return False
+    return "src_port" not in match or getattr(l4, "src_port", None) == match["src_port"]

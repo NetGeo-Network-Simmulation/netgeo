@@ -145,7 +145,6 @@ class _SimRun:
     gate: asyncio.Event = field(default_factory=asyncio.Event)
 
     def status(self) -> dict:
-        res = self.sim.result
         return {
             "project_id": self.project_id,
             "state": self.state,

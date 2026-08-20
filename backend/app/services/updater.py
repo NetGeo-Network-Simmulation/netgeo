@@ -20,7 +20,6 @@ Standard library only — no new dependencies.
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import time
 import urllib.error
@@ -76,7 +75,7 @@ def _get_json(url: str) -> object:
             "User-Agent": "netgeo-updater",
         },
     )
-    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:  # noqa: S310
+    with urllib.request.urlopen(req, timeout=_HTTP_TIMEOUT) as resp:
         return json.loads(resp.read().decode("utf-8"))
 
 
@@ -212,7 +211,7 @@ def apply() -> dict:
         if script.exists():
             try:
                 # Detached: it will rebuild + restart this very process.
-                subprocess.Popen(  # noqa: S603
+                subprocess.Popen(
                     ["bash", str(script), "--apply"],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,

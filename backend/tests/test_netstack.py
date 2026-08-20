@@ -8,15 +8,12 @@ from __future__ import annotations
 
 from ipaddress import IPv4Address, IPv4Network
 
-import pytest
-
 from engine.netstack import Network
 from engine.netstack.device import Host
-from engine.netstack.routing import AclRule, DhcpPool, Router
-from engine.netstack.switching import Switch
 from engine.netstack.protocols.bgp import BgpProcess
 from engine.netstack.protocols.ospf import OspfProcess
-
+from engine.netstack.routing import AclRule, DhcpPool, Router
+from engine.netstack.switching import Switch
 
 # ---------------------------------------------------------------------------
 # helpers
@@ -62,7 +59,7 @@ def routed_chain() -> Network:
 # ---------------------------------------------------------------------------
 
 def test_arp_and_ping_same_lan():
-    net, h1, h2, sw = lan_pair()
+    net, h1, h2, _sw = lan_pair()
     report = net.ping("h1", "10.0.0.2", count=4)
     assert report.sent == 4
     assert report.received == 4
@@ -305,7 +302,7 @@ def test_jitter_varies_rtt_but_stays_deterministic():
         return net.ping("h1", "10.9.0.2", count=5).rtts_ms
 
     a = rtts(11)
-    assert len(set(round(r, 6) for r in a)) > 1   # jitter spreads RTTs
+    assert len({round(r, 6) for r in a}) > 1   # jitter spreads RTTs
     assert a == rtts(11)                           # deterministic
 
 

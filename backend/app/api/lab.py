@@ -14,8 +14,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import repo, translate_not_found
 from app.exceptions.base import NotFound, SimulationError
-from app.services import netlab
-from app.services import notify
+from app.services import netlab, notify
 from app.store import MemoryRepository
 from app.store import NotFound as StoreNotFound
 

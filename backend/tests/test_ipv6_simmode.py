@@ -17,7 +17,6 @@ from engine.netstack import Network
 from engine.netstack.cli import CliSession
 from engine.netstack.device import Host
 from engine.netstack.routing import Router
-from engine.netstack.switching import Switch
 
 
 @pytest.fixture(autouse=True)
@@ -90,9 +89,7 @@ def test_icmpv6_unreachable_and_hop_limit():
     rep = net.ping("a", "2001:db8:dead::1", count=1)
     assert rep.received == 0 and any("unreachable" in e for e in rep.errors)
     # hop_limit=1 dies at the first router -> time-exceeded (traceroute's engine).
-    rep2 = net.pings[
-        net.ping("a", "2001:db8:b::10", count=1, run_after=False).ident
-    ]
+    net.ping("a", "2001:db8:b::10", count=1, run_after=False)
     # send a probe with hlim 1 by driving the host API directly
     a = net.find_device("a")
     ident = a.ping(net, IPv6Address("2001:db8:b::10"), count=1, ttl=1)

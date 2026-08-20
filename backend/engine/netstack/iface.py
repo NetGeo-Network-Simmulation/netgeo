@@ -21,7 +21,8 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from ipaddress import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
+
 
 def _three_zeros() -> list:
     return [0, 0, 0]
@@ -46,7 +47,7 @@ class FrameContext:
     frame: EthernetFrame
     link_id: str
     iface: str      # qualified "device:port" at the recording end
-    qos_class: "str | None" = None  # "EF"/"AF"/"BE" when QoS enabled; absent otherwise
+    qos_class: str | None = None  # "EF"/"AF"/"BE" when QoS enabled; absent otherwise
 
     def ledger_fields(self) -> dict:
         d = {
@@ -121,7 +122,7 @@ class Interface:
     def __init__(
         self,
         name: str,
-        device: "Device",
+        device: Device,
         mac: MacAddr,
         ips: list[IPv4Interface] | None = None,
         queue_depth: int = 64,
@@ -136,7 +137,7 @@ class Interface:
         self.access_vlan: int = 1
         self.trunk_vlans: set[int] | None = None  # None = allow all
         self.enabled: bool = True
-        self.attachment: Optional[LinkAttachment] = None
+        self.attachment: LinkAttachment | None = None
         self.counters = IfaceCounters()
         # Three deques indexed by QosClass (EF=0, AF=1, BE=2).
         # When QoS is disabled only EF and BE slots are used — mirrors the
@@ -146,7 +147,7 @@ class Interface:
         self.queue_depth = queue_depth
         self.stp_state: str = "forwarding"       # forwarding | blocking | learning
         self.stp_role: str = "designated"        # root | designated | blocked
-        self.lag_parent: Optional["Interface"] = None
+        self.lag_parent: Interface | None = None
 
     # ----- addressing ----------------------------------------------------
     @property
@@ -191,7 +192,7 @@ class Interface:
             and self.attachment.up
         )
 
-    def peer(self) -> Optional["Interface"]:
+    def peer(self) -> Interface | None:
         return self.attachment.peer(self) if self.attachment else None
 
     # ----- VLAN helpers ----------------------------------------------------
@@ -201,7 +202,7 @@ class Interface:
         return self.trunk_vlans is None or vlan in self.trunk_vlans
 
     # ----- egress path ------------------------------------------------------
-    def transmit(self, net: "Network", frame: EthernetFrame) -> None:
+    def transmit(self, net: Network, frame: EthernetFrame) -> None:
         """Enqueue a frame for transmission out of this interface."""
         if frame.id == 0:
             frame.id = net.next_frame_id()
@@ -254,7 +255,7 @@ class Interface:
         if not self._transmitting:
             self._start_next(net)
 
-    def _start_next(self, net: "Network") -> None:
+    def _start_next(self, net: Network) -> None:
         # Strict-priority drain: EF first, then AF, then BE.
         # Disabled path: AF queue is always empty so EF→BE order is preserved
         # bit-for-bit (same as former _queue_prio → _queue_be drain).
@@ -296,7 +297,7 @@ class Interface:
             ),
         )
 
-    def _tx_done(self, net: "Network", frame: EthernetFrame) -> None:
+    def _tx_done(self, net: Network, frame: EthernetFrame) -> None:
         att = self.attachment
         # Keep the pipe busy with whatever queued up meanwhile.
         self._transmitting = False
@@ -332,7 +333,7 @@ class Interface:
         )
 
     # ----- ingress path -------------------------------------------------------
-    def _deliver(self, net: "Network", frame: EthernetFrame) -> None:
+    def _deliver(self, net: Network, frame: EthernetFrame) -> None:
         if not self.enabled:
             self.counters.drops_down += 1
             net.record_drop("iface_down")

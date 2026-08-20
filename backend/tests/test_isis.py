@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from app.models import Topology
 from engine.netstack import Network
-from engine.netstack.routing import Router
 from engine.netstack.protocols.isis import IsisProcess
+from engine.netstack.routing import Router
 
 
 def _net() -> Network:

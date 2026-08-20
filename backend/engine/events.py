@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import heapq
 import itertools
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import IntEnum
-from typing import Any, Callable
+from typing import Any
 
 
 class EventType(IntEnum):
@@ -75,7 +76,7 @@ class EventQueue:
     deterministic.
     """
 
-    __slots__ = ("_heap", "_counter", "_pushed", "_popped")
+    __slots__ = ("_counter", "_heap", "_popped", "_pushed")
 
     def __init__(self) -> None:
         self._heap: list[tuple[float, int, int, SimEvent]] = []

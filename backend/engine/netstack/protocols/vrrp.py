@@ -56,7 +56,7 @@ class VrrpAdvert:
 class VrrpProcess:
     """One virtual router on one interface."""
 
-    router: "Router"
+    router: Router
     iface_name: str
     vrid: int
     vip: IPv4Address
@@ -90,20 +90,20 @@ class VrrpProcess:
     def vmac(self) -> MacAddr:
         return virtual_mac(self.vrid)
 
-    def _iface(self) -> "Interface | None":
+    def _iface(self) -> Interface | None:
         return self.router.interfaces.get(self.iface_name)
 
     # ----- lifecycle --------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self.priority == 255:
             self._become_master(net)
         else:
             self._enter_backup(net)
 
-    def on_iface_change(self, net: "Network") -> None:  # duck-typed hook
+    def on_iface_change(self, net: Network) -> None:  # duck-typed hook
         pass
 
-    def on_power_off(self, net: "Network") -> None:  # duck-typed hook
+    def on_power_off(self, net: Network) -> None:  # duck-typed hook
         """F47: a power loss must not leave a stale master claim behind —
         relinquish so mastership is re-earned via the normal listen/promote
         path on resume instead of being assumed the instant power returns
@@ -112,21 +112,21 @@ class VrrpProcess:
             self._enter_backup(net)
 
     # ----- state transitions -------------------------------------------------
-    def _log(self, net: "Network", state: str) -> None:
+    def _log(self, net: Network, state: str) -> None:
         self.state = state
         self.transitions.append((net.now, state))
         net.log_event(
             "vrrp.state", device=self.router.name, vrid=self.vrid, state=state
         )
 
-    def _enter_backup(self, net: "Network") -> None:
+    def _enter_backup(self, net: Network) -> None:
         if self.state == "master":
             self.router.mac_aliases.discard(str(self.vmac))
             self.router.ip_aliases.discard(self.vip)
         self._log(net, "backup")
         self._arm_master_down(net, self.master_down_interval)
 
-    def _become_master(self, net: "Network") -> None:
+    def _become_master(self, net: Network) -> None:
         self._timer_seq += 1  # cancel any pending master-down timer
         self.router.mac_aliases.add(str(self.vmac))
         self.router.ip_aliases.add(self.vip)
@@ -136,7 +136,7 @@ class VrrpProcess:
         self._arm_advert(net)
 
     # ----- timers (sequence-guarded so resets are cheap + deterministic) ----
-    def _arm_master_down(self, net: "Network", delay: float) -> None:
+    def _arm_master_down(self, net: Network, delay: float) -> None:
         self._timer_seq += 1
         seq = self._timer_seq
         net.scheduler.schedule_after(
@@ -149,7 +149,7 @@ class VrrpProcess:
             ),
         )
 
-    def _master_down_fired(self, net: "Network", seq: int) -> None:
+    def _master_down_fired(self, net: Network, seq: int) -> None:
         if seq != self._timer_seq or self.state == "master":
             return
         if not self.router.powered_on:
@@ -159,7 +159,7 @@ class VrrpProcess:
             return
         self._become_master(net)
 
-    def _arm_advert(self, net: "Network") -> None:
+    def _arm_advert(self, net: Network) -> None:
         net.scheduler.schedule_after(
             self.adv_interval,
             SimEvent(
@@ -170,7 +170,7 @@ class VrrpProcess:
             ),
         )
 
-    def _advert_tick(self, net: "Network") -> None:
+    def _advert_tick(self, net: Network) -> None:
         if self.state != "master":
             return
         if self.router.powered_on:
@@ -178,7 +178,7 @@ class VrrpProcess:
         self._arm_advert(net)
 
     # ----- wire I/O -----------------------------------------------------------
-    def _send_advert(self, net: "Network", priority: int | None = None) -> None:
+    def _send_advert(self, net: Network, priority: int | None = None) -> None:
         iface = self._iface()
         if iface is None or iface.ip is None or not iface.is_up:
             return
@@ -203,7 +203,7 @@ class VrrpProcess:
             ),
         )
 
-    def _gratuitous_arp(self, net: "Network") -> None:
+    def _gratuitous_arp(self, net: Network) -> None:
         iface = self._iface()
         if iface is None or not iface.is_up:
             return
@@ -224,7 +224,7 @@ class VrrpProcess:
         )
 
     # ----- ingress -------------------------------------------------------------
-    def on_packet(self, net: "Network", iface: "Interface", pkt: Ipv4Packet) -> None:
+    def on_packet(self, net: Network, iface: Interface, pkt: Ipv4Packet) -> None:
         adv = pkt.payload
         if not isinstance(adv, VrrpAdvert) or adv.vrid != self.vrid:
             return
@@ -247,7 +247,7 @@ class VrrpProcess:
             self._arm_master_down(net, self.master_down_interval)
         # else: higher local priority + preempt → let the timer expire.
 
-    def on_arp_request(self, net: "Network", iface: "Interface", arp: ArpPacket) -> None:
+    def on_arp_request(self, net: Network, iface: Interface, arp: ArpPacket) -> None:
         """Master answers ARP for the VIP with the virtual MAC."""
         if self.state != "master" or iface.name != self.iface_name:
             return

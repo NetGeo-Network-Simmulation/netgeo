@@ -85,14 +85,14 @@ class Switch(Device):
         return (self.priority, self.bridge_mac, 0, self.priority, self.bridge_mac, 0)
 
     # ----- lifecycle ------------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         """Kick off periodic STP hellos (idempotent)."""
         if self._started or not self.stp_enabled:
             return
         self._started = True
         self._hello(net)
 
-    def _hello(self, net: "Network") -> None:
+    def _hello(self, net: Network) -> None:
         if not self.powered_on:
             return
         self._age_out(net)
@@ -129,7 +129,7 @@ class Switch(Device):
         )
 
     # ----- STP machinery ------------------------------------------------------------
-    def _current_root(self, net: "Network") -> tuple[int, str, int]:
+    def _current_root(self, net: Network) -> tuple[int, str, int]:
         """(root_prio, root_mac, my_cost_to_root)."""
         best = (self.priority, self.bridge_mac, 0)
         for pb in self._port_best.values():
@@ -138,13 +138,13 @@ class Switch(Device):
                 best = candidate
         return best
 
-    def _age_out(self, net: "Network") -> None:
+    def _age_out(self, net: Network) -> None:
         cutoff = net.now - STP_MAX_AGE
         for port, pb in list(self._port_best.items()):
             if pb.heard_at < cutoff:
                 del self._port_best[port]
 
-    def _recompute_roles(self, net: "Network") -> None:
+    def _recompute_roles(self, net: Network) -> None:
         root_prio, root_mac, _ = self._current_root(net)
         i_am_root = (root_prio, root_mac) == (self.priority, self.bridge_mac)
 
@@ -182,7 +182,7 @@ class Switch(Device):
             else:
                 iface.stp_role, iface.stp_state = "blocked", "blocking"
 
-    def _handle_bpdu(self, net: "Network", iface: Interface, bpdu: BpduFrame) -> None:
+    def _handle_bpdu(self, net: Network, iface: Interface, bpdu: BpduFrame) -> None:
         if not self.stp_enabled:
             return
         root_prio, root_mac = _parse_bridge_id(bpdu.root_id)
@@ -202,7 +202,7 @@ class Switch(Device):
         self._recompute_roles(net)
 
     # ----- data plane -----------------------------------------------------------------
-    def on_frame(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         if not self.powered_on:
             return
 
@@ -253,7 +253,7 @@ class Switch(Device):
             self._egress(net, out, frame.clone(), vlan)
 
     @staticmethod
-    def _egress(net: "Network", out: Interface, frame: EthernetFrame, vlan: int) -> None:
+    def _egress(net: Network, out: Interface, frame: EthernetFrame, vlan: int) -> None:
         # Tag on trunks, strip on access ports.
         frame.vlan = vlan if out.vlan_mode == "trunk" else None
         out.transmit(net, frame)

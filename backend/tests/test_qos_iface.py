@@ -16,17 +16,9 @@ behaviour is structurally preserved.
 """
 from __future__ import annotations
 
-from collections import deque
-
-import pytest
-
 from engine.netstack import Network
 from engine.netstack.device import Host
-from engine.netstack.frames import EthernetFrame, Ipv4Packet
-from engine.netstack.addr import MacAddr
 from engine.netstack.qos import QosClass, QosConfig, classify
-from ipaddress import IPv4Address
-
 
 # ---------------------------------------------------------------------------
 # Unit: classify() boundary tests
@@ -126,7 +118,7 @@ def test_disabled_path_shared_depth_tail_drop():
 
 def test_disabled_path_ef_drains_before_be():
     """Disabled path: high-DSCP (EF) frames leave before low-DSCP (BE) — same priority semantics."""
-    net, rep = _ping_pair(bandwidth_bps=10_000_000, count=1)
+    _net, rep = _ping_pair(bandwidth_bps=10_000_000, count=1)
     # Just confirm ping succeeds; priority ordering is structural (EF→BE in _queues iteration)
     assert rep.received == 1
 
@@ -179,6 +171,6 @@ def test_enabled_path_per_class_tail_drop():
     att = net.connect("link", i1, i2, bandwidth_bps=64_000)
     att.qos = QosConfig(enabled=True, ef_min_dscp=40, af_min_dscp=8, depth_per_class=1)
 
-    rep = net.ping("h1", "10.3.0.2", count=10, interval=0.0)
+    net.ping("h1", "10.3.0.2", count=10, interval=0.0)
     # With depth_per_class=1 on a slow link some BE frames must be tail-dropped
     assert net.drops.get("queue_overflow", 0) > 0

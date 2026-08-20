@@ -22,8 +22,8 @@ from pathlib import Path
 from app.core.config import get_settings
 from app.models import (
     Activity,
-    ConfigArtifact,
     Cable,
+    ConfigArtifact,
     FiberPath,
     GradeResult,
     ImportSnapshot,
@@ -170,7 +170,7 @@ class MemoryRepository:
             os.chmod(tmp, 0o600)
             tmp.replace(self._state_path)
         except Exception:
-            logger.error("Failed to persist state to %s", self._state_path, exc_info=True)
+            logger.exception("Failed to persist state to %s", self._state_path)
 
     # --- projects -----------------------------------------------------------
     async def list_projects(self) -> list[Project]:
@@ -273,7 +273,7 @@ class MemoryRepository:
                     # effective site_id = what this patch explicitly says, else
                     # whatever the node already has — either way, it must not
                     # disagree with the target rack's site.
-                    current = filtered["site_id"] if "site_id" in filtered else node.site_id
+                    current = filtered.get("site_id", node.site_id)
                     if current is not None and current != rack.site_id:
                         from app.exceptions.base import Conflict
                         raise Conflict(

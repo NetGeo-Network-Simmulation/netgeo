@@ -14,9 +14,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from ipaddress import IPv4Address, IPv6Address
-from typing import Any, Union
+from typing import Any
 
-from engine.netstack.addr import BROADCAST_MAC, MacAddr
+from engine.netstack.addr import BROADCAST_MAC
 
 # EtherTypes
 ETH_IPV4 = 0x0800
@@ -233,7 +233,7 @@ class Ipv4Packet:
     ttl: int = 64
     dscp: int = 0               # QoS marking (0 = best effort, 46 = EF)
     dont_fragment: bool = True
-    payload: Union[IcmpMessage, UdpSegment, TcpSegment, Any] = None
+    payload: IcmpMessage | UdpSegment | TcpSegment | Any = None
     payload_len: int = 0        # used when payload has no wire_size
 
     @property
@@ -262,7 +262,7 @@ class Ipv6Packet:
     proto: int = PROTO_ICMPV6
     hop_limit: int = 64
     dscp: int = 0               # traffic-class DSCP bits
-    payload: Union[Icmpv6Message, UdpSegment, TcpSegment, Any] = None
+    payload: Icmpv6Message | UdpSegment | TcpSegment | Any = None
     payload_len: int = 0
 
     @property
@@ -390,7 +390,7 @@ class IsisLsp:
     def wire_size(self) -> int:
         return 27 + 12 * len(self.links)
 
-    def copy(self) -> "IsisLsp":
+    def copy(self) -> IsisLsp:
         return IsisLsp(self.system_id, self.seq, list(self.links), self.level)
 
     def summary(self) -> str:
@@ -428,7 +428,7 @@ class MplsPacket:
         inner = getattr(self.inner, "wire_size", 0)
         return 4 * len(self.labels) + inner
 
-    def copy(self) -> "MplsPacket":
+    def copy(self) -> MplsPacket:
         import copy
 
         return MplsPacket(list(self.labels), copy.deepcopy(self.inner))
@@ -453,7 +453,7 @@ class LdpBinding:
     def wire_size(self) -> int:
         return 20 + 8 * len(self.bindings)
 
-    def copy(self) -> "LdpBinding":
+    def copy(self) -> LdpBinding:
         return LdpBinding(self.router_id, self.src_ip, dict(self.bindings))
 
     def summary(self) -> str:
@@ -507,7 +507,7 @@ class SrSidAdvert:
     def wire_size(self) -> int:
         return 24 + 8 * len(self.adj_sids)
 
-    def copy(self) -> "SrSidAdvert":
+    def copy(self) -> SrSidAdvert:
         return SrSidAdvert(self.router_id, self.prefix, self.node_sid, dict(self.adj_sids))
 
     def summary(self) -> str:
@@ -541,7 +541,7 @@ class VxlanPacket:
         inner = getattr(self.inner, "size_bytes", 0)
         return 8 + inner       # 8-byte VXLAN header + inner L2 frame
 
-    def copy(self) -> "VxlanPacket":
+    def copy(self) -> VxlanPacket:
         import copy
 
         return VxlanPacket(self.vni, copy.deepcopy(self.inner))
@@ -600,7 +600,7 @@ class EthernetFrame:
     dst_mac: str
     ethertype: int = ETH_IPV4
     vlan: int | None = None
-    payload: Union[Ipv4Packet, Ipv6Packet, ArpPacket, BpduFrame, Any] = None
+    payload: Ipv4Packet | Ipv6Packet | ArpPacket | BpduFrame | Any = None
     explicit_size: int | None = None
     # Assigned by the Network at first transmit (0 = unassigned) so ids are
     # deterministic per lab — a rebuilt lab replays with identical frame ids.
@@ -621,7 +621,7 @@ class EthernetFrame:
     def is_broadcast(self) -> bool:
         return self.dst_mac == BROADCAST_MAC
 
-    def clone(self) -> "EthernetFrame":
+    def clone(self) -> EthernetFrame:
         """Copy for flooding — each egress port gets its own frame instance
         (id reassigned at transmit) *and its own payload*, so two receivers
         can independently mutate TTL / NAT fields without corrupting each

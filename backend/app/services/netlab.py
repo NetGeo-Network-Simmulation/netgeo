@@ -48,7 +48,6 @@ Node ``intent`` fields understood by the builder (all optional):
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import threading
 from collections import defaultdict
@@ -60,15 +59,15 @@ from app.models import Topology
 from engine.netstack import Network
 from engine.netstack.cli import CliSession
 from engine.netstack.device import Device, Host
-from engine.netstack.routing import AclRule, DhcpPool, Firewall, Router
-from engine.netstack.switching import Switch
-from engine.netstack.qos import QosConfig
 from engine.netstack.protocols.bgp import BgpProcess
 from engine.netstack.protocols.isis import IsisProcess
 from engine.netstack.protocols.mpls import L3vpnProcess, LdpProcess
 from engine.netstack.protocols.ospf import OspfProcess
 from engine.netstack.protocols.vrrp import VrrpProcess
 from engine.netstack.protocols.vxlan import VxlanProcess
+from engine.netstack.qos import QosConfig
+from engine.netstack.routing import AclRule, DhcpPool, Firewall, Router
+from engine.netstack.switching import Switch
 
 logger = logging.getLogger("netgeo.netlab")
 
@@ -708,9 +707,7 @@ def plan_auto_addressing(topo: Topology) -> dict:
             if is_l3(nid):
                 domains.setdefault(find(f"n:{nid}"), []).append((nid, ref))
 
-    lan_index = 0
-    for members in domains.values():
-        lan_index += 1
+    for lan_index, members in enumerate(domains.values(), start=1):
         base = IPv4Address("10.0.0.0") + lan_index * 65536  # 10.<n>.0.0/24
         base6 = IPv6Address("fd00::") + lan_index * 2**64   # fd00:0:0:<n>::/64
         routers = [m for m in members if str(node_by_id[m[0]].kind) in ("router", "firewall")]

@@ -15,7 +15,6 @@ from app.core import config as config_mod
 from app.core.config import Settings, get_settings
 from app.services import updater
 
-
 # ---- Version source of truth -------------------------------------------------
 
 def test_app_version_ignores_environment(monkeypatch):

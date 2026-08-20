@@ -285,8 +285,7 @@ def coverage_raster(req: CoverageRasterRequest) -> dict:
                 dist = rf.haversine_m(slat, slon, lat, lon)
                 loss = prop.path_loss(req.model_id, dist, sf, sh, req.rx_height_m, **req.params)
                 rssi = sp + sg + req.rx_gain_dbi - loss - req.misc_loss_db
-                if rssi > best:
-                    best = rssi
+                best = max(best, rssi)
             row_vals.append(round(best, 2))
         values.append(row_vals)
 
@@ -445,15 +444,15 @@ def product_select(req: ProductSelectRequest) -> dict:
 
 
 __all__ = [
-    "plan_topology",
+    "MAX_COVERAGE_CELLS",
     "coverage_radius",
+    "coverage_raster",
     "link_budget_between",
     "list_models",
-    "path_loss",
-    "ptp_budget",
-    "coverage_raster",
-    "MAX_COVERAGE_CELLS",
     "mcs_for_rssi",
-    "ptmp_plan",
+    "path_loss",
+    "plan_topology",
     "product_select",
+    "ptmp_plan",
+    "ptp_budget",
 ]

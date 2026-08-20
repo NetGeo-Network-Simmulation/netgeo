@@ -144,5 +144,9 @@ def analyse_los(
 
 
 __all__ = [
-    "fetch_profile", "analyse_los", "ElevationUnavailable", "TerrainSource", "_PROVIDER_URL",
+    "_PROVIDER_URL",
+    "ElevationUnavailable",
+    "TerrainSource",
+    "analyse_los",
+    "fetch_profile",
 ]

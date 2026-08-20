@@ -40,7 +40,7 @@ class MacAddr(str):
 
     __slots__ = ()
 
-    def __new__(cls, value: str) -> "MacAddr":
+    def __new__(cls, value: str) -> MacAddr:
         v = value.strip().lower().replace("-", ":")
         parts = v.split(":")
         if len(parts) != 6 or not all(len(p) == 2 and _is_hex(p) for p in parts):
@@ -139,28 +139,28 @@ def parse_ip_interface6(value: str) -> IPv6Interface:
 
 
 __all__ = [
-    "BROADCAST_MAC",
-    "STP_MULTICAST_MAC",
     "ALL_NODES_V6",
     "ALL_ROUTERS_V6",
+    "BROADCAST_MAC",
     "LINK_LOCAL_NET",
+    "STP_MULTICAST_MAC",
     "IPv4Address",
     "IPv4Interface",
     "IPv4Network",
     "IPv6Address",
     "IPv6Interface",
     "IPv6Network",
+    "MacAddr",
+    "eui64_suffix",
     "ip_address",
     "ip_interface",
-    "MacAddr",
+    "ipv4_multicast_mac",
+    "ipv6_multicast_mac",
+    "link_local_for",
     "mac_from_int",
     "parse_ip_interface",
     "parse_ip_interface6",
     "same_subnet",
-    "eui64_suffix",
-    "link_local_for",
     "slaac_address",
     "solicited_node",
-    "ipv4_multicast_mac",
-    "ipv6_multicast_mac",
 ]

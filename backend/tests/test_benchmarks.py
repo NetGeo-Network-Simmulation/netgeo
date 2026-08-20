@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import time
 import warnings
-
 from ipaddress import IPv4Address
 
 from engine.events import EventType, SimEvent

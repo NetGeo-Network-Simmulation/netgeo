@@ -32,5 +32,5 @@ async def test_normal_body_passes_through():
 
 async def test_garbage_content_length_passes_through():
     # A non-numeric header must not crash the guard.
-    sent, passed = await _run([(b"content-length", b"not-a-number")])
+    _sent, passed = await _run([(b"content-length", b"not-a-number")])
     assert passed

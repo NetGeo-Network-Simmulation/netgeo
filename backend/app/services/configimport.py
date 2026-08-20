@@ -15,22 +15,22 @@ import ipaddress
 import re
 from collections import defaultdict
 
-_HOSTNAME = re.compile(r"^\s*hostname\s+(\S+)", re.M)
-_INTERFACE = re.compile(r"^\s*interface\s+(\S+)", re.I)
-_IP_ADDR = re.compile(r"^\s*ip\s+address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", re.I)
+_HOSTNAME = re.compile(r"^\s*hostname\s+(\S+)", re.MULTILINE)
+_INTERFACE = re.compile(r"^\s*interface\s+(\S+)", re.IGNORECASE)
+_IP_ADDR = re.compile(r"^\s*ip\s+address\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)", re.IGNORECASE)
 _IP_ROUTE = re.compile(
-    r"^\s*ip\s+route\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+(\S+)", re.I | re.M
+    r"^\s*ip\s+route\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+(\S+)", re.IGNORECASE | re.MULTILINE
 )
 # Router-process blocks: everything indented under the "router <proto> ..." line.
-_OSPF_BLOCK = re.compile(r"^router\s+ospf\s+\S+\s*\n((?:[ \t]+.*\n?)*)", re.I | re.M)
-_BGP_BLOCK = re.compile(r"^router\s+bgp\s+(\d+)\s*\n((?:[ \t]+.*\n?)*)", re.I | re.M)
+_OSPF_BLOCK = re.compile(r"^router\s+ospf\s+\S+\s*\n((?:[ \t]+.*\n?)*)", re.IGNORECASE | re.MULTILINE)
+_BGP_BLOCK = re.compile(r"^router\s+bgp\s+(\d+)\s*\n((?:[ \t]+.*\n?)*)", re.IGNORECASE | re.MULTILINE)
 _OSPF_NET = re.compile(
-    r"network\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+area\s+(\S+)", re.I
+    r"network\s+(\d+\.\d+\.\d+\.\d+)\s+(\d+\.\d+\.\d+\.\d+)\s+area\s+(\S+)", re.IGNORECASE
 )
-_ROUTER_ID = re.compile(r"router-id\s+(\d+\.\d+\.\d+\.\d+)", re.I)
-_BGP_NEIGHBOR = re.compile(r"neighbor\s+(\d+\.\d+\.\d+\.\d+)\s+remote-as\s+(\d+)", re.I)
+_ROUTER_ID = re.compile(r"router-id\s+(\d+\.\d+\.\d+\.\d+)", re.IGNORECASE)
+_BGP_NEIGHBOR = re.compile(r"neighbor\s+(\d+\.\d+\.\d+\.\d+)\s+remote-as\s+(\d+)", re.IGNORECASE)
 _BGP_NETWORK = re.compile(
-    r"network\s+(\d+\.\d+\.\d+\.\d+)\s+mask\s+(\d+\.\d+\.\d+\.\d+)", re.I
+    r"network\s+(\d+\.\d+\.\d+\.\d+)\s+mask\s+(\d+\.\d+\.\d+\.\d+)", re.IGNORECASE
 )
 
 
@@ -115,7 +115,7 @@ def parse_ios(text: str) -> dict:
     return out
 
 
-_ROS_IDENTITY = re.compile(r"/system identity.*?name=([^\s]+)", re.S)
+_ROS_IDENTITY = re.compile(r"/system identity.*?name=([^\s]+)", re.DOTALL)
 _ROS_KV = re.compile(r"(\S+?)=([^\s]+)")
 
 

@@ -170,4 +170,4 @@ def project_report(project, topo: Topology, fiber_paths: list[FiberPath]) -> tup
     return bom, render_report_html(project, topo, budgets, bom)
 
 
-__all__ = ["build_bom", "render_report_html", "project_report"]
+__all__ = ["build_bom", "project_report", "render_report_html"]

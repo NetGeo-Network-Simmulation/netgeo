@@ -22,7 +22,7 @@ async def test_system_internet_shape(client):
     resp = await client.get("/api/system/internet")
     assert resp.status_code == 200, resp.text
     data = resp.json()
-    assert set(("online", "latency_ms", "via", "source_ip")) <= set(data)
+    assert {"online", "latency_ms", "via", "source_ip"} <= set(data)
     assert isinstance(data["online"], bool)
 
 

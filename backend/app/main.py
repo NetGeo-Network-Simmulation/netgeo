@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -23,7 +22,12 @@ from app.api.ws import router as ws_router
 from app.core.config import APP_CHANNEL, get_settings
 from app.core.errors import register_exception_handlers
 from app.core.logging import configure_logging
-from app.core.security import check_rate_limit, configure_auth_store, init_admin_user, is_setup_required
+from app.core.security import (
+    check_rate_limit,
+    configure_auth_store,
+    init_admin_user,
+    is_setup_required,
+)
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,14 @@ against the class power budget.
 """
 from __future__ import annotations
 
-from app.models import FiberCheck, FiberElement, FiberKind, FiberPath, GponClass, LossBudget
+from app.models import (
+    FiberCheck,
+    FiberElement,
+    FiberKind,
+    FiberPath,
+    GponClass,
+    LossBudget,
+)
 
 # Standard passive component losses (dB). Splitter losses are the common
 # 1:N insertion-loss figures; connector/splice are typical field values.

@@ -10,8 +10,15 @@ accounting), DHCP client and DNS stub resolver.
 from __future__ import annotations
 
 import logging
-from ipaddress import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface, IPv6Network
-from typing import TYPE_CHECKING, Callable, Optional
+from collections.abc import Callable
+from ipaddress import (
+    IPv4Address,
+    IPv4Interface,
+    IPv6Address,
+    IPv6Interface,
+    IPv6Network,
+)
+from typing import TYPE_CHECKING
 
 from engine.events import EventType, SimEvent
 from engine.netstack.addr import (
@@ -84,13 +91,13 @@ class Device:
         return self.add_interface(lag)
 
     # ----- frame entry point --------------------------------------------------
-    def on_frame(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         """Called when a frame is fully received on ``iface``. Override."""
 
-    def on_mtu_drop(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_mtu_drop(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         """Hook: an egress frame exceeded the link MTU (routers send ICMP)."""
 
-    def on_start(self, net: "Network") -> None:
+    def on_start(self, net: Network) -> None:
         """Hook: the network started — kick off periodic/bootstrap behaviour."""
 
     # ----- helpers ---------------------------------------------------------------
@@ -147,7 +154,7 @@ class L3Device(Device):
                     return iface, dst
         return None
 
-    def send_ip(self, net: "Network", packet: Ipv4Packet) -> None:
+    def send_ip(self, net: Network, packet: Ipv4Packet) -> None:
         route = self.egress_for(packet.dst)
         if route is None:
             net.record_drop("no_route")
@@ -157,7 +164,7 @@ class L3Device(Device):
         self._resolve_and_send(net, iface, next_hop, packet)
 
     def _resolve_and_send(
-        self, net: "Network", iface: Interface, next_hop: IPv4Address, packet: Ipv4Packet
+        self, net: Network, iface: Interface, next_hop: IPv4Address, packet: Ipv4Packet
     ) -> None:
         if next_hop == packet.dst and self.owns_ip(packet.dst):
             return  # to-self; nothing to put on the wire
@@ -185,7 +192,7 @@ class L3Device(Device):
             self._schedule_arp_timeout(net, iface, next_hop)
 
     def _schedule_arp_timeout(
-        self, net: "Network", iface: Interface, next_hop: IPv4Address
+        self, net: Network, iface: Interface, next_hop: IPv4Address
     ) -> None:
         net.scheduler.schedule_after(
             ARP_TIMEOUT,
@@ -197,7 +204,7 @@ class L3Device(Device):
             ),
         )
 
-    def _send_arp_request(self, net: "Network", iface: Interface, target: IPv4Address) -> None:
+    def _send_arp_request(self, net: Network, iface: Interface, target: IPv4Address) -> None:
         src_ip = iface.ip.ip if iface.ip else IPv4Address("0.0.0.0")
         iface.transmit(
             net,
@@ -215,7 +222,7 @@ class L3Device(Device):
             ),
         )
 
-    def _arp_timeout(self, net: "Network", iface: Interface, ip: IPv4Address) -> None:
+    def _arp_timeout(self, net: Network, iface: Interface, ip: IPv4Address) -> None:
         if ip not in self._arp_pending or ip in self.arp_table:
             return
         attempts = self._arp_attempts.get(ip, 1)
@@ -231,7 +238,7 @@ class L3Device(Device):
                 net.record_drop("arp_timeout")
 
     # ----- ARP ingress -------------------------------------------------------
-    def _handle_arp(self, net: "Network", iface: Interface, arp: ArpPacket) -> None:
+    def _handle_arp(self, net: Network, iface: Interface, arp: ArpPacket) -> None:
         # Learn the sender either way (gratuitous learning, like real stacks).
         if str(arp.sender_ip) != "0.0.0.0":
             self.arp_table[arp.sender_ip] = (MacAddr(arp.sender_mac), iface.name)
@@ -254,7 +261,7 @@ class L3Device(Device):
                 ),
             )
 
-    def _flush_pending(self, net: "Network", resolved: IPv4Address) -> None:
+    def _flush_pending(self, net: Network, resolved: IPv4Address) -> None:
         self._arp_attempts.pop(resolved, None)
         queued = self._arp_pending.pop(resolved, None)
         if not queued:
@@ -272,7 +279,7 @@ class L3Device(Device):
             )
 
     # ----- ICMP -----------------------------------------------------------------
-    def _handle_icmp_to_self(self, net: "Network", packet: Ipv4Packet) -> None:
+    def _handle_icmp_to_self(self, net: Network, packet: Ipv4Packet) -> None:
         icmp = packet.payload
         if not isinstance(icmp, IcmpMessage):
             return
@@ -292,7 +299,7 @@ class L3Device(Device):
         else:
             net.on_icmp(self, packet, icmp)
 
-    def on_no_route(self, net: "Network", packet: Ipv4Packet) -> None:
+    def on_no_route(self, net: Network, packet: Ipv4Packet) -> None:
         """Hook: no route for a locally-originated/forwarded packet."""
 
     # ==================== IPv6: egress + neighbor discovery ====================
@@ -315,7 +322,7 @@ class L3Device(Device):
                 return first, dst
         return None
 
-    def send_ip6(self, net: "Network", packet: Ipv6Packet) -> None:
+    def send_ip6(self, net: Network, packet: Ipv6Packet) -> None:
         route = self.egress_for6(packet.dst)
         if route is None:
             net.record_drop("no_route6")
@@ -325,7 +332,7 @@ class L3Device(Device):
         self._resolve_and_send6(net, iface, next_hop, packet)
 
     def _resolve_and_send6(
-        self, net: "Network", iface: Interface, next_hop: IPv6Address, packet: Ipv6Packet
+        self, net: Network, iface: Interface, next_hop: IPv6Address, packet: Ipv6Packet
     ) -> None:
         if packet.dst.is_multicast:
             iface.transmit(
@@ -363,7 +370,7 @@ class L3Device(Device):
             self._send_ns(net, iface, next_hop)
             self._schedule_nd_timeout(net, iface, next_hop)
 
-    def _send_ns(self, net: "Network", iface: Interface, target: IPv6Address) -> None:
+    def _send_ns(self, net: Network, iface: Interface, target: IPv6Address) -> None:
         group = solicited_node(target)
         iface.transmit(
             net,
@@ -384,7 +391,7 @@ class L3Device(Device):
         )
 
     def _schedule_nd_timeout(
-        self, net: "Network", iface: Interface, next_hop: IPv6Address
+        self, net: Network, iface: Interface, next_hop: IPv6Address
     ) -> None:
         net.scheduler.schedule_after(
             ARP_TIMEOUT,
@@ -396,7 +403,7 @@ class L3Device(Device):
             ),
         )
 
-    def _nd_timeout(self, net: "Network", iface: Interface, ip: IPv6Address) -> None:
+    def _nd_timeout(self, net: Network, iface: Interface, ip: IPv6Address) -> None:
         if ip not in self._nd_pending or ip in self.nd_cache:
             return
         attempts = self._nd_attempts.get(ip, 1)
@@ -411,7 +418,7 @@ class L3Device(Device):
             for _pkt in stale:
                 net.record_drop("nd_timeout")
 
-    def _nd_learn(self, net: "Network", iface: Interface, addr: IPv6Address, ll: str) -> None:
+    def _nd_learn(self, net: Network, iface: Interface, addr: IPv6Address, ll: str) -> None:
         self.nd_cache[addr] = (MacAddr(ll), iface.name)
         self._nd_attempts.pop(addr, None)
         queued = self._nd_pending.pop(addr, None)
@@ -431,7 +438,7 @@ class L3Device(Device):
 
     # ----- ICMPv6 ingress (NDP + echo + errors) --------------------------------
     def _handle_icmpv6(
-        self, net: "Network", iface: Interface, pkt: Ipv6Packet, icmp: Icmpv6Message
+        self, net: Network, iface: Interface, pkt: Ipv6Packet, icmp: Icmpv6Message
     ) -> None:
         if icmp.type == 135:  # neighbor solicitation
             if icmp.ll_addr and not pkt.src.is_unspecified:
@@ -467,7 +474,7 @@ class L3Device(Device):
         self.on_ndp_router(net, iface, pkt, icmp)  # RS/RA — subclass hooks
 
     def _send_na(
-        self, net: "Network", iface: Interface, dst: IPv6Address, target: IPv6Address
+        self, net: Network, iface: Interface, dst: IPv6Address, target: IPv6Address
     ) -> None:
         cached = self.nd_cache.get(dst)
         dst_mac = cached[0] if cached else ipv6_multicast_mac(IPv6Address("ff02::1"))
@@ -490,11 +497,11 @@ class L3Device(Device):
         )
 
     def on_ndp_router(
-        self, net: "Network", iface: Interface, pkt: Ipv6Packet, icmp: Icmpv6Message
+        self, net: Network, iface: Interface, pkt: Ipv6Packet, icmp: Icmpv6Message
     ) -> None:
         """Hook: RS/RA handling — hosts consume RA, routers answer RS."""
 
-    def on_no_route6(self, net: "Network", packet: Ipv6Packet) -> None:
+    def on_no_route6(self, net: Network, packet: Ipv6Packet) -> None:
         """Hook: no IPv6 route for a locally-originated/forwarded packet."""
 
 
@@ -512,7 +519,7 @@ class Host(L3Device):
         self.dns_cache: dict[str, IPv4Address] = {}
         self._dhcp_xid = 0
         self._dns_xid = 0
-        self._dns_waiting: dict[int, Callable[[Optional[IPv4Address]], None]] = {}
+        self._dns_waiting: dict[int, Callable[[IPv4Address | None], None]] = {}
 
     # ----- routing: connected or default gateway --------------------------------
     def egress_for(self, dst: IPv4Address) -> tuple[Interface, IPv4Address] | None:
@@ -543,7 +550,7 @@ class Host(L3Device):
         return None
 
     # ----- SLAAC / router discovery ----------------------------------------------
-    def on_start(self, net: "Network") -> None:
+    def on_start(self, net: Network) -> None:
         """Solicit routers on SLAAC-enabled ports so autoconfig converges fast."""
         for iface in self.interfaces.values():
             if iface.slaac:
@@ -557,7 +564,7 @@ class Host(L3Device):
                     ),
                 )
 
-    def _send_rs(self, net: "Network", iface: Interface) -> None:
+    def _send_rs(self, net: Network, iface: Interface) -> None:
         iface.transmit(
             net,
             EthernetFrame(
@@ -575,7 +582,7 @@ class Host(L3Device):
         )
 
     def on_ndp_router(
-        self, net: "Network", iface: Interface, pkt: Ipv6Packet, icmp: Icmpv6Message
+        self, net: Network, iface: Interface, pkt: Ipv6Packet, icmp: Icmpv6Message
     ) -> None:
         if icmp.type != 134:  # hosts only consume router advertisements
             return
@@ -598,7 +605,7 @@ class Host(L3Device):
                     net.on_slaac_bound(self, iface, addr)
 
     # ----- frame handling --------------------------------------------------------
-    def on_frame(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         if not self.powered_on:
             return
         # NIC filter: mine, broadcast or multicast only.
@@ -638,7 +645,7 @@ class Host(L3Device):
         if pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):
             self._handle_udp(net, iface, pkt, pkt.payload)
 
-    def _on_ipv6(self, net: "Network", iface: Interface, pkt: Ipv6Packet) -> None:
+    def _on_ipv6(self, net: Network, iface: Interface, pkt: Ipv6Packet) -> None:
         if not (self.owns_ip6(pkt.dst) or iface.joined_group(pkt.dst)):
             return  # hosts do not forward
         if pkt.proto == PROTO_ICMPV6 and isinstance(pkt.payload, Icmpv6Message):
@@ -647,7 +654,7 @@ class Host(L3Device):
     # ----- applications ---------------------------------------------------------
     def ping(
         self,
-        net: "Network",
+        net: Network,
         dst: IPv4Address | IPv6Address,
         count: int = 4,
         interval: float = 1.0,
@@ -672,7 +679,7 @@ class Host(L3Device):
 
     def _send_echo(
         self,
-        net: "Network",
+        net: Network,
         dst: IPv4Address | IPv6Address,
         ident: int,
         seq: int,
@@ -701,7 +708,7 @@ class Host(L3Device):
         )
 
     def _send_echo6(
-        self, net: "Network", dst: IPv6Address, ident: int, seq: int, size: int, hlim: int
+        self, net: Network, dst: IPv6Address, ident: int, seq: int, size: int, hlim: int
     ) -> None:
         route = self.egress_for6(dst)
         iface = route[0] if route else next(iter(self.interfaces.values()), None)
@@ -725,7 +732,7 @@ class Host(L3Device):
         )
 
     # ----- DHCP client ------------------------------------------------------------
-    def dhcp_discover(self, net: "Network", iface_name: str | None = None) -> None:
+    def dhcp_discover(self, net: Network, iface_name: str | None = None) -> None:
         iface = (
             self.interfaces.get(iface_name)
             if iface_name
@@ -738,7 +745,7 @@ class Host(L3Device):
             net, iface, DhcpMessage(op="discover", client_mac=iface.mac, xid=self._dhcp_xid)
         )
 
-    def _broadcast_dhcp(self, net: "Network", iface: Interface, msg: DhcpMessage) -> None:
+    def _broadcast_dhcp(self, net: Network, iface: Interface, msg: DhcpMessage) -> None:
         iface.transmit(
             net,
             EthernetFrame(
@@ -756,7 +763,7 @@ class Host(L3Device):
         )
 
     def _handle_udp(
-        self, net: "Network", iface: Interface, pkt: Ipv4Packet, udp: UdpSegment
+        self, net: Network, iface: Interface, pkt: Ipv4Packet, udp: UdpSegment
     ) -> None:
         app = udp.payload
         if isinstance(app, DhcpMessage) and udp.dst_port == 68:
@@ -770,7 +777,7 @@ class Host(L3Device):
                 cb(answer)
             net.on_dns_response(self, app)
 
-    def _handle_dhcp(self, net: "Network", iface: Interface, msg: DhcpMessage) -> None:
+    def _handle_dhcp(self, net: Network, iface: Interface, msg: DhcpMessage) -> None:
         if msg.xid != self._dhcp_xid:
             return
         if msg.op == "offer":
@@ -797,9 +804,9 @@ class Host(L3Device):
     # ----- DNS stub resolver ---------------------------------------------------------
     def resolve(
         self,
-        net: "Network",
+        net: Network,
         qname: str,
-        callback: Callable[[Optional[IPv4Address]], None] | None = None,
+        callback: Callable[[IPv4Address | None], None] | None = None,
     ) -> None:
         cached = self.dns_cache.get(qname)
         if cached is not None:

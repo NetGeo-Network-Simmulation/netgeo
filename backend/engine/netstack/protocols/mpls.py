@@ -60,7 +60,7 @@ if TYPE_CHECKING:  # pragma: no cover
 logger = logging.getLogger(__name__)
 
 
-def _schedule(net: "Network", after: float, node_id: str, fn) -> None:
+def _schedule(net: Network, after: float, node_id: str, fn) -> None:
     net.scheduler.schedule_after(
         after,
         SimEvent(time=0.0, type=EventType.TIMER, handler=lambda _c, _e: fn(), node_id=node_id),
@@ -101,13 +101,13 @@ class LdpProcess:
         )
 
     # ----- lifecycle ---------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self._started:
             return
         self._started = True
         self._tick(net)
 
-    def _tick(self, net: "Network") -> None:
+    def _tick(self, net: Network) -> None:
         # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
         # the work, not the reschedule, so a power-on self-heals within one
         # interval instead of needing an explicit restart.
@@ -116,7 +116,7 @@ class LdpProcess:
             self._rebuild()
         _schedule(net, self.interval, self.router.node_id, lambda: self._tick(net))
 
-    def _advertise(self, net: "Network") -> None:
+    def _advertise(self, net: Network) -> None:
         binds = {str(p): self._local_label(p) for p in self._fecs()}
         for name, iface in self.router.interfaces.items():
             if not iface.is_up or not iface.ip or name in self.router.iface_vrf:
@@ -135,7 +135,7 @@ class LdpProcess:
                 ),
             )
 
-    def on_frame(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         pdu = frame.payload
         if not isinstance(pdu, LdpBinding):
             return
@@ -209,7 +209,7 @@ class L3vpnProcess:
         self.router.iface_vrf[iface_name] = vrf_name
 
     # ----- lifecycle ---------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self._started:
             return
         self._started = True
@@ -229,7 +229,7 @@ class L3vpnProcess:
                 vrf.install(Route(prefix=ip.network, next_hop=None, iface_name=ifn, source="connected"))
         self._tick(net)
 
-    def _tick(self, net: "Network") -> None:
+    def _tick(self, net: Network) -> None:
         # ponytail: same self-healing shape as the LDP tick above.
         if self.router.powered_on:
             self._advertise(net)
@@ -256,7 +256,7 @@ class L3vpnProcess:
                                     next_hop=my_nh, label=vrf.vpn_label))
         return out
 
-    def _advertise(self, net: "Network") -> None:
+    def _advertise(self, net: Network) -> None:
         bgp = self._bgp()
         if bgp is None:
             return
@@ -290,7 +290,7 @@ class L3vpnProcess:
             )
 
     # ----- ingress -----------------------------------------------------------
-    def on_packet(self, net: "Network", iface: Interface, pkt: Ipv4Packet) -> None:
+    def on_packet(self, net: Network, iface: Interface, pkt: Ipv4Packet) -> None:
         seg = pkt.payload
         if not isinstance(seg, TcpSegment) or not isinstance(seg.payload, VpnUpdate):
             return

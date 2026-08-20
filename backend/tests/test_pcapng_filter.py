@@ -17,7 +17,7 @@ import pytest
 from engine.netstack import Network
 from engine.netstack.device import Host
 from engine.netstack.filterlang import compile_filter
-from engine.netstack.pcapng import frame_bytes, write_pcapng
+from engine.netstack.pcapng import write_pcapng
 from engine.netstack.routing import Router
 
 

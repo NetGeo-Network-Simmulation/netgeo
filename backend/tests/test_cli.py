@@ -1,14 +1,14 @@
 """CLI emulation tests — Cisco-like and MikroTik-like dialects on live labs."""
 from __future__ import annotations
 
-from ipaddress import IPv4Address, IPv4Network
+from ipaddress import IPv4Address
 
 from engine.netstack import Network
 from engine.netstack.cli import CliSession
 from engine.netstack.device import Host
-from engine.netstack.routing import DhcpPool, Router
-from engine.netstack.switching import Switch
 from engine.netstack.protocols.ospf import OspfProcess
+from engine.netstack.routing import Router
+from engine.netstack.switching import Switch
 
 
 def build_lab() -> Network:

@@ -21,8 +21,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import logging
+from collections.abc import AsyncGenerator
 from functools import lru_cache
-from typing import Any, AsyncGenerator, AsyncIterator
+from typing import Any
 
 logger = logging.getLogger("netgeo.events")
 
@@ -40,7 +41,7 @@ class _Subscriber:
     sees the event.
     """
 
-    __slots__ = ("queue", "project_id", "loop")
+    __slots__ = ("loop", "project_id", "queue")
 
     def __init__(self, project_id: str | None, maxsize: int) -> None:
         self.project_id = project_id

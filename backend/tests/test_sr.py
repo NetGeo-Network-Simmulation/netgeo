@@ -19,10 +19,10 @@ from ipaddress import IPv4Address
 from engine.netstack import Network
 from engine.netstack.device import Host
 from engine.netstack.frames import IcmpMessage, Ipv4Packet
-from engine.netstack.routing import Router
-from engine.netstack.protocols.ospf import OspfProcess
 from engine.netstack.protocols.mpls import LdpProcess
+from engine.netstack.protocols.ospf import OspfProcess
 from engine.netstack.protocols.sr import SrProcess
+from engine.netstack.routing import Router
 
 SRGB = 16000
 ADJ = 15000

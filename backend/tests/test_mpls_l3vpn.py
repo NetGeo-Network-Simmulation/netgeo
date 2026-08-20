@@ -18,10 +18,10 @@ from ipaddress import IPv4Address
 
 from engine.netstack import Network
 from engine.netstack.device import Host
-from engine.netstack.routing import Router
 from engine.netstack.protocols.bgp import BgpProcess
+from engine.netstack.protocols.mpls import L3vpnProcess, LdpProcess
 from engine.netstack.protocols.ospf import OspfProcess
-from engine.netstack.protocols.mpls import LdpProcess, L3vpnProcess
+from engine.netstack.routing import Router
 
 
 def _lab() -> Network:

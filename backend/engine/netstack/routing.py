@@ -16,12 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from ipaddress import (
     IPv4Address,
-    IPv4Interface,
     IPv4Network,
     IPv6Address,
     IPv6Network,
 )
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from engine.events import EventType, SimEvent
 from engine.netstack.addr import ALL_NODES_V6, ALL_ROUTERS_V6, BROADCAST_MAC, MacAddr
@@ -30,16 +29,17 @@ from engine.netstack.frames import (
     ETH_IPV4,
     ETH_IPV6,
     ETH_MPLS,
+    ISIS_PDUS,
+    MPLS_L2_PDUS,
     PROTO_ICMP,
     PROTO_ICMPV6,
     PROTO_OSPF,
     PROTO_TCP,
     PROTO_UDP,
+    VXLAN_UDP_PORT,
     ArpPacket,
     DhcpMessage,
     DnsMessage,
-    ISIS_PDUS,
-    MPLS_L2_PDUS,
     EthernetFrame,
     IcmpMessage,
     Icmpv6Message,
@@ -48,7 +48,6 @@ from engine.netstack.frames import (
     MplsPacket,
     TcpSegment,
     UdpSegment,
-    VXLAN_UDP_PORT,
     VxlanPacket,
 )
 from engine.netstack.iface import Interface
@@ -89,7 +88,7 @@ class Route:
         return d
 
 
-def _lpm(routes: list["Route"], dst: IPv4Address) -> "Route | None":
+def _lpm(routes: list[Route], dst: IPv4Address) -> Route | None:
     """Longest-prefix match over a route list; ties broken by (ad, metric).
     Shared by the global RIB and every per-VRF RIB."""
     best: Route | None = None
@@ -420,7 +419,7 @@ class Router(L3Device):
         return iface, next_hop
 
     # ----- ingress -----------------------------------------------------------------
-    def on_frame(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         if not self.powered_on:
             return
         # VXLAN access port (NG-SIM-10): the tenant frame is bridged into the
@@ -493,7 +492,7 @@ class Router(L3Device):
 
         self._forward(net, iface, pkt)
 
-    def _handle_arp(self, net: "Network", iface: Interface, arp: ArpPacket) -> None:
+    def _handle_arp(self, net: Network, iface: Interface, arp: ArpPacket) -> None:
         super()._handle_arp(net, iface, arp)
         if arp.op == "request":
             # A VRRP master answers for the virtual IP with the virtual MAC.
@@ -502,7 +501,7 @@ class Router(L3Device):
                     proc.on_arp_request(net, iface, arp)
 
     # ----- forwarding pipeline --------------------------------------------------------
-    def _forward(self, net: "Network", in_iface: Interface, pkt: Ipv4Packet) -> None:
+    def _forward(self, net: Network, in_iface: Interface, pkt: Ipv4Packet) -> None:
         # Traffic entering a VRF interface is confined to that VRF's RIB — the
         # root of L3VPN isolation (NG-SIM-08).
         vrf_name = self.iface_vrf.get(in_iface.name)
@@ -557,7 +556,7 @@ class Router(L3Device):
         self._resolve_and_send(net, out, next_hop, pkt)
 
     # ----- MPLS / L3VPN forwarding (NG-SIM-08) --------------------------------------
-    def _forward_vrf(self, net: "Network", pkt: Ipv4Packet, vrf_name: str) -> None:
+    def _forward_vrf(self, net: Network, pkt: Ipv4Packet, vrf_name: str) -> None:
         """Forward an IP packet that entered a VRF interface, using only that
         VRF's RIB. A remote (VPNv4) route triggers MPLS encapsulation; a local
         route stays inside the VRF."""
@@ -568,7 +567,7 @@ class Router(L3Device):
         pkt.ttl -= 1
         self._vrf_deliver(net, pkt, vrf_name)
 
-    def _vrf_deliver(self, net: "Network", pkt: Ipv4Packet, vrf_name: str) -> None:
+    def _vrf_deliver(self, net: Network, pkt: Ipv4Packet, vrf_name: str) -> None:
         vrf = self.vrfs.get(vrf_name)
         route = vrf.lookup(pkt.dst) if vrf else None
         if route is None:
@@ -587,7 +586,7 @@ class Router(L3Device):
         self.forwarded += 1
         self._resolve_and_send(net, out, next_hop, pkt)
 
-    def _mpls_encap(self, net: "Network", pkt: Ipv4Packet, route: Route) -> None:
+    def _mpls_encap(self, net: Network, pkt: Ipv4Packet, route: Route) -> None:
         """Push [transport_label, vpn_label] and send the labelled packet toward
         the egress PE (``route.next_hop`` = its loopback)."""
         fec = self.mpls_fec.get(IPv4Network(f"{route.next_hop}/32"))
@@ -608,7 +607,7 @@ class Router(L3Device):
             ),
         )
 
-    def _mpls_forward(self, net: "Network", iface: Interface, mpls: MplsPacket) -> None:
+    def _mpls_forward(self, net: Network, iface: Interface, mpls: MplsPacket) -> None:
         """Label-switch: pop VPN labels into the local VRF, pop our own transport
         label at the LSP egress, swap transit labels toward the next LSR."""
         labels = list(mpls.labels)
@@ -672,7 +671,7 @@ class Router(L3Device):
         return False  # implicit deny at the end of a configured ACL
 
     # ----- local delivery ------------------------------------------------------------
-    def _local_deliver(self, net: "Network", iface: Interface, pkt: Ipv4Packet) -> None:
+    def _local_deliver(self, net: Network, iface: Interface, pkt: Ipv4Packet) -> None:
         # Local import: engine.netstack.protocols/__init__ pulls in ospf.py et al,
         # which import Route/Router from this module — a module-level import here
         # would deadlock on the partially-initialized routing module.
@@ -726,7 +725,7 @@ class Router(L3Device):
                 return
 
     # ----- IPv6 ingress + forwarding pipeline ----------------------------------------
-    def _on_ipv6(self, net: "Network", iface: Interface, pkt: Ipv6Packet) -> None:
+    def _on_ipv6(self, net: Network, iface: Interface, pkt: Ipv6Packet) -> None:
         if (
             self.owns_ip6(pkt.dst)
             or iface.joined_group(pkt.dst)
@@ -739,7 +738,7 @@ class Router(L3Device):
             return  # never forwarded off-link
         self._forward6(net, iface, pkt)
 
-    def _forward6(self, net: "Network", in_iface: Interface, pkt: Ipv6Packet) -> None:
+    def _forward6(self, net: Network, in_iface: Interface, pkt: Ipv6Packet) -> None:
         if pkt.hop_limit <= 1:
             net.record_drop("hop_limit_expired")
             self._send_icmpv6_error(net, pkt, icmp_type=3, code=0)
@@ -756,7 +755,7 @@ class Router(L3Device):
         self._resolve_and_send6(net, out, next_hop, pkt)
 
     def on_ndp_router(
-        self, net: "Network", iface: Interface, pkt: Ipv6Packet, icmp: Icmpv6Message
+        self, net: Network, iface: Interface, pkt: Ipv6Packet, icmp: Icmpv6Message
     ) -> None:
         # Routers answer solicitations immediately (solicited RA).
         if icmp.type == 133 and self.ra_enabled:
@@ -768,14 +767,14 @@ class Router(L3Device):
         self.ra_enabled = True
         self.ra_interval = interval
 
-    def on_start(self, net: "Network") -> None:
+    def on_start(self, net: Network) -> None:
         if not self.ra_enabled:
             return
         for iface in self.interfaces.values():
             if iface.ips6:
                 self._schedule_ra(net, iface, first=True)
 
-    def _schedule_ra(self, net: "Network", iface: Interface, first: bool = False) -> None:
+    def _schedule_ra(self, net: Network, iface: Interface, first: bool = False) -> None:
         net.scheduler.schedule_after(
             0.05 if first else self.ra_interval,
             SimEvent(
@@ -786,14 +785,14 @@ class Router(L3Device):
             ),
         )
 
-    def _ra_tick(self, net: "Network", iface: Interface) -> None:
+    def _ra_tick(self, net: Network, iface: Interface) -> None:
         if not self.ra_enabled:
             return
         if self.powered_on and iface.is_up:
             self._send_ra(net, iface)
         self._schedule_ra(net, iface)
 
-    def _send_ra(self, net: "Network", iface: Interface) -> None:
+    def _send_ra(self, net: Network, iface: Interface) -> None:
         """Unsolicited/solicited RA to all-nodes: advertise this port's /64s."""
         prefixes = tuple(
             str(ip6.network) for ip6 in iface.ips6 if ip6.network.prefixlen == 64
@@ -820,7 +819,7 @@ class Router(L3Device):
         )
 
     def _send_icmpv6_error(
-        self, net: "Network", offending: Ipv6Packet, icmp_type: int, code: int
+        self, net: Network, offending: Ipv6Packet, icmp_type: int, code: int
     ) -> None:
         # Never generate errors about errors, nor toward multicast sources.
         inner = offending.payload
@@ -855,7 +854,7 @@ class Router(L3Device):
 
     # ----- ICMP error generation ----------------------------------------------------
     def _send_icmp_error(
-        self, net: "Network", offending: Ipv4Packet, icmp_type: int, code: int
+        self, net: Network, offending: Ipv4Packet, icmp_type: int, code: int
     ) -> None:
         # Never generate errors about errors (RFC 1122).
         inner = offending.payload
@@ -887,7 +886,7 @@ class Router(L3Device):
             ),
         )
 
-    def on_mtu_drop(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_mtu_drop(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         pkt = frame.payload
         if isinstance(pkt, Ipv4Packet):
             self._send_icmp_error(net, pkt, icmp_type=3, code=4)  # frag needed
@@ -907,7 +906,7 @@ class Router(L3Device):
             return l4.src_port
         return None
 
-    def _nat_outbound(self, net: "Network", out: Interface, pkt: Ipv4Packet) -> bool:
+    def _nat_outbound(self, net: Network, out: Interface, pkt: Ipv4Packet) -> bool:
         outside_ip = out.ip.ip if out.ip else None
         if outside_ip is None:
             net.record_drop("nat_no_outside_ip")
@@ -942,7 +941,7 @@ class Router(L3Device):
             l4.src_port = binding.outside_key
         return True
 
-    def _nat_inbound(self, net: "Network", pkt: Ipv4Packet) -> bool:
+    def _nat_inbound(self, net: Network, pkt: Ipv4Packet) -> bool:
         """Restore the inside destination for a reply. True if translated."""
         l4 = pkt.payload
         key: int | None = None
@@ -980,7 +979,7 @@ class Router(L3Device):
                     return pool
         return None
 
-    def _dhcp_serve(self, net: "Network", iface: Interface, msg: DhcpMessage) -> None:
+    def _dhcp_serve(self, net: Network, iface: Interface, msg: DhcpMessage) -> None:
         pool = self._pool_for_iface(iface)
         if pool is None:
             return
@@ -1016,7 +1015,7 @@ class Router(L3Device):
             ))
 
     def _dhcp_send(
-        self, net: "Network", iface: Interface, client_mac: str, msg: DhcpMessage
+        self, net: Network, iface: Interface, client_mac: str, msg: DhcpMessage
     ) -> None:
         iface.transmit(
             net,
@@ -1037,7 +1036,7 @@ class Router(L3Device):
     # ----- DNS server -----------------------------------------------------------------------
     def _dns_serve(
         self,
-        net: "Network",
+        net: Network,
         iface: Interface,
         pkt: Ipv4Packet,
         udp: UdpSegment,

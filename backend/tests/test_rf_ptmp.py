@@ -20,12 +20,12 @@ from app.services import wireless as wsvc
 
 # --- NG-RF-04 PtMP ----------------------------------------------------------
 def _ptmp(**over) -> PtmpRequest:
-    base = dict(
-        lat=0.0, lon=0.0, height_m=30.0, azimuth_deg=0.0, beamwidth_deg=60.0,
-        freq_mhz=5000.0, bandwidth_mhz=20.0, tx_power_dbm=23.0, tx_gain_dbi=16.0,
-        rx_sensitivity_dbm=-85.0, model_id="fspl",
-        cpes=[PtmpCpe(id="c1", distance_m=500.0, bearing_deg=0.0)],
-    )
+    base = {
+        "lat": 0.0, "lon": 0.0, "height_m": 30.0, "azimuth_deg": 0.0, "beamwidth_deg": 60.0,
+        "freq_mhz": 5000.0, "bandwidth_mhz": 20.0, "tx_power_dbm": 23.0, "tx_gain_dbi": 16.0,
+        "rx_sensitivity_dbm": -85.0, "model_id": "fspl",
+        "cpes": [PtmpCpe(id="c1", distance_m=500.0, bearing_deg=0.0)],
+    }
     base.update(over)
     return PtmpRequest(**base)
 
@@ -126,10 +126,10 @@ def _candidates() -> list[RadioCandidate]:
 
 
 def _psel(**over) -> ProductSelectRequest:
-    base = dict(
-        distance_m=5000.0, freq_mhz=5000.0, target_throughput_mbps=0.0,
-        model_id="fspl", candidates=_candidates(),
-    )
+    base = {
+        "distance_m": 5000.0, "freq_mhz": 5000.0, "target_throughput_mbps": 0.0,
+        "model_id": "fspl", "candidates": _candidates(),
+    }
     base.update(over)
     return ProductSelectRequest(**base)
 

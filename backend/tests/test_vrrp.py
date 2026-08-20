@@ -93,7 +93,7 @@ def test_failover_within_master_down_interval():
 
 
 def test_traffic_survives_failover():
-    net, r1, _r2, _h1 = _fhrp_lab()
+    net, _r1, _r2, _h1 = _fhrp_lab()
     net.run_for(15.0)
     assert net.ping("h1", "10.9.0.10", count=2).received == 2
     net.set_device_power("r1", False)

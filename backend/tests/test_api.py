@@ -56,7 +56,7 @@ async def test_full_flow_node_link_config_simulate(client):
     pid = await _make_project(client, "spine-leaf")
 
     n1 = await _make_node(client, pid, "r1", "r1-e0", "10.0.0.1/24")
-    n2 = await _make_node(client, pid, "r2", "r2-e0", "10.0.0.2/24")
+    await _make_node(client, pid, "r2", "r2-e0", "10.0.0.2/24")
 
     # link kedua interface
     link_resp = await client.post(

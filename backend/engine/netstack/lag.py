@@ -16,7 +16,7 @@ member drains deterministically. Static mode trusts link state alone.
 from __future__ import annotations
 
 import zlib
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from engine.events import EventType, SimEvent
 from engine.netstack.frames import EthernetFrame, Ipv4Packet, Ipv6Packet, LacpFrame
@@ -48,12 +48,12 @@ def _flow_key(frame: EthernetFrame) -> bytes:
 class LagInterface(Interface):
     """The logical port-channel."""
 
-    __slots__ = ("members", "mode", "_partner_seen", "_started")
+    __slots__ = ("_partner_seen", "_started", "members", "mode")
 
     def __init__(
         self,
         name: str,
-        device: "Device",
+        device: Device,
         members: list[Interface],
         mode: str = "lacp",
     ) -> None:
@@ -85,7 +85,7 @@ class LagInterface(Interface):
         return self.enabled and any(m.is_up for m in self.members)
 
     # ----- egress: hash a member ---------------------------------------------
-    def transmit(self, net: "Network", frame: EthernetFrame) -> None:  # type: ignore[override]
+    def transmit(self, net: Network, frame: EthernetFrame) -> None:  # type: ignore[override]
         active = self.active_members(net.now)
         if not active:
             self.counters.drops_down += 1
@@ -95,13 +95,13 @@ class LagInterface(Interface):
         member.transmit(net, frame)
 
     # ----- LACP ---------------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self._started or self.mode != "lacp":
             return
         self._started = True
         self._lacp_tick(net)
 
-    def _lacp_tick(self, net: "Network") -> None:
+    def _lacp_tick(self, net: Network) -> None:
         if self.device.powered_on:
             for m in self.members:
                 if not m.is_up:
@@ -127,7 +127,7 @@ class LagInterface(Interface):
             ),
         )
 
-    def on_lacp(self, net: "Network", member: Interface, pdu: LacpFrame) -> None:
+    def on_lacp(self, net: Network, member: Interface, pdu: LacpFrame) -> None:
         self._partner_seen[member.name] = net.now
 
     # ----- introspection ---------------------------------------------------------

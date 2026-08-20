@@ -55,4 +55,4 @@ async def upload(content: bytes, filename: str, source: str) -> dict:
     return resp.json()
 
 
-__all__ = ["upload", "StorageHubError"]
+__all__ = ["StorageHubError", "upload"]

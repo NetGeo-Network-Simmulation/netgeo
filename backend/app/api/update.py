@@ -38,7 +38,7 @@ def update_check() -> dict:
     # the frontend distinguishes "GitHub unreachable" from "backend unreachable".
     try:
         return updater.check()
-    except Exception:  # noqa: BLE001 — last-resort guard; never 500 a read-only check
+    except Exception:
         logger.exception("update_check failed unexpectedly")
         return {
             "current": get_settings().APP_VERSION,

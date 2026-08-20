@@ -52,7 +52,6 @@ class ConfigGenError(RuntimeError):
 
 def _cidr_to_mask(cidr: str) -> str:
     """'10.0.0.1/24' or '24' -> dotted netmask '255.255.255.0'."""
-    import ipaddress
 
     prefix = cidr.split("/")[1] if "/" in cidr else cidr
     bits = int(prefix)

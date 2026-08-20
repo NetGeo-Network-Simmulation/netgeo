@@ -23,10 +23,9 @@ from fastapi.concurrency import run_in_threadpool
 
 from app.api.deps import get_current_user_ws
 from app.services import netlab as netlab_service
-from app.services.events import get_bus
 from app.services import wireless as wsvc
-from app.store import get_repo
-from app.store import NotFound
+from app.services.events import get_bus
+from app.store import NotFound, get_repo
 
 logger = logging.getLogger(__name__)
 

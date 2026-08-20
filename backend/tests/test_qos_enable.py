@@ -17,10 +17,9 @@ from __future__ import annotations
 
 from ipaddress import IPv4Address
 
-import pytest
-
 from engine.netstack import Network
 from engine.netstack.addr import MacAddr
+from engine.netstack.cli import CliSession
 from engine.netstack.device import Host
 from engine.netstack.frames import (
     ETH_IPV4,
@@ -29,12 +28,9 @@ from engine.netstack.frames import (
     Ipv4Packet,
     UdpSegment,
 )
-from engine.netstack.iface import FrameContext, IfaceCounters, LinkAttachment, Interface
-from engine.netstack.qos import QosClass, QosConfig, apply_marking, classify
+from engine.netstack.iface import FrameContext, IfaceCounters
+from engine.netstack.qos import QosClass, QosConfig, apply_marking
 from engine.netstack.routing import Router
-from engine.netstack.cli import CliSession
-from engine.events import EventType
-
 
 # ---------------------------------------------------------------------------
 # apply_marking unit tests
@@ -146,7 +142,7 @@ def _qos_net(*, bandwidth_bps: float = 100_000_000, depth: int = 32) -> tuple:
 
 
 def test_enabled_path_tx_by_class_increments():
-    net, i1, att = _qos_net()
+    net, i1, _att = _qos_net()
     rep = net.ping("h1", "10.0.0.2", count=2)
     assert rep.received == 2
     # ping DSCP=0 → BE; some frames must have been transmitted
@@ -156,8 +152,8 @@ def test_enabled_path_tx_by_class_increments():
 
 def test_enabled_path_drops_queue_by_class_increments():
     """Overfill BE queue on enabled path — drops_queue_by_class[BE] must increment."""
-    net, i1, att = _qos_net(bandwidth_bps=1_000, depth=1)
-    rep = net.ping("h1", "10.0.0.2", count=10, interval=0.0)
+    net, i1, _att = _qos_net(bandwidth_bps=1_000, depth=1)
+    net.ping("h1", "10.0.0.2", count=10, interval=0.0)
     be_drops = i1.counters.drops_queue_by_class[QosClass.BE]
     total_drops = i1.counters.drops_queue
     assert be_drops > 0
@@ -183,7 +179,7 @@ def test_disabled_path_class_counters_stay_zero():
 
 def test_packet_enqueue_fires_when_qos_enabled():
     """PACKET_ENQUEUE events appear in the ledger when QoS is enabled."""
-    net, i1, att = _qos_net(bandwidth_bps=1_000_000)
+    net, _i1, _att = _qos_net(bandwidth_bps=1_000_000)
     net.ping("h1", "10.0.0.2", count=1)
     enqueue_records = [r for r in net.ledger.records
                        if r["type"] == "PACKET_ENQUEUE"]
@@ -309,7 +305,7 @@ def test_router_qos_marking_sets_dscp_on_forward():
 # ---------------------------------------------------------------------------
 
 def test_ledger_qos_class_present_when_enabled():
-    net, i1, att = _qos_net()
+    net, _i1, _att = _qos_net()
     net.ping("h1", "10.0.0.2", count=1)
     tx_records = [r for r in net.ledger.records if r["type"] == "PACKET_TX"]
     # At least some records should carry qos_class when QoS is on
@@ -369,7 +365,6 @@ async def test_do_set_link_qos_journaled(client):
 
     # Use the lab manager directly (no REST endpoint for do_set_link_qos yet)
     from app.services.netlab import get_lab_manager
-    from app.store import MemoryRepository
 
     # Warm up the lab via REST (ping creates it)
     pr = await client.post(f"/api/lab/{pid}/ping", json={"src": "h1", "dst": "10.20.0.2"})
@@ -394,7 +389,7 @@ async def test_do_set_link_qos_journaled(client):
 # ---------------------------------------------------------------------------
 
 def test_cli_show_qos_interface_cisco():
-    net, i1, att = _qos_net()
+    net, _i1, _att = _qos_net()
     net.ping("h1", "10.0.0.2", count=1)
     r = net.find_device("h1")
     sess = CliSession(net, r)
@@ -404,7 +399,7 @@ def test_cli_show_qos_interface_cisco():
 
 
 def test_cli_show_qos_interface_specific_cisco():
-    net, i1, att = _qos_net()
+    net, _i1, _att = _qos_net()
     r = net.find_device("h1")
     sess = CliSession(net, r)
     out = sess.execute("show qos interface eth0")
@@ -412,10 +407,9 @@ def test_cli_show_qos_interface_specific_cisco():
 
 
 def test_cli_queue_print_mikrotik():
-    net, i1, att = _qos_net()
+    net, _i1, _att = _qos_net()
     net.ping("h1", "10.0.0.2", count=1)
     h1 = net.find_device("h1")
-    from engine.netstack.device import Device
     h1.nos = "routeros"
     sess = CliSession(net, h1)
     out = sess.execute("/queue print")

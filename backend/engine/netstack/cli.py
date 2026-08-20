@@ -13,10 +13,9 @@ window behaves like a real terminal session.
 from __future__ import annotations
 
 from ipaddress import IPv4Interface, IPv4Network, ip_address
-
-from engine.netstack.addr import parse_ip_interface6
 from typing import TYPE_CHECKING
 
+from engine.netstack.addr import parse_ip_interface6
 from engine.netstack.device import Device, Host
 from engine.netstack.routing import Router
 from engine.netstack.switching import Switch
@@ -41,7 +40,7 @@ _SOURCE_CODE = {
 class CliSession:
     """One interactive console session bound to a device."""
 
-    def __init__(self, net: "Network", device: Device) -> None:
+    def __init__(self, net: Network, device: Device) -> None:
         self.net = net
         self.device = device
         self.mode = "exec"            # exec | priv | config | config-if
@@ -234,7 +233,7 @@ class CliSession:
                 return "% No neighbor table on this device\n"
             rows = ["IPv6 Address                             Link-layer Addr      Interface"]
             for ip, (mac, ifname) in sorted(dev.nd_cache.items(), key=lambda kv: str(kv[0])):
-                rows.append(f"{str(ip):<40} {mac:<20} {ifname}")
+                rows.append(f"{ip!s:<40} {mac:<20} {ifname}")
             return "\n".join(rows) + "\n"
         if low.startswith("show ipv6 interface brief") or low.startswith("show ipv6 int br"):
             rows = ["Interface        Status  IPv6 Address(es)"]
@@ -320,7 +319,7 @@ class CliSession:
                 return "% No ARP table on this device\n"
             rows = ["Address          Hardware Addr        Interface"]
             for ip, (mac, ifname) in sorted(dev.arp_table.items()):
-                rows.append(f"{str(ip):<16} {mac:<20} {ifname}")
+                rows.append(f"{ip!s:<16} {mac:<20} {ifname}")
             return "\n".join(rows) + "\n"
         if low.startswith("show mac address-table") or low.startswith("show mac-address-table"):
             if not isinstance(dev, Switch):
@@ -451,11 +450,11 @@ class CliSession:
             rows = ["IP address       MAC address          Pool"]
             for pool in dev.dhcp_pools:
                 for mac, ip in pool.leases.items():
-                    rows.append(f"{str(ip):<16} {mac:<20} {pool.network}")
+                    rows.append(f"{ip!s:<16} {mac:<20} {pool.network}")
             return "\n".join(rows) + "\n"
         if low.startswith("show qos interface"):
             return self._show_qos_iface(low.split())
-        return f"% Invalid show command\n"
+        return "% Invalid show command\n"
 
     def _show_qos_iface(self, words: list[str]) -> str:
         """show qos interface [<name>] — per-class tx/drops table (§2.6)."""
@@ -508,7 +507,7 @@ class CliSession:
             n = 0
             for i in dev.interfaces.values():
                 for ip in i.ips:
-                    rows.append(f"{n}  {str(ip):<18} {i.name}")
+                    rows.append(f"{n}  {ip!s:<18} {i.name}")
                     n += 1
             return "\n".join(rows) + "\n"
         if low == "/ip route print":
@@ -524,7 +523,7 @@ class CliSession:
             n = 0
             for i in dev.interfaces.values():
                 for ip in [i.link_local, *i.ips6]:
-                    rows.append(f"{n}  {str(ip):<40} {i.name}")
+                    rows.append(f"{n}  {ip!s:<40} {i.name}")
                     n += 1
             return "\n".join(rows) + "\n"
         if low == "/ipv6 route print":
@@ -541,13 +540,13 @@ class CliSession:
             for n, (ip, (mac, ifname)) in enumerate(
                 sorted(nd.items(), key=lambda kv: str(kv[0]))
             ):
-                rows.append(f"{n}  {str(ip):<40} {mac:<20} {ifname}")
+                rows.append(f"{n}  {ip!s:<40} {mac:<20} {ifname}")
             return "\n".join(rows) + "\n"
         if low == "/ip arp print":
             rows = ["#  ADDRESS         MAC-ADDRESS          INTERFACE"]
             arp = getattr(dev, "arp_table", {})
             for n, (ip, (mac, ifname)) in enumerate(sorted(arp.items())):
-                rows.append(f"{n}  {str(ip):<15} {mac:<20} {ifname}")
+                rows.append(f"{n}  {ip!s:<15} {mac:<20} {ifname}")
             return "\n".join(rows) + "\n"
         if low == "/interface vrrp print":
             procs = [
@@ -576,15 +575,13 @@ class CliSession:
         if low.startswith("/queue print") or low.startswith("/queue simple print"):
             rows = ["#  INTERFACE        QOS  CLASS  TX-FRAMES  DROPS"]
             _names = ("EF", "AF", "BE")
-            n = 0
-            for i in dev.interfaces.values():
+            for n, i in enumerate(dev.interfaces.values()):
                 enabled = i.attachment is not None and i.attachment.qos.enabled
                 state = "on " if enabled else "off"
                 for ci, cname in enumerate(_names):
                     tx = i.counters.tx_by_class[ci]
                     dr = i.counters.drops_queue_by_class[ci]
                     rows.append(f"{n}  {i.name:<16} {state}  {cname}    {tx:<10} {dr}")
-                n += 1
             return "\n".join(rows) + "\n"
         if low == "/interface print":
             rows = ["#  NAME       MTU   MAC-ADDRESS        RUNNING"]
@@ -625,9 +622,7 @@ class CliSession:
             return f"% {exc}\n"
         d = rep.as_dict()
         lines = [f"Sending {count} ICMP echos to {dst}:"]
-        seq = 0
-        for rtt in d["rtts_ms"]:
-            seq += 1
+        for seq, rtt in enumerate(d["rtts_ms"], start=1):
             lines.append(f"  reply seq={seq} time={rtt} ms")
         for err in d["errors"]:
             lines.append(f"  {err}")

@@ -33,7 +33,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import datetime
 
-from sqlalchemy import JSON, DateTime, Float, ForeignKey, Integer, String, Text, delete, select
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Float,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    delete,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -164,9 +174,8 @@ class PostgresRepository:
 
     @asynccontextmanager
     async def _txn(self) -> AsyncIterator[AsyncSession]:
-        async with self._sf() as session:
-            async with session.begin():
-                yield session
+        async with self._sf() as session, session.begin():
+            yield session
 
     # --- projects -----------------------------------------------------------
     async def list_projects(self) -> list[Project]:

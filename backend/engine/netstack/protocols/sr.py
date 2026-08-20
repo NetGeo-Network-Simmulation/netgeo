@@ -40,21 +40,20 @@ from typing import TYPE_CHECKING
 from engine.events import EventType, SimEvent
 from engine.netstack.frames import (
     ALL_LDP_MAC,
-    ETH_MPLS,
     ETH_SR,
     EthernetFrame,
     MplsPacket,
     SrSidAdvert,
 )
 from engine.netstack.iface import Interface
-from engine.netstack.routing import AdjSidEntry, LfibEntry, Router
 from engine.netstack.protocols.mpls import LdpProcess
+from engine.netstack.routing import AdjSidEntry, LfibEntry, Router
 
 if TYPE_CHECKING:  # pragma: no cover
     from engine.netstack.network import Network
 
 
-def _schedule(net: "Network", after: float, node_id: str, fn) -> None:
+def _schedule(net: Network, after: float, node_id: str, fn) -> None:
     net.scheduler.schedule_after(
         after,
         SimEvent(time=0.0, type=EventType.TIMER, handler=lambda _c, _e: fn(), node_id=node_id),
@@ -101,13 +100,13 @@ class SrProcess:
         return IPv4Network(f"{self.router_id}/32")
 
     # ----- lifecycle ---------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self._started:
             return
         self._started = True
         self._tick(net)
 
-    def _tick(self, net: "Network") -> None:
+    def _tick(self, net: Network) -> None:
         # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
         # the work, not the reschedule, so a power-on self-heals within one
         # interval instead of needing an explicit restart.
@@ -138,7 +137,7 @@ class SrProcess:
             adj_sids=dict(self.adj_sids),
         )
 
-    def _advertise(self, net: "Network") -> None:
+    def _advertise(self, net: Network) -> None:
         advert = self._advert()
         if self._sent == advert:
             return                       # send only on change (L3vpn pattern)
@@ -146,7 +145,7 @@ class SrProcess:
         self.sid_db[self.router_id] = advert.copy()   # our own row in sid-database
         self._flood(net, advert, exclude_iface=None)
 
-    def _flood(self, net: "Network", advert: SrSidAdvert, exclude_iface: str | None) -> None:
+    def _flood(self, net: Network, advert: SrSidAdvert, exclude_iface: str | None) -> None:
         for nh in sorted(self.ldp.adj):
             _mac, ifn = self.ldp.adj[nh]
             if ifn == exclude_iface:
@@ -165,7 +164,7 @@ class SrProcess:
             )
 
     # ----- ingress -----------------------------------------------------------
-    def on_frame(self, net: "Network", iface: Interface, frame: EthernetFrame) -> None:
+    def on_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
         advert = frame.payload
         if not isinstance(advert, SrSidAdvert):
             return
@@ -217,7 +216,7 @@ class SrProcess:
         return LfibEntry(str(prefix), "swap", label, route.next_hop, mac, ifn)
 
     # ----- ops / test hook ---------------------------------------------------
-    def install_policy(self, net: "Network", sid_list: list[int], inner) -> None:
+    def install_policy(self, net: Network, sid_list: list[int], inner) -> None:
         """Impose an explicit SID label stack on ``inner`` and inject it into our
         own forwarding plane. A leading adjacency-SID we own selects the egress
         link (popped here); the rest are switched hop-by-hop as usual."""

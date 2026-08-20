@@ -8,8 +8,6 @@ against the Friis FSPL budget below so a reviewer can verify the reference.
 """
 from __future__ import annotations
 
-import math
-
 import httpx
 import pytest
 
@@ -160,11 +158,11 @@ async def test_ptp_endpoint_out_of_range_freq_422(client):
 
 # --- NG-RF-02 coverage raster ----------------------------------------------
 def _cov_req(**over) -> CoverageRasterRequest:
-    base = dict(
-        sites=[CoverageSite(lat=0.0, lon=0.0)],
-        technology="wifi_5ghz", model_id="fspl", rows=11, cols=11,
-        min_lat=-0.05, min_lon=-0.05, max_lat=0.05, max_lon=0.05,
-    )
+    base = {
+        "sites": [CoverageSite(lat=0.0, lon=0.0)],
+        "technology": "wifi_5ghz", "model_id": "fspl", "rows": 11, "cols": 11,
+        "min_lat": -0.05, "min_lon": -0.05, "max_lat": 0.05, "max_lon": 0.05,
+    }
     base.update(over)
     return CoverageRasterRequest(**base)
 

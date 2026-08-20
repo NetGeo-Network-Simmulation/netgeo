@@ -9,8 +9,8 @@ from __future__ import annotations
 from ipaddress import IPv4Network
 
 from engine.netstack import Network
+from engine.netstack.protocols.bgp import NO_EXPORT, BgpProcess
 from engine.netstack.routing import Router
-from engine.netstack.protocols.bgp import BgpProcess, NO_EXPORT
 
 
 def _link(net: Network, a: Router, an: str, aip: str, b: Router, bn: str, bip: str):
@@ -78,7 +78,7 @@ def test_route_reflector_reaches_all_clients():
     r1 = _route(net, "pe1", "198.51.100.0/24")
     assert r1 is not None and r1.source == "ebgp"
     # Originator id recorded on the reflected path.
-    attrs = _bgp(net, "pe2").peers[list(_bgp(net, "pe2").peers)[0]].rib_in[
+    attrs = _bgp(net, "pe2").peers[next(iter(_bgp(net, "pe2").peers))].rib_in[
         IPv4Network("198.51.100.0/24")
     ]
     assert attrs.originator == "2.2.2.2"
@@ -105,13 +105,13 @@ def test_communities_propagate_and_no_export():
     net.run(until=40.0)
 
     # b received both, with communities intact.
-    rib_b = _bgp(net, "b").peers[list(_bgp(net, "b").peers)[0]].rib_in
+    rib_b = _bgp(net, "b").peers[next(iter(_bgp(net, "b").peers))].rib_in
     assert rib_b[IPv4Network("203.0.113.0/24")].communities == ("65001:100", NO_EXPORT)
     # no-export crossed one eBGP hop into b but must stop there.
     assert _route(net, "b", "203.0.113.0/24") is not None
     assert _route(net, "c", "203.0.113.0/24") is None
     # The ordinary prefix reaches c with the AS path prepended.
-    rib_c = _bgp(net, "c").peers[list(_bgp(net, "c").peers)[0]].rib_in
+    rib_c = _bgp(net, "c").peers[next(iter(_bgp(net, "c").peers))].rib_in
     assert rib_c[IPv4Network("198.18.0.0/24")].as_path == (65002, 65001)
 
 
@@ -205,7 +205,7 @@ def test_isp_nasional_rr_scenario_reduced():
     assert _route(net, "pe-agg", "8.8.8.0/24") is not None
     assert _route(net, "pe-agg", "185.99.0.0/24") is not None
     # AS path seen at the upstream: 65001 then customer 65101.
-    pup_rib = _bgp(net, "upstream").peers[list(_bgp(net, "upstream").peers)[0]].rib_in
+    pup_rib = _bgp(net, "upstream").peers[next(iter(_bgp(net, "upstream").peers))].rib_in
     assert pup_rib[IPv4Network("203.0.113.0/24")].as_path == (65001, 65101)
     # End-to-end data path: customer LAN pings the upstream service.
     rep = net.ping("ce-corp", "8.8.8.1", count=3)

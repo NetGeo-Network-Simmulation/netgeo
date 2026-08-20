@@ -11,6 +11,7 @@ Public surface:
     - :mod:`engine.netstack.cli` — per-NOS CLI over live device state
 """
 from engine.netstack.addr import MacAddr, mac_from_int
+from engine.netstack.device import Device, Host
 from engine.netstack.frames import (
     ArpPacket,
     BpduFrame,
@@ -25,36 +26,35 @@ from engine.netstack.frames import (
     UdpSegment,
 )
 from engine.netstack.iface import Interface, LinkAttachment
-from engine.netstack.device import Device, Host
-from engine.netstack.switching import Switch
-from engine.netstack.routing import AclRule, NatBinding, Route, Route6, Router
 from engine.netstack.network import Network, PingReport, TracerouteReport
+from engine.netstack.routing import AclRule, NatBinding, Route, Route6, Router
+from engine.netstack.switching import Switch
 
 __all__ = [
-    "MacAddr",
-    "mac_from_int",
+    "AclRule",
     "ArpPacket",
     "BpduFrame",
+    "Device",
     "DhcpMessage",
     "DnsMessage",
     "EthernetFrame",
+    "Host",
     "IcmpMessage",
     "Icmpv6Message",
+    "Interface",
     "Ipv4Packet",
     "Ipv6Packet",
-    "TcpSegment",
-    "UdpSegment",
-    "Interface",
     "LinkAttachment",
-    "Device",
-    "Host",
-    "Switch",
-    "AclRule",
+    "MacAddr",
     "NatBinding",
+    "Network",
+    "PingReport",
     "Route",
     "Route6",
     "Router",
-    "Network",
-    "PingReport",
+    "Switch",
+    "TcpSegment",
     "TracerouteReport",
+    "UdpSegment",
+    "mac_from_int",
 ]

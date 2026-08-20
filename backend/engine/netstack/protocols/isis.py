@@ -29,7 +29,7 @@ Not modelled (documented deferrals — ponytail, add when a lab needs it):
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from ipaddress import IPv4Address, IPv4Network
 from typing import TYPE_CHECKING
 
@@ -116,14 +116,14 @@ class IsisProcess:
         return out
 
     # ----- lifecycle ---------------------------------------------------------
-    def start(self, net: "Network") -> None:
+    def start(self, net: Network) -> None:
         if self._started:
             return
         self._started = True
         self._originate_lsp(net, flood=False)
         self._tick(net)
 
-    def _tick(self, net: "Network") -> None:
+    def _tick(self, net: Network) -> None:
         # ponytail: keep the loop alive across power-cycles (F36/F47) — gate
         # the work, not the reschedule, so a power-on self-heals within one
         # interval instead of needing an explicit restart.
@@ -141,7 +141,7 @@ class IsisProcess:
         )
 
     # ----- hello protocol ----------------------------------------------------
-    def _send_hellos(self, net: "Network") -> None:
+    def _send_hellos(self, net: Network) -> None:
         for iface in self._enabled_ifaces():
             if not iface.is_up:
                 continue
@@ -167,13 +167,13 @@ class IsisProcess:
                 ),
             )
 
-    def on_frame(self, net: "Network", iface: Interface, pdu) -> None:
+    def on_frame(self, net: Network, iface: Interface, pdu) -> None:
         if isinstance(pdu, IsisHello):
             self._on_hello(net, iface, pdu)
         elif isinstance(pdu, IsisLsp):
             self._on_lsp(net, iface, pdu)
 
-    def _on_hello(self, net: "Network", iface: Interface, hello: IsisHello) -> None:
+    def _on_hello(self, net: Network, iface: Interface, hello: IsisHello) -> None:
         if hello.system_id == self.system_id:
             return
         key = (iface.name, hello.system_id)
@@ -197,7 +197,7 @@ class IsisProcess:
                 self._send_lsp(net, iface.name, lsp)
             self._schedule_spf(net)
 
-    def _expire_neighbors(self, net: "Network") -> None:
+    def _expire_neighbors(self, net: Network) -> None:
         dead = [
             key
             for key, a in self.neighbors.items()
@@ -211,7 +211,7 @@ class IsisProcess:
             self._schedule_spf(net)
 
     # ----- LSP origination / flooding ----------------------------------------
-    def _originate_lsp(self, net: "Network", flood: bool = True) -> None:
+    def _originate_lsp(self, net: Network, flood: bool = True) -> None:
         self._seq += 1
         links: list[tuple[str, str, int]] = []
         for iface in self._enabled_ifaces():
@@ -227,7 +227,7 @@ class IsisProcess:
             self._flood(net, lsp, exclude_iface=None)
         self._schedule_spf(net)
 
-    def _flood(self, net: "Network", lsp: IsisLsp, exclude_iface: str | None) -> None:
+    def _flood(self, net: Network, lsp: IsisLsp, exclude_iface: str | None) -> None:
         sent: set[str] = set()
         for adj in self.neighbors.values():
             if adj.state != "up" or adj.iface_name == exclude_iface:
@@ -237,7 +237,7 @@ class IsisProcess:
             sent.add(adj.iface_name)
             self._send_lsp(net, adj.iface_name, lsp)
 
-    def _send_lsp(self, net: "Network", iface_name: str, lsp: IsisLsp) -> None:
+    def _send_lsp(self, net: Network, iface_name: str, lsp: IsisLsp) -> None:
         iface = self.router.interfaces.get(iface_name)
         if iface is None or not iface.is_up:
             return
@@ -251,7 +251,7 @@ class IsisProcess:
             ),
         )
 
-    def _on_lsp(self, net: "Network", iface: Interface, lsp: IsisLsp) -> None:
+    def _on_lsp(self, net: Network, iface: Interface, lsp: IsisLsp) -> None:
         current = self.lsdb.get(lsp.system_id)
         if current is None or lsp.seq > current.seq:
             self.lsdb[lsp.system_id] = lsp.copy()
@@ -259,7 +259,7 @@ class IsisProcess:
             self._schedule_spf(net)
 
     # ----- SPF ---------------------------------------------------------------
-    def _schedule_spf(self, net: "Network") -> None:
+    def _schedule_spf(self, net: Network) -> None:
         """Debounce SPF: one run per burst of LSDB changes (mirrors OSPF)."""
         if self._spf_pending:
             return
@@ -317,7 +317,7 @@ class IsisProcess:
                 return a
         return None
 
-    def _run_spf(self, net: "Network") -> None:
+    def _run_spf(self, net: Network) -> None:
         self._spf_pending = False
         dist, first_hop = self._dijkstra()
         local_prefixes = {ip.network for ip in self.router.all_ips()}

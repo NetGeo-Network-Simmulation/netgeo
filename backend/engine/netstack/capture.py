@@ -7,8 +7,9 @@ memory footprint growing with simulation length.
 from __future__ import annotations
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Iterable
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:  # pragma: no cover
     from engine.netstack.frames import EthernetFrame
@@ -53,7 +54,7 @@ class CaptureManager:
         link_id: str,
         iface: str,
         direction: str,
-        frame: "EthernetFrame",
+        frame: EthernetFrame,
     ) -> None:
         buf = self._buffers.get(link_id)
         if buf is None:

@@ -76,8 +76,8 @@ def test_okumura_hata_urban_reference():
 
 def test_okumura_hata_area_ordering():
     # Same geometry: urban loss > suburban > open.
-    kw = dict(distance_m=5000.0, freq_mhz=900.0, tx_height_m=30.0,
-              rx_height_m=1.5)
+    kw = {"distance_m": 5000.0, "freq_mhz": 900.0, "tx_height_m": 30.0,
+          "rx_height_m": 1.5}
     urban = prop.path_loss("okumura_hata", area_type="urban", **kw)
     suburban = prop.path_loss("okumura_hata", area_type="suburban", **kw)
     open_ = prop.path_loss("okumura_hata", area_type="open", **kw)
@@ -95,8 +95,8 @@ def test_cost231_hata_urban_reference():
 
 def test_cost231_metro_costs_three_db_more():
     # The C_m metropolitan term is exactly 3 dB above the suburban base term.
-    kw = dict(distance_m=2000.0, freq_mhz=1800.0, tx_height_m=30.0,
-              rx_height_m=1.5)
+    kw = {"distance_m": 2000.0, "freq_mhz": 1800.0, "tx_height_m": 30.0,
+          "rx_height_m": 1.5}
     urban = prop.path_loss("cost231_hata", area_type="urban", **kw)
     # 'open' subtracts the open-area correction, so compare the raw base via a
     # non-urban area with C_m=0: suburban applies its own correction, so instead
