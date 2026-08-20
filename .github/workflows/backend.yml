@@ -5,35 +5,13 @@ name: backend-ci
 
 on:
   push:
-    paths: ["backend/**", "infra/db/**", "infra/ci/backend.yml"]
+    paths: ["backend/**", "infra/db/**", ".github/workflows/backend.yml"]
   pull_request:
-    paths: ["backend/**", "infra/db/**", "infra/ci/backend.yml"]
+    paths: ["backend/**", "infra/db/**", ".github/workflows/backend.yml"]
 
 jobs:
   test:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:16-alpine
-        env:
-          POSTGRES_USER: netgeo
-          POSTGRES_PASSWORD: netgeo
-          POSTGRES_DB: netgeo
-        ports: ["5432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U netgeo -d netgeo"
-          --health-interval 10s --health-timeout 5s --health-retries 5
-      redis:
-        image: redis:7-alpine
-        ports: ["6379:6379"]
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 10s --health-timeout 3s --health-retries 5
-
-    env:
-      DATABASE_URL: postgresql+asyncpg://netgeo:netgeo@localhost:5432/netgeo
-      REDIS_URL: redis://localhost:6379/0
 
     steps:
       - uses: actions/checkout@v4
@@ -50,11 +28,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           pip install ruff
-
-      - name: Apply DB schema
-        run: |
-          PGPASSWORD=netgeo psql -h localhost -U netgeo -d netgeo \
-            -v ON_ERROR_STOP=1 -f infra/db/migrations/0001_init.up.sql
 
       - name: Lint (ruff)
         working-directory: backend

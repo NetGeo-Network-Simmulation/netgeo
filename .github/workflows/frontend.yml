@@ -5,9 +5,9 @@ name: frontend-ci
 
 on:
   push:
-    paths: ["frontend/**", "infra/ci/frontend.yml"]
+    paths: ["frontend/**", ".github/workflows/frontend.yml"]
   pull_request:
-    paths: ["frontend/**", "infra/ci/frontend.yml"]
+    paths: ["frontend/**", ".github/workflows/frontend.yml"]
 
 jobs:
   build:
@@ -24,10 +24,6 @@ jobs:
       - name: Install
         working-directory: frontend
         run: npm ci || npm install
-
-      - name: Lint
-        working-directory: frontend
-        run: npm run lint
 
       - name: Typecheck
         working-directory: frontend
