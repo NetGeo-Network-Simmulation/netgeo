@@ -1,25 +1,35 @@
 # Contributing to NetGeo
 
-Terima kasih sudah mau berkontribusi. Dokumen ini singkat — detail lengkap ada di vault memory proyek (lihat §"Vault bersama").
+Terima kasih sudah mau berkontribusi. Dokumen ini memuat semua yang kamu butuhkan untuk mengirim PR pertama.
 
 ## Setup dev
+
+Butuh Python 3.12+ dan Node 20+.
 
 ```bash
 git clone https://github.com/suryaex/netgeo.git
 cd netgeo
-make install          # atau: bash install.sh
+
+# Backend — venv dibuat manual (installer Docker tidak membuatnya)
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+cd ..
+
+# Frontend
+cd frontend && npm ci && cd ..
 ```
 
-Butuh Python 3.11+ dan Node 20+ di mesin lokal (untuk tes cepat tanpa Docker).
+Untuk menjalankan stack lengkap (Postgres, Redis, nginx) pakai Docker: `make install`, lalu `make up`. Itu tidak diperlukan untuk menjalankan tes.
 
 ## Verifikasi sebelum PR
 
 ```bash
-# Backend
+# Backend — tidak butuh database
 cd backend && .venv/bin/python -m pytest -q -W ignore::DeprecationWarning
 
 # Frontend
-cd frontend && npm install && npm run typecheck && npm run build
+cd frontend && npm run typecheck && npm run build
 ```
 
 CI di GitHub Actions menjalankan hal yang sama di tiap PR — PR yang gagal CI tidak di-merge.
@@ -35,7 +45,7 @@ CI di GitHub Actions menjalankan hal yang sama di tiap PR — PR yang gagal CI t
 
 - Pesan: `<scope>: <imperative>` — scope ringkas (engine, frontend, rf, tests, docs, ci), kalimat dalam Bahasa Indonesia atau Inggris, tanpa titik akhir.
 - Author: identitas kontributor masing-masing (nama + email yang sama dengan akun GitHub-nya). **Jangan pakai author orang lain.**
-- **Tanpa jejak AI**: tidak ada `Co-Authored-By: Claude/Codex/…`, tidak ada `Generated with [nama AI]`. Lihat [[commit-no-ai-trace]] di vault.
+- **Tanpa jejak AI**: tidak ada trailer `Co-Authored-By:` untuk asisten AI, tidak ada baris "Generated with …". Commit harus tampil sebagai karya kontributor manusianya.
 - Bump versi kalau slice menyentuh app (bukan hanya docs/CI): edit `backend/app/core/config.py` + `frontend/package.json`, naik `v1.<minor>.<NNN>` (NNN jalan terus, jangan reset). Tag `v1.<minor>.<NNN>` di commit bump.
 
 ## Yang tidak boleh di-commit
@@ -46,7 +56,7 @@ CI di GitHub Actions menjalankan hal yang sama di tiap PR — PR yang gagal CI t
 
 ## Scope slice
 
-Ikuti prinsip [[ponytail]] (skill `ponytail` di vault): minimal, lean, satu slice = satu tujuan. Kalau satu PR menyentuh >3 area engine yang tak berkaitan, pecah jadi PR kecil.
+Prinsipnya minimal dan lean: satu slice = satu tujuan. Utamakan stdlib sebelum menambah dependency — kalau beberapa baris sudah cukup, jangan tarik library baru. Kalau satu PR menyentuh lebih dari 3 area engine yang tak berkaitan, pecah jadi beberapa PR kecil.
 
 ## Tanya / diskusi
 
@@ -54,10 +64,14 @@ Buka issue dengan template (`bug` atau `feature`) — Surya review.
 
 ---
 
-## Vault bersama (untuk kontributor NetGeo)
+## Vault memory (opsional — untuk kontributor tetap)
 
-NetGeo punya **vault memory kolaboratif** (lihat `netgeo-dev-workflow` di vault) yang jadi ingatan bersama lintas-kontributor:
+NetGeo punya **vault memory**: repo privat terpisah berisi catatan arah proyek, antrean kerja, dan pelajaran teknis lintas-sesi. **Kamu tidak butuh akses vault untuk berkontribusi** — semua yang wajib ada di `README.md`, dokumen ini, dan kode itu sendiri.
 
-- **Baca wajib** sebelum kontribusi pertama: `MEMORY.md` → `netgeo-dev-workflow.md` → `netgeo-next-plan.md` → `design.md`.
-- **Tulis**: lihat `.claude/vault-rules.md` di vault untuk siapa boleh tulis apa (Mode 2 = kolaboratif).
-- **Sinkron**: vault adalah repo git — `git pull` di awal sesi, `git push` di akhir (skill `lanjut-dev` §9).
+Vault berguna kalau kamu jadi kontributor tetap dan ingin tahu *kenapa* sesuatu diputuskan begitu. Aksesnya diberikan per-orang oleh Surya; minta lewat issue atau kontak langsung.
+
+Kalau sudah punya akses:
+
+- **Baca dulu**: `MEMORY.md` (indeks) → `netgeo-dev-workflow.md` → `netgeo-next-plan.md` (antrean kerja terkini).
+- **Aturan tulis**: `.claude/vault-rules.md` — sebagian catatan hanya boleh diubah Surya.
+- **Sinkron**: vault adalah repo git; `git pull` sebelum membaca, `git push` setelah menulis.
