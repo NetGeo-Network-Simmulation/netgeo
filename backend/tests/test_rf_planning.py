@@ -292,3 +292,10 @@ def test_unknown_area_type_rejected():
         prop.path_loss("okumura_hata", 5000.0, 900.0, area_type="Urban")
     with pytest.raises(ValueError, match="area_type"):
         prop.path_loss("cost231_hata", 5000.0, 1800.0, area_type="rural")
+
+def test_fspl_accepts_zero_heights_since_it_ignores_them():
+    """fspl declares tx/rx height defaults of 0.0 and ignores them entirely, so
+    the height guard must not reject a height-blind caller (regression: the
+    guard was applied to every model, breaking free-space calls at 0 m)."""
+    loss = prop.path_loss("fspl", 1000.0, 2400.0, 0.0, 0.0)
+    assert loss == pytest.approx(prop.path_loss("fspl", 1000.0, 2400.0, 30.0, 1.5))

@@ -297,7 +297,10 @@ def path_loss(
             f"distance {distance_m} m out of range for {model_id} "
             f"({model.dist_min_m}-{model.dist_max_m} m)"
         )
-    if tx_height_m <= 0 or rx_height_m <= 0:
+    # Only models that actually consume antenna heights may reject them: fspl
+    # ignores heights entirely and declares 0.0 as its own default, so a
+    # height-blind caller must not be turned away here.
+    if model.hb_min_m is not None and (tx_height_m <= 0 or rx_height_m <= 0):
         raise ValueError(
             f"antenna heights must be positive "
             f"(tx_height_m={tx_height_m}, rx_height_m={rx_height_m})"
