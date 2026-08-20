@@ -14,6 +14,7 @@ import pytest
 from app.models import CoverageRasterRequest, CoverageSite
 from app.services import elevation as esvc
 from app.services import wireless as wsvc
+from engine import propagation as prop
 from engine import wireless as rf
 
 # --- NG-RF-03 acceptance reference (hand calculation) -----------------------
@@ -258,3 +259,36 @@ def test_ac_reference_value():
     fspl = rf.fspl_db(10_000.0, 5e9)
     assert (30.0 - fspl) == pytest.approx(_AC_RSSI_DBM, abs=0.05)
     assert fspl == pytest.approx(126.43, abs=0.05)
+
+
+# --- F64/F65/F66: declared validity ranges must be enforced, not silently
+# clamped into a plausible-looking result -----------------------------------
+def test_distance_out_of_declared_range_rejected():
+    # Hata is declared valid 1000-20000 m; 50 m is far outside it.
+    with pytest.raises(ValueError, match="distance"):
+        prop.path_loss("okumura_hata", 50.0, 900.0)
+    with pytest.raises(ValueError, match="distance"):
+        prop.path_loss("okumura_hata", 25_000.0, 900.0)
+
+
+def test_nonphysical_antenna_height_rejected():
+    with pytest.raises(ValueError, match="positive"):
+        prop.path_loss("okumura_hata", 5000.0, 900.0, tx_height_m=0.0)
+    with pytest.raises(ValueError, match="positive"):
+        prop.path_loss("okumura_hata", 5000.0, 900.0, rx_height_m=-1.0)
+
+
+def test_hata_height_outside_declared_envelope_rejected():
+    # Declared hb 30-200 m / hm 1-10 m (see REGISTRY note); 500 m mast and a
+    # 15 m receiver both fall outside it and must not be silently clamped.
+    with pytest.raises(ValueError, match="tx_height_m"):
+        prop.path_loss("okumura_hata", 5000.0, 900.0, tx_height_m=500.0)
+    with pytest.raises(ValueError, match="rx_height_m"):
+        prop.path_loss("cost231_hata", 5000.0, 1800.0, rx_height_m=15.0)
+
+
+def test_unknown_area_type_rejected():
+    with pytest.raises(ValueError, match="area_type"):
+        prop.path_loss("okumura_hata", 5000.0, 900.0, area_type="Urban")
+    with pytest.raises(ValueError, match="area_type"):
+        prop.path_loss("cost231_hata", 5000.0, 1800.0, area_type="rural")

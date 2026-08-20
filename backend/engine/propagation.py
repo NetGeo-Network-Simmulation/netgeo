@@ -38,7 +38,7 @@ def _hata_a_hm(freq_mhz: float, rx_height_m: float, large_city: bool) -> float:
     Small/medium city uses the general formula; large (metropolitan) cities use
     the frequency-split quadratic form from the Hata model.
     """
-    hm = max(rx_height_m, 0.1)
+    hm = rx_height_m
     f = freq_mhz
     if large_city:
         if f >= 300.0:
@@ -50,7 +50,7 @@ def _hata_a_hm(freq_mhz: float, rx_height_m: float, large_city: bool) -> float:
 def _hata_core(freq_mhz: float, tx_height_m: float, rx_height_m: float,
                dist_km: float, large_city: bool) -> float:
     """Okumura-Hata *urban* median path loss (dB)."""
-    hb = max(tx_height_m, 1.0)
+    hb = tx_height_m
     a = _hata_a_hm(freq_mhz, rx_height_m, large_city)
     return (
         69.55
@@ -77,6 +77,10 @@ def okumura_hata(distance_m: float, freq_mhz: float,
     ``area_type`` ∈ {urban, suburban, open}. ``large_city`` selects the
     metropolitan ``a(h_re)`` correction (only affects the urban base term).
     """
+    if area_type not in _AREA.options:
+        raise ValueError(
+            f"unknown area_type {area_type!r} for okumura_hata (expected one of {_AREA.options})"
+        )
     d_km = max(distance_m, 1.0) / 1000.0
     urban = _hata_core(freq_mhz, tx_height_m, rx_height_m, d_km, large_city)
     if area_type == "suburban":
@@ -100,7 +104,11 @@ def cost231_hata(distance_m: float, freq_mhz: float,
     ``C_m`` is 3 dB for ``urban`` (dense metropolitan) and 0 dB otherwise. Uses
     the small/medium-city ``a(h_re)`` form as prescribed by COST-231.
     """
-    hb = max(tx_height_m, 1.0)
+    if area_type not in _AREA.options:
+        raise ValueError(
+            f"unknown area_type {area_type!r} for cost231_hata (expected one of {_AREA.options})"
+        )
+    hb = tx_height_m
     a = _hata_a_hm(freq_mhz, rx_height_m, large_city=False)
     d_km = max(distance_m, 1.0) / 1000.0
     c_m = 3.0 if area_type == "urban" else 0.0
@@ -188,6 +196,12 @@ class PropagationModel:
     dist_max_m: float
     params: list[ModelParam] = field(default_factory=list)
     note: str = ""
+    # Declared antenna-height validity (None = model doesn't publish one, e.g.
+    # fspl ignores heights and p1546_lite states none). Hata-family models do.
+    hb_min_m: float | None = None
+    hb_max_m: float | None = None
+    hm_min_m: float | None = None
+    hm_max_m: float | None = None
 
     def as_dict(self) -> dict:
         return {
@@ -211,7 +225,10 @@ REGISTRY: dict[str, PropagationModel] = {
     "fspl": PropagationModel(
         id="fspl", name="Free-Space Path Loss (Friis)", fn=fspl,
         freq_min_mhz=1.0, freq_max_mhz=100_000.0,
-        dist_min_m=1.0, dist_max_m=1_000_000.0,
+        # 0 m is valid (e.g. a coverage-raster cell colocated with the site);
+        # fspl_db floors internally at 1 m only to dodge log10(0), which is a
+        # numerical guard, not a modelled validity limit like Hata's 1-20 km.
+        dist_min_m=0.0, dist_max_m=1_000_000.0,
         note="Exact theoretical minimum loss; ignores antenna heights.",
     ),
     "okumura_hata": PropagationModel(
@@ -223,13 +240,18 @@ REGISTRY: dict[str, PropagationModel] = {
             ModelParam("large_city", False, "Use metropolitan a(h_re) correction"),
         ],
         note="Empirical median for 150-1500 MHz macrocells; hb 30-200 m, hm 1-10 m.",
+        hb_min_m=30.0, hb_max_m=200.0, hm_min_m=1.0, hm_max_m=10.0,
     ),
     "cost231_hata": PropagationModel(
         id="cost231_hata", name="COST-231-Hata", fn=cost231_hata,
         freq_min_mhz=1500.0, freq_max_mhz=2000.0,
         dist_min_m=1000.0, dist_max_m=20_000.0,
         params=[_AREA],
-        note="PCS extension of Hata for 1500-2000 MHz; urban adds C_m = 3 dB.",
+        note=(
+            "PCS extension of Hata for 1500-2000 MHz; urban adds C_m = 3 dB; "
+            "same antenna-height envelope as Hata: hb 30-200 m, hm 1-10 m."
+        ),
+        hb_min_m=30.0, hb_max_m=200.0, hm_min_m=1.0, hm_max_m=10.0,
     ),
     "p1546_lite": PropagationModel(
         id="p1546_lite", name="ITU-R P.1546-lite (approx.)", fn=p1546_lite,
@@ -257,8 +279,10 @@ def path_loss(
 ) -> float:
     """Path loss (dB) from the chosen model.
 
-    Raises :class:`ValueError` for an unknown ``model_id`` or a frequency outside
-    the model's declared valid range (callers map this to HTTP 422).
+    Raises :class:`ValueError` for an unknown ``model_id``, a frequency or
+    distance outside the model's declared valid range, a non-physical
+    (<= 0) antenna height, or (for Hata-family models) a height outside the
+    model's declared hb/hm envelope. Callers map this to HTTP 422.
     """
     model = REGISTRY.get(model_id)
     if model is None:
@@ -267,6 +291,26 @@ def path_loss(
         raise ValueError(
             f"frequency {freq_mhz} MHz out of range for {model_id} "
             f"({model.freq_min_mhz}-{model.freq_max_mhz} MHz)"
+        )
+    if not (model.dist_min_m <= distance_m <= model.dist_max_m):
+        raise ValueError(
+            f"distance {distance_m} m out of range for {model_id} "
+            f"({model.dist_min_m}-{model.dist_max_m} m)"
+        )
+    if tx_height_m <= 0 or rx_height_m <= 0:
+        raise ValueError(
+            f"antenna heights must be positive "
+            f"(tx_height_m={tx_height_m}, rx_height_m={rx_height_m})"
+        )
+    if model.hb_min_m is not None and not (model.hb_min_m <= tx_height_m <= model.hb_max_m):
+        raise ValueError(
+            f"tx_height_m {tx_height_m} out of range for {model_id} "
+            f"({model.hb_min_m}-{model.hb_max_m} m)"
+        )
+    if model.hm_min_m is not None and not (model.hm_min_m <= rx_height_m <= model.hm_max_m):
+        raise ValueError(
+            f"rx_height_m {rx_height_m} out of range for {model_id} "
+            f"({model.hm_min_m}-{model.hm_max_m} m)"
         )
     return model.fn(distance_m, freq_mhz, tx_height_m, rx_height_m, **params)
 
