@@ -739,14 +739,30 @@ class LosCheckResult(_Base):
     profile: ElevationProfile | None = None
 
 
-# --- point-to-point link planner (NG-RF-03) --------------------------------
+# --- point-to-point link planner (NG-RF-03 / NG-RF-N2a bidirectional) ------
+class PtpRadio(_Base):
+    """One side's radio for a bidirectional PtP link (NG-RF-N2a). Any field
+    left unset falls back to the request's legacy shared value on that side,
+    so an old single-direction request still resolves both directions."""
+
+    tx_power_dbm: float | None = None
+    gain_dbi: float | None = None
+    bandwidth_mhz: float = Field(20.0, gt=0)
+    sensitivity_dbm: float | None = None
+
+
 class PtpRequest(_Base):
     """Plan a point-to-point link between two endpoints.
 
     Path loss is computed through the propagation registry (NG-RF-01) so the
     chosen ``model_id`` is honoured. LoS/Fresnel reuse the terrain profile:
     supply ``profile`` for offline/deterministic runs, else the server fetches
-    it (degrading to flat terrain if the provider is offline)."""
+    it (degrading to flat terrain if the provider is offline).
+
+    ``radio_a``/``radio_b`` (NG-RF-N2a) give each side its own tx power, gain,
+    bandwidth and sensitivity for a bidirectional A->B / B->A budget; omit
+    either (or both) to fall back to the legacy ``tx_*``/``rx_*`` fields, which
+    is what makes an old single-direction request keep working unchanged."""
 
     # ``model_id`` collides with Pydantic's protected ``model_`` namespace.
     model_config = ConfigDict(
@@ -770,6 +786,24 @@ class PtpRequest(_Base):
     params: dict[str, object] = Field(default_factory=dict)
     samples: int = Field(24, ge=2, le=128)
     profile: list[ElevationPoint] | None = None
+    radio_a: PtpRadio | None = None
+    radio_b: PtpRadio | None = None
+
+
+class PtpDirectionResult(_Base):
+    """One direction of a bidirectional PtP link budget (NG-RF-N2a). Path loss
+    itself is direction-agnostic (see ``PtpResult.path_loss_db``) so only the
+    per-side radio terms differ here."""
+
+    tx_power_dbm: float
+    eirp_dbm: float
+    rssi_dbm: float
+    noise_floor_dbm: float       # thermal noise at the receiving side's bandwidth
+    snr_db: float
+    mcs: int | None              # None = below the lowest MCS floor
+    modulation: str | None
+    throughput_mbps: float
+    fade_margin_db: float        # rssi - receiving side's sensitivity
 
 
 class PtpResult(_Base):
@@ -791,6 +825,13 @@ class PtpResult(_Base):
     verdict: str                 # "clear" | "obstructed"
     link_ok: bool                # rssi >= sensitivity AND 60% Fresnel clear
     profile: ElevationProfile | None = None
+    # NG-RF-N2a bidirectional budget; always populated (symmetric radios when
+    # radio_a/radio_b were not supplied), additive so old responses still
+    # decode with these simply present.
+    a_to_b: PtpDirectionResult | None = None
+    b_to_a: PtpDirectionResult | None = None
+    bearing_a_to_b: float | None = None
+    bearing_b_to_a: float | None = None
 
 
 # --- coverage raster (NG-RF-02) --------------------------------------------
