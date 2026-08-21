@@ -208,6 +208,7 @@ class _Peer:
     rr_client: bool = False
     admin_down: bool = False             # neighbor administratively shut down
     hold_seq: int = 0                    # sequence-guard for the Hold Timer
+    connect_retry_seq: int = 0           # sequence-guard for the ConnectRetryTimer
     transitions: list[tuple[float, str]] = field(default_factory=list)
     plist_in: tuple[PrefixRule, ...] = ()
     plist_out: tuple[PrefixRule, ...] = ()
@@ -309,7 +310,9 @@ class BgpProcess:
     def on_power_off(self, net: Network) -> None:
         """F47-style hook: a power loss drops every session locally (no
         graceful NOTIFICATION — a dead router can't send one) instead of
-        leaving a stale Established claim behind."""
+        leaving a stale Established claim behind. Goes through
+        _close_session, so the ConnectRetryTimer seq-guard bump below
+        already covers this path too — no separate bump needed here."""
         for peer in list(self.peers.values()):
             self._close_session(net, peer)
 
@@ -325,6 +328,11 @@ class BgpProcess:
         """Idle -> Connect (Start event)."""
         if peer.admin_down:
             return
+        # A fresh cycle starts here: any ConnectRetryTimer armed by an
+        # earlier generation (e.g. one that raced a NOTIFICATION-driven
+        # close) is no longer this generation's — kill it even though this
+        # call may or may not re-arm one of its own below.
+        peer.connect_retry_seq += 1
         self._set_state(net, peer, "connect")
         self._attempt_open(net, peer)
         self._maybe_arm_connect_retry(net, peer)
@@ -343,17 +351,28 @@ class BgpProcess:
             self._arm_connect_retry(net, peer)
 
     def _arm_connect_retry(self, net: Network, peer: _Peer) -> None:
+        # Sequence-guard (same pattern as _arm_hold / vrrp.py's
+        # _timer_seq): the FSM state string alone isn't a safe identity
+        # check here because "connect"/"active"/"idle" recur across
+        # generations — a stale timer from an earlier generation could
+        # fire after the state has cycled back to a value its own guard
+        # would accept, and wrongly drive the FSM. The seq makes each
+        # arm-to-fire pairing generation-specific.
+        peer.connect_retry_seq += 1
+        seq = peer.connect_retry_seq
         net.scheduler.schedule_after(
             self.keepalive_interval,
             SimEvent(
                 time=0.0,
                 type=EventType.TIMER,
-                handler=lambda _c, _e: self._connect_retry_fired(net, peer),
+                handler=lambda _c, _e: self._connect_retry_fired(net, peer, seq),
                 node_id=self.router.node_id,
             ),
         )
 
-    def _connect_retry_fired(self, net: Network, peer: _Peer) -> None:
+    def _connect_retry_fired(self, net: Network, peer: _Peer, seq: int) -> None:
+        if seq != peer.connect_retry_seq:
+            return  # superseded by a newer generation's chain
         # Stale timer: session already progressed past the pre-OPEN phase,
         # or was administratively shut down in the meantime.
         if peer.admin_down or peer.state in ("open-sent", "open-confirm", "established"):
@@ -377,6 +396,10 @@ class BgpProcess:
         closes and hard resets (power loss)."""
         if peer.state == "idle":
             return
+        # Same reasoning as _begin_connect: kill any in-flight
+        # ConnectRetryTimer from before this close, whether or not we're
+        # about to arm a fresh one below.
+        peer.connect_retry_seq += 1
         peer.rib_in.clear()
         peer.adj_out = None          # a new session must get a fresh UPDATE
         self._set_state(net, peer, "idle")

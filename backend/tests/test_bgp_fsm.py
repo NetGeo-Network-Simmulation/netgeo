@@ -169,3 +169,66 @@ def test_bgp_fsm_replay_determinism():
     net2.run(until=20.0)
     assert net1.ledger.seq == net2.ledger.seq
     assert net1.ledger.hash() == net2.ledger.hash()
+
+
+def _pending_connect_retry_timers(net: Network, peer) -> int:
+    """Count still-scheduled ConnectRetryTimer events bound to this exact
+    peer. There's no public API for this — the FSM has no notion of
+    "cancel a timer", only "ignore it when it fires" — so this reaches
+    into the scheduler's heap and matches each pending TIMER event's
+    handler closure against ``peer`` by identity. White-box on purpose:
+    this is the only way to observe a leaked duplicate chain that never
+    happens to log a further state transition (see the test below)."""
+    n = 0
+    for entry in net.scheduler.queue._heap:
+        ev = entry[-1]
+        handler = getattr(ev, "handler", None)
+        if handler is None or "_arm_connect_retry" not in handler.__qualname__:
+            continue
+        cells = [c.cell_contents for c in (handler.__closure__ or ())]
+        if any(c is peer for c in cells):
+            n += 1
+    return n
+
+
+def test_connect_retry_timer_does_not_duplicate_across_an_early_close():
+    """A peer stuck in Connect (no route yet) has a ConnectRetryTimer
+    pending. If the session is force-closed (e.g. a power-cycle) before
+    that timer fires, the old timer must not survive as a second,
+    uncoordinated retry chain running alongside the fresh one.
+
+    That duplicate is easy to miss by only checking the final state or
+    even ``peer.transitions``: once both chains agree the peer is "active"
+    (a permanently unreachable peer never moves past that), neither logs
+    another transition — the extra chain goes quiet but stays alive,
+    silently doubling live timers forever. Assert on the scheduler
+    directly instead of a symptom that can hide the leak."""
+    net = Network(seed=37)
+    a = net.add_device(Router("a"))
+    mid = net.add_device(Router("mid"))
+    b = net.add_device(Router("b"))
+    _link(net, a, "eth0", "10.0.1.1/30", mid, "eth0", "10.0.1.2/30")
+    _link(net, mid, "eth1", "10.0.2.1/30", b, "eth0", "10.0.2.2/30")
+    # No route a -> b's peering IP, ever: pa stays stuck in connect/active
+    # for the whole run.
+    pa = BgpProcess(a, asn=65001, router_id="1.1.1.1", keepalive_interval=1.0)
+    pb = BgpProcess(b, asn=65002, router_id="2.2.2.2", keepalive_interval=1.0)
+    pa.add_neighbor("10.0.2.2", 65002)
+    pb.add_neighbor("10.0.1.1", 65001)
+    net.start()
+    peer = _peer(pa)
+    net.run(until=0.5)  # peer is "connect" with a retry pending at t=1.0
+    assert peer.state == "connect"
+
+    net.set_device_power("a", False)  # on_power_off -> forces an early close
+    net.set_device_power("a", True)   # comes right back — retries resume
+    net.run(until=40.0)               # let the (leaked) chains settle into "active"
+
+    assert peer.state == "active"  # end state looks fine either way...
+    assert _pending_connect_retry_timers(net, peer) == 1  # ...but only one chain may live
+
+    # A second collision must not grow it either.
+    net.set_device_power("a", False)
+    net.set_device_power("a", True)
+    net.run(until=80.0)
+    assert _pending_connect_retry_timers(net, peer) == 1
