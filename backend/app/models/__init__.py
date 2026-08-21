@@ -67,6 +67,8 @@ from app.models.schemas import (  # noqa: F401
     PtmpCpeResult,
     PtmpRequest,
     PtmpResult,
+    PtpDirectionResult,
+    PtpRadio,
     PtpRequest,
     PtpResult,
     Rack,

@@ -119,7 +119,10 @@ async def plan_ptp(body: PtpRequest):
     """Plan a point-to-point link (NG-RF-03): link budget via the propagation
     registry + terrain LoS/Fresnel verdict. Supply ``profile`` for an offline
     deterministic run, else terrain is fetched (flat-terrain fallback offline).
-    422 on an unknown model id or out-of-range frequency."""
+    Also returns a bidirectional budget (NG-RF-N2a): ``a_to_b``/``b_to_a`` with
+    per-direction RSSI/SNR/MCS from each side's radio (``radio_a``/``radio_b``,
+    falling back to the legacy shared fields when omitted). 422 on an unknown
+    model id or out-of-range frequency."""
     distance_m = rf.haversine_m(body.a_lat, body.a_lon, body.b_lat, body.b_lon)
     try:
         budget = wsvc.ptp_budget(
@@ -169,6 +172,7 @@ async def plan_ptp(body: PtpRequest):
         profile=profile,
     )
     link_ok = budget["rssi_dbm"] >= body.rx_sensitivity_dbm and los.fresnel_clear
+    directions = wsvc.ptp_directions(body, budget["path_loss_db"])
     return PtpResult(
         model_id=body.model_id,
         distance_m=round(distance_m, 2),
@@ -180,6 +184,7 @@ async def plan_ptp(body: PtpRequest):
         link_ok=link_ok,
         profile=out_profile,
         **budget,
+        **directions,
     )
 
 

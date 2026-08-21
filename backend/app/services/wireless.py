@@ -21,6 +21,8 @@ from app.models import (
     Node,
     ProductSelectRequest,
     PtmpRequest,
+    PtpRadio,
+    PtpRequest,
     Radio,
     Topology,
     WirelessLink,
@@ -193,6 +195,58 @@ def ptp_budget(
         "path_loss_db": round(loss, 2),
         "rssi_dbm": round(rssi, 2),
         "fade_margin_db": round(rssi - rx_sensitivity_dbm, 2),
+    }
+
+
+def _ptp_direction(
+    tx_power_dbm: float,
+    tx_gain_dbi: float,
+    rx_gain_dbi: float,
+    rx_sensitivity_dbm: float,
+    rx_bandwidth_mhz: float,
+    path_loss_db: float,
+    misc_loss_db: float,
+) -> dict:
+    """One direction of a PtP link, given a path loss already computed
+    (direction-agnostic, see :func:`ptp_budget`). Noise floor and MCS use the
+    *receiving* side's bandwidth."""
+    eirp = tx_power_dbm + tx_gain_dbi
+    rssi = eirp + rx_gain_dbi - path_loss_db - misc_loss_db
+    noise = rf.noise_floor_dbm(rx_bandwidth_mhz)
+    return {
+        "tx_power_dbm": round(tx_power_dbm, 2),
+        "eirp_dbm": round(eirp, 2),
+        "rssi_dbm": round(rssi, 2),
+        "noise_floor_dbm": round(noise, 2),
+        "snr_db": round(rssi - noise, 2),
+        "fade_margin_db": round(rssi - rx_sensitivity_dbm, 2),
+        **mcs_for_rssi(rssi, rx_bandwidth_mhz),
+    }
+
+
+def ptp_directions(req: PtpRequest, path_loss_db: float) -> dict:
+    """Bidirectional PtP budget (NG-RF-N2a): A->B and B->A, reusing the
+    already-computed (direction-agnostic) path loss. ``req.radio_a``/
+    ``radio_b`` give each side its own tx power/gain/bandwidth/sensitivity;
+    any left unset (including an old request with neither supplied) falls
+    back to the legacy shared ``tx_*``/``rx_*`` fields, i.e. a symmetric
+    radio on both ends."""
+    a, b = req.radio_a or PtpRadio(), req.radio_b or PtpRadio()
+    a_tx = a.tx_power_dbm if a.tx_power_dbm is not None else req.tx_power_dbm
+    a_gain = a.gain_dbi if a.gain_dbi is not None else req.tx_gain_dbi
+    a_sens = a.sensitivity_dbm if a.sensitivity_dbm is not None else req.rx_sensitivity_dbm
+    b_tx = b.tx_power_dbm if b.tx_power_dbm is not None else req.tx_power_dbm
+    b_gain = b.gain_dbi if b.gain_dbi is not None else req.rx_gain_dbi
+    b_sens = b.sensitivity_dbm if b.sensitivity_dbm is not None else req.rx_sensitivity_dbm
+    return {
+        "a_to_b": _ptp_direction(
+            a_tx, a_gain, b_gain, b_sens, b.bandwidth_mhz, path_loss_db, req.misc_loss_db
+        ),
+        "b_to_a": _ptp_direction(
+            b_tx, b_gain, a_gain, a_sens, a.bandwidth_mhz, path_loss_db, req.misc_loss_db
+        ),
+        "bearing_a_to_b": round(_bearing_deg(req.a_lat, req.a_lon, req.b_lat, req.b_lon), 2),
+        "bearing_b_to_a": round(_bearing_deg(req.b_lat, req.b_lon, req.a_lat, req.a_lon), 2),
     }
 
 
