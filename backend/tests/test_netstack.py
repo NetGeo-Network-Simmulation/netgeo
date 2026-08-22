@@ -130,7 +130,10 @@ def test_vlan_trunk_carries_tagged_traffic():
     net.connect("acc1", i1, a1)
     net.connect("acc2", i2, a2)
     net.connect("trunk", t1, t2)
-    report = net.ping("h1", "10.0.0.2", count=3)
+    # The trunk's non-root switch has its port promoted designated->root on
+    # first convergence, so it rides the 802.1D §8.4 Listening/Learning
+    # delay (2 x Forward Delay) before it forwards — settle past that first.
+    report = net.ping("h1", "10.0.0.2", count=3, settle=5.0)
     assert report.received == 3
     # Learned entries live in VLAN 10.
     assert any(row["vlan"] == 10 for row in sw1.mac_table_rows())
