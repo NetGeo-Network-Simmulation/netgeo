@@ -5,8 +5,14 @@ per VLAN, and runs a compact spanning-tree implementation (root election via
 configuration BPDUs, root/designated/blocked port roles) so redundant L2
 topologies converge instead of melting down in a broadcast storm.
 
+Port state transitions (802.1D §8.4): a port moving onto the forwarding
+track (root or designated) passes through Listening (no forwarding, no MAC
+learning) then Learning (MAC learning, still no forwarding) before
+Forwarding, each phase lasting one Forward Delay. A port moving to Blocking
+does so immediately — the whole point is to stop forwarding fast enough to
+avoid a loop.
+
 Simplifications vs. real 802.1D (documented, deliberate):
-- no listening/learning transition delays (ports jump to their final state);
 - topology-change notifications are not modelled;
 - BPDU max-age pruning uses the same dead-interval mechanism as hellos.
 """
@@ -26,6 +32,11 @@ if TYPE_CHECKING:  # pragma: no cover
 
 STP_HELLO = 2.0
 STP_MAX_AGE = 20.0
+# 802.1D §8.4 Forward Delay: derived from STP_HELLO (one Hello Time per
+# Listening/Learning phase) rather than a new hardcoded constant, so a
+# freshly-designated port's convergence stays proportional to this module's
+# own BPDU cadence instead of the (much larger) textbook 15s default.
+STP_FORWARD_DELAY = STP_HELLO
 
 
 @dataclass(slots=True)
@@ -69,6 +80,13 @@ class Switch(Device):
         self.mac_table: dict[tuple[int, str], str] = {}
         self._port_best: dict[str, _PortBpdu] = {}
         self._started = False
+        # Per-port sequence-guard for the Listening->Learning->Forwarding
+        # chain (same pattern as bgp.py's _arm_hold / vrrp.py's _timer_seq):
+        # bumped on every (re)arm so a superseded generation's delayed
+        # callback recognizes itself as stale and no-ops instead of
+        # advancing a state that has since moved on (re-election, or
+        # re-blocked) mid-delay.
+        self._delay_seq: dict[str, int] = {}
 
     # ----- identity ----------------------------------------------------------
     @property
@@ -166,21 +184,70 @@ class Switch(Device):
                 iface.stp_role, iface.stp_state = "designated", "forwarding"
                 continue
             if name == root_port:
-                iface.stp_role, iface.stp_state = "root", "forwarding"
+                self._enter_forwarding_track(net, iface, "root")
                 continue
             pb = self._port_best.get(name)
             if pb is None:
                 # Nothing better heard: we are designated on this segment.
-                iface.stp_role, iface.stp_state = "designated", "forwarding"
+                self._enter_forwarding_track(net, iface, "designated")
                 continue
             # Compare our offer on this segment vs. the best heard on it.
             _, _, my_cost = self._current_root(net)
             ours = (root_prio, root_mac, my_cost, my_prio, my_mac)
             theirs = (pb.root_prio, pb.root_mac, pb.cost, pb.bridge_prio, pb.bridge_mac)
             if ours < theirs:
-                iface.stp_role, iface.stp_state = "designated", "forwarding"
+                self._enter_forwarding_track(net, iface, "designated")
             else:
-                iface.stp_role, iface.stp_state = "blocked", "blocking"
+                self._enter_blocking(iface)
+
+    def _enter_blocking(self, iface: Interface) -> None:
+        """To-blocking is always immediate (§8.4) — a port must stop
+        forwarding fast enough to prevent a loop, never wait out a delay."""
+        if iface.stp_role == "blocked" and iface.stp_state == "blocking":
+            return  # already there; nothing in flight to abort
+        iface.stp_role, iface.stp_state = "blocked", "blocking"
+        # Force-abort: invalidate any in-flight Listening/Learning chain for
+        # this port so its delayed callback recognizes itself as stale.
+        self._delay_seq[iface.name] = self._delay_seq.get(iface.name, 0) + 1
+
+    def _enter_forwarding_track(self, net: Network, iface: Interface, role: str) -> None:
+        """Root/designated: Listening -> Learning -> Forwarding, one Forward
+        Delay per phase. A no-op if this port is already on this exact
+        track (avoids restarting the clock on every periodic recompute)."""
+        if iface.stp_role == role and iface.stp_state in ("listening", "learning", "forwarding"):
+            return
+        iface.stp_role = role
+        iface.stp_state = "listening"
+        self._delay_seq[iface.name] = self._delay_seq.get(iface.name, 0) + 1
+        seq = self._delay_seq[iface.name]
+        net.scheduler.schedule_after(
+            STP_FORWARD_DELAY,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e: self._enter_learning(net, iface, seq),
+                node_id=self.node_id,
+            ),
+        )
+
+    def _enter_learning(self, net: Network, iface: Interface, seq: int) -> None:
+        if self._delay_seq.get(iface.name) != seq:
+            return  # superseded — port moved on (re-blocked, re-armed) already
+        iface.stp_state = "learning"
+        net.scheduler.schedule_after(
+            STP_FORWARD_DELAY,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e: self._enter_forwarding(net, iface, seq),
+                node_id=self.node_id,
+            ),
+        )
+
+    def _enter_forwarding(self, net: Network, iface: Interface, seq: int) -> None:
+        if self._delay_seq.get(iface.name) != seq:
+            return
+        iface.stp_state = "forwarding"
 
     def _handle_bpdu(self, net: Network, iface: Interface, bpdu: BpduFrame) -> None:
         if not self.stp_enabled:
@@ -210,7 +277,9 @@ class Switch(Device):
             self._handle_bpdu(net, iface, frame.payload)
             return
 
-        if iface.stp_state == "blocking":
+        if iface.stp_state in ("blocking", "listening"):
+            # §8.4: neither state participates in the data plane at all —
+            # Listening doesn't even learn MACs yet.
             net.record_drop("stp_blocked")
             return
 
@@ -226,10 +295,14 @@ class Switch(Device):
                 net.record_drop("vlan_filtered")
                 return
 
-        # Learn source MAC.
+        # Learn source MAC — Learning does this, just doesn't forward yet.
         src = str(frame.src_mac)
         if not MacAddr(src).is_multicast:
             self.mac_table[(vlan, src)] = iface.name
+
+        if iface.stp_state == "learning":
+            net.record_drop("stp_blocked")
+            return
 
         # Forward.
         dst = str(frame.dst_mac)
@@ -237,7 +310,7 @@ class Switch(Device):
             out_name = self.mac_table.get((vlan, dst))
             if out_name is not None and out_name != iface.name:
                 out = self.interfaces.get(out_name)
-                if out is not None and out.stp_state != "blocking" and out.vlan_allows(vlan):
+                if out is not None and out.stp_state == "forwarding" and out.vlan_allows(vlan):
                     self._egress(net, out, frame, vlan)
                 return
             if out_name == iface.name:
@@ -248,7 +321,7 @@ class Switch(Device):
         for name, out in self.interfaces.items():
             if name == iface.name or out.lag_parent is not None or not out.is_up:
                 continue
-            if out.stp_state == "blocking" or not out.vlan_allows(vlan):
+            if out.stp_state != "forwarding" or not out.vlan_allows(vlan):
                 continue
             self._egress(net, out, frame.clone(), vlan)
 
