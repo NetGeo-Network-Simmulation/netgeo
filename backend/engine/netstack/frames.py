@@ -351,7 +351,11 @@ ETH_ISIS = 0x00FE  # sentinel, not a real EtherType (IS-IS = 802.3/LLC SAP 0xFE)
 class IsisHello:
     """IS-IS Hello (IIH). ``ip_addresses`` is the sending interface's own
     address(es) (TLV 132) so the receiver can use it as the route next-hop;
-    ``neighbors_seen`` drives the P2P 3-way handshake."""
+    ``neighbors_seen`` drives the P2P 3-way handshake. ``priority`` and
+    ``lan_id`` (TLV 129/6 territory, simplified) only carry meaning on a LAN
+    IIH: ``priority`` is the sender's LAN priority for DIS election (ISO
+    10589 §8.4.5), ``lan_id`` is the elected DIS's ``system_id.circuit_id``
+    as that sender currently sees it ("" = no DIS elected yet)."""
 
     system_id: str
     neighbors_seen: list[str] = field(default_factory=list)
@@ -359,10 +363,15 @@ class IsisHello:
     hold_time: float = 30.0
     level: int = 2
     area_id: str = "49.0001"
+    priority: int = 64
+    lan_id: str = ""
 
     @property
     def wire_size(self) -> int:
-        return 27 + 6 * len(self.neighbors_seen) + 4 * len(self.ip_addresses)
+        return (
+            27 + 6 * len(self.neighbors_seen) + 4 * len(self.ip_addresses)
+            + 1 + (7 if self.lan_id else 0)
+        )
 
     def summary(self) -> str:
         return (
