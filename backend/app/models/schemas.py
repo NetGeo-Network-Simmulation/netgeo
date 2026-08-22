@@ -788,6 +788,9 @@ class PtpRequest(_Base):
     profile: list[ElevationPoint] | None = None
     radio_a: PtpRadio | None = None
     radio_b: PtpRadio | None = None
+    # RF-1: rain rate along the whole path (ITU-R P.838); 0.0 = no rain fade,
+    # so an old request without this field budgets identically to before.
+    rain_rate_mm_hr: float = Field(0.0, ge=0)
 
 
 class PtpDirectionResult(_Base):
@@ -816,6 +819,8 @@ class PtpResult(_Base):
     distance_m: float
     eirp_dbm: float
     path_loss_db: float
+    rain_fade_db: float = 0.0    # RF-1: ITU-R P.838 rain attenuation already
+                                 # folded into rssi_dbm/fade_margin_db below
     rssi_dbm: float
     fade_margin_db: float        # rssi - rx sensitivity
     los_clear: bool

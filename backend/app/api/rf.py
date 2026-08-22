@@ -137,6 +137,7 @@ async def plan_ptp(body: PtpRequest):
             misc_loss_db=body.misc_loss_db,
             rx_sensitivity_dbm=body.rx_sensitivity_dbm,
             params=body.params,
+            rain_rate_mm_hr=body.rain_rate_mm_hr,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

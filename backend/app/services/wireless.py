@@ -179,20 +179,26 @@ def ptp_budget(
     misc_loss_db: float,
     rx_sensitivity_dbm: float,
     params: dict,
+    rain_rate_mm_hr: float = 0.0,
 ) -> dict:
     """PtP link budget with path loss taken THROUGH the propagation registry.
 
         EIRP = Ptx + Gtx
-        RSSI = EIRP + Grx - path_loss(model) - Lmisc
+        RSSI = EIRP + Grx - path_loss(model) - Lmisc - rain_fade(P.838)
+
+    ``rain_rate_mm_hr=0`` (the default) contributes zero attenuation, so an old
+    caller that never passes it gets byte-identical results (RF-1).
 
     Raises ``ValueError`` (→ HTTP 422) on an unknown model or out-of-range freq.
     """
     loss = prop.path_loss(model_id, distance_m, freq_mhz, tx_height_m, rx_height_m, **params)
+    rain_db = rf.rain_attenuation_db(freq_mhz / 1000.0, rain_rate_mm_hr, distance_m)
     eirp = tx_power_dbm + tx_gain_dbi
-    rssi = eirp + rx_gain_dbi - loss - misc_loss_db
+    rssi = eirp + rx_gain_dbi - loss - misc_loss_db - rain_db
     return {
         "eirp_dbm": round(eirp, 2),
         "path_loss_db": round(loss, 2),
+        "rain_fade_db": round(rain_db, 2),
         "rssi_dbm": round(rssi, 2),
         "fade_margin_db": round(rssi - rx_sensitivity_dbm, 2),
     }
