@@ -19,13 +19,17 @@ What is modelled (v3, NG-SIM-08 follow-on — full FSM):
   (never advertised to an eBGP peer);
 - **prefix filtering**: per-neighbor in/out prefix lists with ge/le, first
   match wins, implicit deny when a list is configured;
-- best-path selection: highest local-pref, shortest AS-path, lowest peer IP;
+- **best-path selection (P-5)**: full RFC 4271 §9.1.2.2 (a)-(j) tie-break
+  ladder — local-pref, AS-path length, origin type, MED (same neighboring
+  AS only, unless ``always_compare_med``), eBGP-over-iBGP, IGP metric to
+  the next-hop, route age, router-id, cluster-list length, peer address
+  (last resort, not first — see ``BgpProcess._better`` for which of these
+  are no-ops in this engine and why);
 - iBGP split-horizon for non-reflectors; next-hop-self on advertisement.
 
-Not modelled: MED, confederations, MP-BGP, dynamic capability negotiation
-(so NOTIFICATION 2/4 "Unsupported Optional Parameter" has no live trigger —
-the wire format supports it, nothing in this engine ever sends it),
-13-step best-path tie-breaking beyond local-pref/as-path-len/peer-IP.
+Not modelled: confederations, MP-BGP, dynamic capability negotiation (so
+NOTIFICATION 2/4 "Unsupported Optional Parameter" has no live trigger — the
+wire format supports it, nothing in this engine ever sends it).
 
 Transport note: this engine has no standalone TCP process — BGP frames its
 own segments directly over IP (``TcpSegment`` with SYN/PSH flags for wire
@@ -79,6 +83,10 @@ NOTIFICATION_SUBCODES = {
 
 # --- route attributes ----------------------------------------------------------
 
+#: RFC 4271 §9.1.2.2 (c): IGP < EGP < Incomplete, lowest wins.
+ORIGIN_RANK = {"igp": 0, "egp": 1, "incomplete": 2}
+
+
 @dataclass(slots=True)
 class BgpAttrs:
     """Path attributes carried with every prefix in an UPDATE."""
@@ -89,10 +97,22 @@ class BgpAttrs:
     communities: tuple[str, ...] = ()
     originator: str = ""          # router-id of the speaker that injected
                                   # the route into this AS (RFC 4456-ish)
+    origin: str = "igp"           # "igp" | "egp" | "incomplete" (§4.3);
+                                  # every route this engine originates is a
+                                  # network statement, so "igp" is the only
+                                  # value ever produced -- "incomplete" is
+                                  # reachable only by a test constructing
+                                  # BgpAttrs directly, no redistribution path
+                                  # sets it today.
+    med: int = 0                  # MULTI_EXIT_DISC (§9.1.2.2 (d)); nothing
+                                  # in this engine sets a non-zero MED yet
+                                  # (no redistribute/route-map knob) -- the
+                                  # field and its same-neighbor-AS compare
+                                  # rule exist so a future one can.
 
     @property
     def wire_size(self) -> int:
-        return 9 + 2 * len(self.as_path) + 4 * len(self.communities)
+        return 14 + 2 * len(self.as_path) + 4 * len(self.communities)
 
 
 # --- prefix lists ----------------------------------------------------------------
@@ -231,6 +251,7 @@ class BgpProcess:
         router_id: str | None = None,
         keepalive_interval: float = 30.0,
         hold_time: float = 90.0,
+        always_compare_med: bool = False,
     ) -> None:
         self.router = router
         self.asn = asn
@@ -242,6 +263,10 @@ class BgpProcess:
         # §4.4 it is always negotiated Hold Time / 3.
         self.keepalive_interval = keepalive_interval
         self.hold_time = hold_time
+        # RFC 4271 §9.1.2.2 (d): by default MED is only meaningful between
+        # routes from the same neighboring AS. Some deployments turn this
+        # off ("bgp always-compare-med") to compare MED across ASes too.
+        self.always_compare_med = always_compare_med
         self.peers: dict[IPv4Address, _Peer] = {}
         # (prefix, communities) advertised by this speaker
         self.networks: list[tuple[IPv4Network, tuple[str, ...]]] = []
@@ -583,18 +608,77 @@ class BgpProcess:
                     best[prefix] = (attrs, peer.ip)
         return best
 
-    @staticmethod
+    def _igp_metric_to(self, next_hop: str) -> int:
+        """IGP cost from this router to a BGP next-hop, for tie-break (f).
+        Falls back to 0 (neutral -- ties rather than wins/loses) when the
+        next-hop doesn't parse or isn't in the routing table yet; that
+        only happens mid-convergence, never in a settled comparison."""
+        try:
+            route = self.router.lookup(IPv4Address(next_hop))
+        except ValueError:
+            return 0
+        return route.metric if route else 0
+
     def _better(
+        self,
         attrs: BgpAttrs,
         peer_ip: IPv4Address,
         cur: tuple[BgpAttrs, IPv4Address],
     ) -> bool:
-        cur_attrs, cur_peer = cur
+        """RFC 4271 §9.1.2.2 (a)-(j), in order -- each step decides as soon
+        as the pair differs, falling through to the next only on an exact
+        tie. Two steps are permanent, documented no-ops in this engine
+        rather than invented infrastructure:
+        (g) route age: rib_in stores only the latest attrs snapshot per
+            peer, no per-route receive timestamp -- add one if a slice
+            ever needs real flap-driven stability preference.
+        (i) cluster-list length: this engine reflects within a single
+            cluster only (see module docstring), so every route's
+            cluster-list is the same length (0) -- add a real list if
+            multi-cluster reflection ever lands.
+        Both fall through immediately and never influence the outcome.
+        """
+        cur_attrs, cur_peer_ip = cur
+        new_peer = self.peers[peer_ip]
+        cur_peer = self.peers[cur_peer_ip]
+
+        # (a) highest local-pref
         if attrs.local_pref != cur_attrs.local_pref:
             return attrs.local_pref > cur_attrs.local_pref
+        # (b) shortest AS-path
         if len(attrs.as_path) != len(cur_attrs.as_path):
             return len(attrs.as_path) < len(cur_attrs.as_path)
-        return peer_ip < cur_peer
+        # (c) lowest origin type: IGP < EGP < Incomplete
+        if attrs.origin != cur_attrs.origin:
+            return ORIGIN_RANK[attrs.origin] < ORIGIN_RANK[cur_attrs.origin]
+        # (d) lowest MED -- only between routes from the same neighboring
+        # AS (leftmost AS_PATH hop; 0 sentinel for a locally-originated/
+        # purely-intra-AS route with no hops yet), unless configured to
+        # always compare.
+        new_nas = attrs.as_path[0] if attrs.as_path else 0
+        cur_nas = cur_attrs.as_path[0] if cur_attrs.as_path else 0
+        if (self.always_compare_med or new_nas == cur_nas) and attrs.med != cur_attrs.med:
+            return attrs.med < cur_attrs.med
+        # (e) eBGP over iBGP
+        new_ibgp = new_peer.remote_asn == self.asn
+        cur_ibgp = cur_peer.remote_asn == self.asn
+        if new_ibgp != cur_ibgp:
+            return cur_ibgp  # new wins iff *cur* is the iBGP one
+        # (f) lowest IGP metric to the BGP next-hop
+        new_metric = self._igp_metric_to(attrs.next_hop)
+        cur_metric = self._igp_metric_to(cur_attrs.next_hop)
+        if new_metric != cur_metric:
+            return new_metric < cur_metric
+        # (g) route age -- no-op, see docstring above.
+        # (h) lowest BGP router-id (originator-id for a reflected route,
+        # else the sending peer's own router-id from its OPEN)
+        new_rid = attrs.originator or new_peer.router_id
+        cur_rid = cur_attrs.originator or cur_peer.router_id
+        if new_rid != cur_rid:
+            return new_rid < cur_rid
+        # (i) cluster-list length -- no-op, see docstring above.
+        # (j) lowest peer address -- last resort, not first.
+        return peer_ip < cur_peer_ip
 
     def _decide_and_install(self, net: Network) -> None:
         local = {ip.network for ip in self.router.all_ips()}
