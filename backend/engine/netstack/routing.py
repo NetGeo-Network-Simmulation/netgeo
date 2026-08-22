@@ -228,6 +228,10 @@ class NatBinding:
     outside_ip: IPv4Address
     outside_key: int
     proto: str
+    # RFC 3022 §2.2 static inbound mapping: admin-declared, present from the
+    # moment NAT is enabled (not created by outbound traffic) — must never
+    # be touched by a dynamic-binding eviction/expiry mechanism.
+    static: bool = False
 
 
 @dataclass(slots=True)
@@ -894,9 +898,33 @@ class Router(L3Device):
             self._send_icmpv6_error(net, pkt, icmp_type=2, code=0)  # packet too big
 
     # ----- NAT44 (PAT) ------------------------------------------------------------------
-    def enable_nat(self, inside: list[str], outside: str) -> None:
+    def enable_nat(
+        self,
+        inside: list[str],
+        outside: str,
+        port_forwards: list[tuple[str, int, str, int]] | None = None,
+    ) -> None:
+        """``port_forwards``: static inbound mappings (RFC 3022 §4, §2.2), each
+        ``(proto, outside_port, inside_ip, inside_port)`` — active immediately,
+        no prior outbound traffic required. Declared here (config/topology
+        intent), not created by traffic, so a rebuild-from-intent replay (e.g.
+        ``/seek``) has the binding from the start, same as ``nat_inside``/
+        ``nat_outside`` themselves."""
         self.nat_inside = set(inside)
         self.nat_outside = outside
+        out_iface = self.interfaces.get(outside)
+        outside_ip = out_iface.ip.ip if out_iface and out_iface.ip else None
+        for proto, out_port, inside_ip, in_port in port_forwards or []:
+            self._nat_bindings.append(
+                NatBinding(
+                    inside_ip=IPv4Address(inside_ip),
+                    inside_key=in_port,
+                    outside_ip=outside_ip,
+                    outside_key=out_port,
+                    proto=proto,
+                    static=True,
+                )
+            )
 
     def _nat_key(self, pkt: Ipv4Packet) -> int | None:
         l4 = pkt.payload
@@ -919,7 +947,10 @@ class Router(L3Device):
             (
                 b
                 for b in self._nat_bindings
-                if b.inside_ip == pkt.src and b.inside_key == key and b.proto == pkt.proto_name
+                if not b.static
+                and b.inside_ip == pkt.src
+                and b.inside_key == key
+                and b.proto == pkt.proto_name
             ),
             None,
         )
@@ -1080,6 +1111,7 @@ class Router(L3Device):
                 "proto": b.proto,
                 "inside": f"{b.inside_ip}:{b.inside_key}",
                 "outside": f"{b.outside_ip}:{b.outside_key}",
+                "static": b.static,
             }
             for b in self._nat_bindings
         ]

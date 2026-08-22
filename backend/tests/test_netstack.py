@@ -8,8 +8,10 @@ from __future__ import annotations
 
 from ipaddress import IPv4Address, IPv4Network
 
+from app.models import Topology
 from engine.netstack import Network
 from engine.netstack.device import Host
+from engine.netstack.frames import PROTO_TCP, Ipv4Packet, TcpSegment
 from engine.netstack.protocols.bgp import BgpProcess
 from engine.netstack.protocols.ospf import OspfProcess
 from engine.netstack.routing import AclRule, DhcpPool, Router
@@ -499,6 +501,105 @@ def test_nat_translates_source_and_restores_replies():
     wan_frames = net.capture.records(link_id="wan", limit=500)
     assert wan_frames
     assert not any("192.168.1.10" in r.layers.get("ipv4", {}).get("src", "") for r in wan_frames)
+
+
+def _nat_port_forward_gw() -> tuple[Network, Host, Router, Host]:
+    """pc(inside, port 80) -- gw -- server(outside), gw statically forwards
+    outside 8080 -> pc:80 (RFC 3022 §4 static inbound mapping)."""
+    net = Network(seed=7)
+    inside = net.add_device(Host("pc"))
+    gw = net.add_device(Router("gw"))
+    server = net.add_device(Host("server"))
+    net.connect("lan", net.add_iface(inside, "eth0", ["192.168.1.10/24"]),
+                net.add_iface(gw, "eth0", ["192.168.1.1/24"]))
+    net.connect("wan", net.add_iface(gw, "eth1", ["203.0.113.2/30"]),
+                net.add_iface(server, "eth0", ["203.0.113.1/30"]))
+    inside.default_gateway = IPv4Address("192.168.1.1")
+    gw.enable_nat(
+        inside=["eth0"], outside="eth1",
+        port_forwards=[("tcp", 8080, "192.168.1.10", 80)],
+    )
+    return net, inside, gw, server
+
+
+def test_nat_static_port_forward_allows_inbound_without_prior_outbound():
+    net, _inside, _gw, server = _nat_port_forward_gw()
+    net.start()
+    # No outbound traffic from "pc" has ever happened — no dynamic binding
+    # exists yet. Only the declared static map allows this through.
+    server.send_ip(net, Ipv4Packet(
+        src=IPv4Address("203.0.113.1"),
+        dst=IPv4Address("203.0.113.2"),
+        proto=PROTO_TCP,
+        payload=TcpSegment(src_port=51000, dst_port=8080, flags="SYN"),
+    ))
+    net.run_for(2.0)
+    lan_frames = net.capture.records(link_id="lan", limit=500)
+    forwarded = [
+        r for r in lan_frames
+        if r.layers.get("ipv4", {}).get("dst") == "192.168.1.10"
+        and r.layers.get("tcp", {}).get("dst_port") == 80
+    ]
+    assert forwarded, "inbound SYN was not translated+forwarded to the inside host"
+
+
+def test_nat_dynamic_binding_unaffected_by_static_map():
+    net, _inside, gw, _server = _nat_port_forward_gw()
+    # A static port-forward is configured, but ordinary outbound NAT (ping)
+    # must behave exactly as before (regression against test_nat_translates_
+    # source_and_restores_replies above).
+    report = net.ping("pc", "203.0.113.1", count=3)
+    assert report.received == 3
+    rows = gw.nat_rows()
+    static_rows = [r for r in rows if r["static"]]
+    dynamic_rows = [r for r in rows if not r["static"]]
+    assert len(static_rows) == 1 and static_rows[0]["outside"].startswith("203.0.113.2:8080")
+    assert len(dynamic_rows) == 1 and dynamic_rows[0]["outside"].startswith("203.0.113.2:")
+    # The dynamic binding must get its own outside port, never the static one.
+    assert dynamic_rows[0]["outside"] != static_rows[0]["outside"]
+
+
+def test_nat_static_binding_present_from_build_no_replay_growth_needed():
+    """Determinism/replay proof: static port-forwards come from the node's
+    declarative intent (``_apply_intent`` in netlab.py), applied on every
+    ``build_network`` call — the same mechanism that already backs plain
+    ``nat_inside``/``nat_outside``. A ``/seek`` replay rebuilds the network
+    from intent and replays the journal on top; since the binding is baked
+    in at build time (not created by a journaled runtime command), it is
+    present immediately, before any journal entry is replayed — never a
+    binding that only "grows in" over sim time."""
+    from app.services.netlab import build_network
+
+    topo = Topology.model_validate({
+        "project": {"id": "p1", "name": "t"},
+        "nodes": [
+            {
+                "id": "n1", "project_id": "p1", "name": "gw", "kind": "router",
+                "interfaces": [
+                    {"id": "i1", "node_id": "n1", "name": "eth0", "ip": ["192.168.1.1/24"]},
+                    {"id": "i2", "node_id": "n1", "name": "eth1", "ip": ["203.0.113.2/30"]},
+                ],
+                "intent": {
+                    "nat": {
+                        "inside": ["eth0"], "outside": "eth1",
+                        "port_forwards": [
+                            {"proto": "tcp", "outside_port": 8080,
+                             "inside_ip": "192.168.1.10", "inside_port": 80},
+                        ],
+                    }
+                },
+            },
+        ],
+        "links": [],
+    })
+    net = build_network(topo)
+    gw = net.devices["gw"]
+    assert isinstance(gw, Router)
+    rows = gw.nat_rows()  # no net.start(), no traffic, no journal replay yet
+    assert rows == [{
+        "proto": "tcp", "inside": "192.168.1.10:80",
+        "outside": "203.0.113.2:8080", "static": True,
+    }]
 
 
 def test_acl_deny_blocks_and_permits_selectively():
