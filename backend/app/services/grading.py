@@ -19,7 +19,8 @@ from app.models import GradeCheck, GradeItem, GradeReport, Topology
 from app.services import netlab
 
 # OSPF neighbour state that counts as "up" (a formed adjacency). The engine
-# only ever emits "init" | "full" (see protocols/ospf.py).
+# emits "init" | "2-way" | "full" (see protocols/ospf.py) — only "full"
+# counts, since a DROther/DROther pair legitimately stops at 2-way.
 _OSPF_UP = "full"
 
 

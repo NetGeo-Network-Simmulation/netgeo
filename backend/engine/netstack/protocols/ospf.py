@@ -1,10 +1,21 @@
 """OSPFv2 — multi-area link-state routing (simplified but event-faithful).
 
-What is modelled (NG-SIM-05):
+What is modelled (NG-SIM-05, DR/BDR election P-1a):
 - periodic Hellos to 224.0.0.5 per enabled interface, tagged with the
   interface's **area**; adjacency only forms between same-area neighbors;
 - per-area LSDBs: router LSAs flooded within their area, Dijkstra SPF per
   area (cost = ref_bandwidth / interface bandwidth);
+- **DR/BDR election** (RFC 2328 §7.3, §9.4): every interface carries a
+  router priority (default 1, configurable per-interface; priority 0 never
+  becomes DR/BDR) and its own election state (waiting -> dr | backup |
+  drother); a Wait Timer (= dead_interval) gates the first election, with
+  the RFC "BackupSeen" shortcut when a Hello already claims a DR/BDR;
+  election is a deterministic total order (priority desc, router-id desc,
+  no randomness) and **non-preemptive** — a higher-priority router joining
+  after a DR is established does not unseat it; only the DR's own death
+  triggers a new election (which promotes the BDR and elects a fresh BDR).
+  Adjacency only climbs to Full for pairs involving the DR or BDR — a
+  DROther/DROther pair stops at 2-Way, so LSAs never flood across it;
 - **ABR behaviour**: a router with links in area 0 plus others originates
   type-3 summary LSAs — non-backbone intra prefixes into area 0, and
   backbone intra + backbone-learned inter prefixes into its leaf areas
@@ -13,8 +24,12 @@ What is modelled (NG-SIM-05):
 - optional **default originate**: ABR injects 0.0.0.0/0 into leaf areas;
 - dead-interval neighbor expiry, LSA re-origination and route withdrawal.
 
-Not modelled (documented): DR/BDR election, NSSA/stub area types, LSA
-aging/refresh, virtual links, authentication, OSPFv3.
+Not modelled (documented): the Type-2 Network/pseudonode LSA a real DR
+would originate for its broadcast segment (P-1b) — SPF here still treats
+each Full adjacency as a point-to-point router-LSA link, so a DROther pair
+just never gets one instead of the segment collapsing through a pseudonode;
+NSSA/stub area types, LSA aging/refresh, virtual links, authentication,
+OSPFv3, ExStart/Exchange/Loading (LSAs sync in one shot on Full).
 """
 from __future__ import annotations
 
@@ -40,6 +55,15 @@ BACKBONE = 0
 LS_INFINITY = 0xFFFFFF  # RFC 2328 §12.4.3: summary at LSInfinity = withdrawn
 
 
+def _rid_key(router_id: str) -> int:
+    """Total order for the DR/BDR tiebreak: numeric so "10.0.0.1" ranks
+    above "9.0.0.1" (a plain string compare would get that backwards)."""
+    try:
+        return int(IPv4Address(router_id))
+    except ValueError:
+        return 0
+
+
 # --- OSPF PDUs (payload of Ipv4Packet proto 89) ------------------------------
 
 @dataclass(slots=True)
@@ -49,9 +73,14 @@ class OspfHello:
     hello_interval: float = 10.0
     dead_interval: float = 40.0
     area: int = 0
+    priority: int = 1
+    dr: str = ""   # router-id the sender believes is DR ("" = none yet)
+    bdr: str = ""  # router-id the sender believes is BDR ("" = none yet)
 
     @property
     def wire_size(self) -> int:
+        # Real OSPF Hello already carries netmask/priority/DR/BDR inside its
+        # fixed 44-byte base — only the neighbor list grows the size.
         return 44 + 4 * len(self.neighbors_seen)
 
     def summary(self) -> str:
@@ -122,8 +151,21 @@ class _Neighbor:
     ip: IPv4Address
     iface_name: str
     area: int = 0
-    state: str = "init"          # init | full
+    state: str = "init"          # init | 2-way | full
     last_seen: float = 0.0
+    priority: int = 1
+    hello_dr: str = ""    # DR this neighbor's last Hello claimed ("" = none)
+    hello_bdr: str = ""   # BDR this neighbor's last Hello claimed
+
+
+@dataclass(slots=True)
+class _IfaceDr:
+    """Per-interface DR/BDR election state (RFC 2328 §9.4)."""
+
+    state: str = "waiting"   # waiting | dr | backup | drother | down
+    dr: str = ""             # elected DR's router-id ("" = none yet)
+    bdr: str = ""            # elected BDR's router-id ("" = none yet)
+    wait_seq: int = 0        # sequence-guard for the Wait Timer
 
 
 class OspfProcess:
@@ -140,6 +182,7 @@ class OspfProcess:
         ifaces: list[str] | None = None,
         areas: dict[str, int] | None = None,
         default_originate: bool = False,
+        priorities: dict[str, int] | None = None,
     ) -> None:
         self.router = router
         self.router_id = router_id or self._pick_router_id()
@@ -148,8 +191,11 @@ class OspfProcess:
         self.iface_names = ifaces  # None = all L3 interfaces
         self.areas = {k: int(v) for k, v in (areas or {}).items()}  # iface -> area
         self.default_originate = default_originate
+        self.priorities = {k: int(v) for k, v in (priorities or {}).items()}  # iface -> priority
         # (router_id, area) -> neighbor
         self.neighbors: dict[tuple[str, int], _Neighbor] = {}
+        # iface name -> DR/BDR election state
+        self._iface_dr: dict[str, _IfaceDr] = {}
         # area -> lsa key -> LSA
         self.lsdb: dict[int, dict[str, Lsa]] = {}
         # (area, prefix) -> our originated summary (change detection)
@@ -165,6 +211,9 @@ class OspfProcess:
 
     def iface_area(self, iface_name: str) -> int:
         return self.areas.get(iface_name, BACKBONE)
+
+    def iface_priority(self, iface_name: str) -> int:
+        return self.priorities.get(iface_name, 1)
 
     def my_areas(self) -> list[int]:
         return sorted({self.iface_area(i.name) for i in self._enabled_ifaces()})
@@ -191,6 +240,9 @@ class OspfProcess:
         if self._started:
             return
         self._started = True
+        for iface in self._enabled_ifaces():
+            self._iface_dr[iface.name] = _IfaceDr()
+            self._arm_wait_timer(net, iface.name, self.iface_area(iface.name))
         for area in self.my_areas():
             self._originate_lsa(net, area, flood=False)
         self._tick(net)
@@ -200,6 +252,7 @@ class OspfProcess:
         # the work, not the reschedule, so a power-on self-heals within one
         # interval instead of needing an explicit restart.
         if self.router.powered_on:
+            self._resume_ifaces(net)
             self._expire_neighbors(net)
             self._send_hellos(net)
         net.scheduler.schedule_after(
@@ -212,6 +265,146 @@ class OspfProcess:
             ),
         )
 
+    def on_power_off(self, net: Network) -> None:
+        """A power loss takes every interface's DR state down with it (no
+        adjacency survives a dead router) instead of leaving a stale
+        DR/BDR claim behind. ``_tick``'s self-heal brings it back via
+        ``_resume_ifaces`` once the router powers back on."""
+        for name in self._iface_dr:
+            self._down_iface_dr(name)
+
+    # ----- DR/BDR election (RFC 2328 §7.3, §9.4) -------------------------------
+    def _down_iface_dr(self, iface_name: str) -> None:
+        st = self._iface_dr.get(iface_name)
+        if st is None:
+            return
+        st.wait_seq += 1  # abort any Wait Timer generation still in flight
+        st.dr, st.bdr = "", ""
+        st.state = "down"
+
+    def _resume_ifaces(self, net: Network) -> None:
+        for name, st in self._iface_dr.items():
+            if st.state == "down":
+                # Flips to "waiting" synchronously below, so the next tick
+                # won't see "down" again and re-arm a second time.
+                st.dr, st.bdr = "", ""
+                st.state = "waiting"
+                self._arm_wait_timer(net, name, self.iface_area(name))
+
+    def _arm_wait_timer(self, net: Network, iface_name: str, area: int) -> None:
+        st = self._iface_dr[iface_name]
+        st.wait_seq += 1
+        seq = st.wait_seq
+        net.scheduler.schedule_after(
+            self.dead_interval,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e: self._wait_timer_fired(net, iface_name, area, seq),
+                node_id=self.router.node_id,
+            ),
+        )
+
+    def _wait_timer_fired(self, net: Network, iface_name: str, area: int, seq: int) -> None:
+        st = self._iface_dr.get(iface_name)
+        if st is None or seq != st.wait_seq:
+            return  # superseded by a newer generation (reset, or BackupSeen)
+        if st.state != "waiting":
+            return
+        if not self.router.powered_on:
+            return  # on_power_off already tore this interface's DR state down
+        self._run_election(net, iface_name, area)
+
+    def _candidates(self, iface_name: str, area: int) -> dict[str, tuple[int, bool, bool]]:
+        """router_id -> (priority, self-claims-DR, self-claims-BDR), for
+        every router visible on this segment (self plus every neighbor
+        that has reached at least 2-Way). The self-claim flags come from
+        each router's own last Hello (RFC 2328 §7.3/§9.4 elect off of who
+        *declares itself* DR/BDR, not off priority ranking alone) — that's
+        what lets a router recognise an already-established DR even on
+        its very first election with it, e.g. a late joiner."""
+        st = self._iface_dr.get(iface_name)
+        out = {
+            self.router_id: (
+                self.iface_priority(iface_name),
+                bool(st and st.dr == self.router_id),
+                bool(st and st.bdr == self.router_id),
+            )
+        }
+        for nbr in self.neighbors.values():
+            if nbr.iface_name == iface_name and nbr.area == area and nbr.state in ("2-way", "full"):
+                out[nbr.router_id] = (
+                    nbr.priority,
+                    nbr.hello_dr == nbr.router_id,
+                    nbr.hello_bdr == nbr.router_id,
+                )
+        return out
+
+    def _run_election(self, net: Network, iface_name: str, area: int) -> None:
+        st = self._iface_dr.setdefault(iface_name, _IfaceDr())
+        st.wait_seq += 1  # commits this generation — a pending Wait Timer is now stale
+        candidates = self._candidates(iface_name, area)
+        eligible = {rid: v for rid, v in candidates.items() if v[0] > 0}  # priority 0 never wins
+
+        def best(pool: list[str]) -> str:
+            return max(pool, key=lambda rid: (eligible[rid][0], _rid_key(rid)))
+
+        def bdr_pool(exclude: str) -> list[str]:
+            claiming = [
+                rid for rid, (_p, cdr, cbdr) in eligible.items()
+                if cbdr and not cdr and rid != exclude
+            ]
+            return claiming or [rid for rid in eligible if rid != exclude]
+
+        if not eligible:
+            dr, bdr = "", ""
+        else:
+            pool = bdr_pool("")
+            bdr = best(pool) if pool else ""
+            dr_claims = [rid for rid, (_p, cdr, _c) in eligible.items() if cdr]
+            dr = best(dr_claims) if dr_claims else bdr
+            if dr and dr == bdr:
+                # RFC 2328 §9.4: redo the BDR pick once more with the DR now
+                # fixed and excluded — covers both a genuine self-claim tie
+                # and the "nobody claims DR yet" fallback picking the same
+                # router for both roles.
+                pool = bdr_pool(dr)
+                bdr = best(pool) if pool else ""
+
+        st.dr, st.bdr = dr, bdr
+        if dr == self.router_id:
+            st.state = "dr"
+        elif bdr == self.router_id:
+            st.state = "backup"
+        else:
+            st.state = "drother"
+        net.log_event(
+            "ospf.dr_election", device=self.router.name, iface=iface_name,
+            dr=dr, bdr=bdr, role=st.state,
+        )
+        self._update_adjacencies(net, iface_name, area)
+
+    def _update_adjacencies(self, net: Network, iface_name: str, area: int) -> None:
+        st = self._iface_dr.get(iface_name)
+        if st is None:
+            return
+        for nbr in self.neighbors.values():
+            if nbr.iface_name != iface_name or nbr.area != area or nbr.state == "init":
+                continue
+            should_be_full = self.router_id in (st.dr, st.bdr) or nbr.router_id in (st.dr, st.bdr)
+            if should_be_full and nbr.state != "full":
+                nbr.state = "full"
+                logger.debug(
+                    "%s: adjacency FULL with %s (area %s)",
+                    self.router_id, nbr.router_id, area,
+                )
+                self._originate_lsa(net, area)
+                # Database sync: give the new neighbor this area's entire LSDB.
+                self._send_lsu(net, nbr, list(self._area_db(area).values()))
+            elif not should_be_full and nbr.state == "full":
+                nbr.state = "2-way"
+                self._originate_lsa(net, area)
+
     # ----- hello protocol -------------------------------------------------------
     def _send_hellos(self, net: Network) -> None:
         for iface in self._enabled_ifaces():
@@ -221,6 +414,7 @@ class OspfProcess:
             seen = [
                 n.router_id for n in self.neighbors.values() if n.area == area
             ]
+            st = self._iface_dr.get(iface.name)
             iface.transmit(
                 net,
                 EthernetFrame(
@@ -239,6 +433,9 @@ class OspfProcess:
                             hello_interval=self.hello_interval,
                             dead_interval=self.dead_interval,
                             area=area,
+                            priority=self.iface_priority(iface.name),
+                            dr=st.dr if st else "",
+                            bdr=st.bdr if st else "",
                         ),
                     ),
                 ),
@@ -271,16 +468,32 @@ class OspfProcess:
         nbr.ip = src
         nbr.iface_name = iface.name
         nbr.last_seen = net.now
+        nbr.priority = hello.priority
+        nbr.hello_dr = hello.dr
+        nbr.hello_bdr = hello.bdr
 
-        if self.router_id in hello.neighbors_seen and nbr.state != "full":
-            nbr.state = "full"
-            logger.debug(
-                "%s: adjacency FULL with %s (area %s)",
-                self.router_id, nbr.router_id, area,
-            )
-            self._originate_lsa(net, area)
-            # Database sync: give the new neighbor this area's entire LSDB.
-            self._send_lsu(net, nbr, list(self._area_db(area).values()))
+        if nbr.state == "init":
+            if self.router_id in hello.neighbors_seen:
+                nbr.state = "2-way"
+            else:
+                return  # not yet 2-Way: no election, no adjacency possible
+
+        st = self._iface_dr.get(iface.name)
+        if st is None:
+            return
+        if st.state == "waiting":
+            if hello.dr or hello.bdr:
+                # RFC 2328 §9.4 BackupSeen: a Hello already claiming a
+                # DR/BDR lets us skip the rest of the Wait Timer.
+                self._run_election(net, iface.name, area)
+            return
+        if not st.bdr:
+            # NeighborChange: this router might fill a still-empty BDR
+            # slot (e.g. rejoining after a drop). Non-preemptive for an
+            # already-seated DR — see _run_election.
+            self._run_election(net, iface.name, area)
+        else:
+            self._update_adjacencies(net, iface.name, area)
 
     def _expire_neighbors(self, net: Network) -> None:
         dead = [
@@ -288,13 +501,24 @@ class OspfProcess:
             for key, n in self.neighbors.items()
             if n.last_seen and net.now - n.last_seen > self.dead_interval
         ]
+        if not dead:
+            return
+        touched: dict[str, int] = {}  # iface_name -> area, for interfaces with a dead neighbor
         for key in dead:
-            del self.neighbors[key]
-        if dead:
-            logger.debug("%s: neighbors dead: %s", self.router_id, dead)
-            for _rid, area in dead:
-                self._originate_lsa(net, area)
-            self._schedule_spf(net)
+            rid, area = key
+            nbr = self.neighbors.pop(key)
+            touched[nbr.iface_name] = area
+            st = self._iface_dr.get(nbr.iface_name)
+            if st is not None and rid in (st.dr, st.bdr):
+                # The DR or BDR itself died: re-elect now rather than
+                # waiting — RFC 2328's NeighborChange event.
+                self._run_election(net, nbr.iface_name, area)
+        logger.debug("%s: neighbors dead: %s", self.router_id, dead)
+        for _rid, area in dead:
+            self._originate_lsa(net, area)
+        for iface_name, area in touched.items():
+            self._update_adjacencies(net, iface_name, area)
+        self._schedule_spf(net)
 
     # ----- LSA origination / flooding -----------------------------------------------
     def _iface_cost(self, iface: Interface) -> int:
@@ -581,6 +805,13 @@ class OspfProcess:
                 "iface": n.iface_name,
                 "area": n.area,
                 "state": n.state,
+                "priority": n.priority,
             }
             for n in self.neighbors.values()
+        ]
+
+    def dr_rows(self) -> list[dict]:
+        return [
+            {"iface": name, "state": st.state, "dr": st.dr, "bdr": st.bdr}
+            for name, st in self._iface_dr.items()
         ]
