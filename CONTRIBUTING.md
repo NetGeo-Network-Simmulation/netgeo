@@ -54,9 +54,19 @@ CI di GitHub Actions menjalankan hal yang sama di tiap PR — PR yang gagal CI t
 
 ## Yang tidak boleh di-commit
 
-- `docs/` (folder lokal-only — lihat `docs/README.md`): berisi catatan internal, screenshot, hostname/IP, kredensial.
+- `docs/` (folder lokal-only, di `.gitignore`): berisi catatan internal, screenshot, hostname/IP, kredensial. `dev-docs/` (di root, di luar `docs/`) adalah folder terpisah yang justru **wajib** ter-track — dokumentasi kontributor publik.
 - File apa pun berisi password, token, PAT, IP host internal.
 - Hasil tes lokal (`__pycache__/`, `node_modules/`, `.pytest_cache/` sudah masuk `.gitignore`).
+
+## Dokumentasi arsitektur
+
+Sebelum menyentuh kode, baca [`dev-docs/`](dev-docs/): `ARCHITECTURE.md`
+(orientasi, tiga jalur eksekusi engine), `ENGINE-GUIDE.md` (model objek
+netstack + kontrak determinisme), `ADDING-A-PROTOCOL.md` (resep tambah
+protokol), `TESTING.md` (struktur test + aturan timer), `FRONTEND-GUIDE.md`
+(struktur `frontend/src/`). Dokumen di bawah ini melengkapi, bukan
+menduplikasi — bagian "Kode ada di mana" dan peringatan choke-point tetap
+di sini.
 
 ## Kode ada di mana
 
