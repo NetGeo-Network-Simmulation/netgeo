@@ -1,21 +1,38 @@
 """OSPFv2 — multi-area link-state routing (simplified but event-faithful).
 
-What is modelled (NG-SIM-05, DR/BDR election P-1a):
+What is modelled (NG-SIM-05, DR/BDR election P-1a, network type + Network
+LSA P-1c):
 - periodic Hellos to 224.0.0.5 per enabled interface, tagged with the
   interface's **area**; adjacency only forms between same-area neighbors;
 - per-area LSDBs: router LSAs flooded within their area, Dijkstra SPF per
   area (cost = ref_bandwidth / interface bandwidth);
-- **DR/BDR election** (RFC 2328 §7.3, §9.4): every interface carries a
-  router priority (default 1, configurable per-interface; priority 0 never
-  becomes DR/BDR) and its own election state (waiting -> dr | backup |
-  drother); a Wait Timer (= dead_interval) gates the first election, with
-  the RFC "BackupSeen" shortcut when a Hello already claims a DR/BDR;
-  election is a deterministic total order (priority desc, router-id desc,
-  no randomness) and **non-preemptive** — a higher-priority router joining
-  after a DR is established does not unseat it; only the DR's own death
-  triggers a new election (which promotes the BDR and elects a fresh BDR).
-  Adjacency only climbs to Full for pairs involving the DR or BDR — a
-  DROther/DROther pair stops at 2-Way, so LSAs never flood across it;
+- **network type** (RFC 2328 §9.5): an interface is inferred **broadcast**
+  when its peer is a Switch, **point-to-point** when it's a direct
+  router-router wire (no explicit config knob — see ``_is_lan_iface``,
+  same detection ``isis.py`` uses). A point-to-point interface never runs
+  DR/BDR election — adjacency goes straight to Full once 2-Way is reached;
+- **DR/BDR election** (RFC 2328 §7.3, §9.4), broadcast interfaces only:
+  every such interface carries a router priority (default 1, configurable
+  per-interface; priority 0 never becomes DR/BDR) and its own election
+  state (waiting -> dr | backup | drother); a Wait Timer (= dead_interval)
+  gates the first election, with the RFC "BackupSeen" shortcut when a
+  Hello already claims a DR/BDR; election is a deterministic total order
+  (priority desc, router-id desc, no randomness) and **non-preemptive** —
+  a higher-priority router joining after a DR is established does not
+  unseat it; only the DR's own death triggers a new election (which
+  promotes the BDR and elects a fresh BDR). Adjacency only climbs to Full
+  for pairs involving the DR or BDR — a DROther/DROther pair stops at
+  2-Way, so LSAs never flood across it;
+- **Type-2 Network LSA / pseudonode** (RFC 2328 §12.4.2, §16.1): the DR of
+  a broadcast segment (and only the DR) originates a Network LSA listing
+  every router Full-adjacent on that segment plus itself, keyed by the
+  DR's interface IP; a router's own Router LSA replaces its per-neighbor
+  links on that segment with a single ``transit`` link to the pseudonode.
+  SPF treats the pseudonode as a vertex with cost 0 to each listed router
+  and the interface's cost the other way, gated by the same bidirectional
+  check as ``ptp`` links (Network LSA must list the router back). A dead
+  or superseded DR's old Network LSA is simply left unreferenced once
+  survivors re-originate against the new DR — no route leaks through it;
 - **ABR behaviour**: a router with links in area 0 plus others originates
   type-3 summary LSAs — non-backbone intra prefixes into area 0, and
   backbone intra + backbone-learned inter prefixes into its leaf areas
@@ -24,12 +41,9 @@ What is modelled (NG-SIM-05, DR/BDR election P-1a):
 - optional **default originate**: ABR injects 0.0.0.0/0 into leaf areas;
 - dead-interval neighbor expiry, LSA re-origination and route withdrawal.
 
-Not modelled (documented): the Type-2 Network/pseudonode LSA a real DR
-would originate for its broadcast segment (P-1b) — SPF here still treats
-each Full adjacency as a point-to-point router-LSA link, so a DROther pair
-just never gets one instead of the segment collapsing through a pseudonode;
-NSSA/stub area types, LSA aging/refresh, virtual links, authentication,
-OSPFv3, ExStart/Exchange/Loading (LSAs sync in one shot on Full).
+Not modelled (documented): NSSA/stub area types, LSA aging/refresh, virtual
+links, authentication, OSPFv3, ExStart/Exchange/Loading (LSAs sync in one
+shot on Full).
 """
 from __future__ import annotations
 
@@ -94,7 +108,11 @@ class OspfHello:
 class RouterLsa:
     router_id: str
     seq: int
-    # ("ptp", neighbor_router_id, cost) | ("stub", "prefix/len", cost)
+    # ("ptp", neighbor_router_id, cost) — direct router-router link (P2P);
+    # ("transit", dr_interface_ip, cost) — broadcast segment, points at the
+    #   pseudonode (Network LSA keyed "net|<dr_interface_ip>") instead of at
+    #   each neighbor individually (P-1c);
+    # ("stub", "prefix/len", cost) — connected prefix, no adjacency needed.
     links: list[tuple[str, str, int]] = field(default_factory=list)
 
     @property
@@ -130,7 +148,32 @@ class SummaryLsa:
         return SummaryLsa(self.router_id, self.seq, self.prefix, self.metric)
 
 
-Lsa = RouterLsa | SummaryLsa
+@dataclass(slots=True)
+class NetworkLsa:
+    """Type-2 pseudonode LSA (RFC 2328 §12.4.2) — originated only by the DR
+    of a broadcast segment, listing every router Full-adjacent there (DR
+    included). Keyed by the DR's own interface IP on that segment, so a new
+    DR after a failover naturally gets a fresh key instead of colliding with
+    the old one."""
+
+    dr_ip: str               # DR's interface address on the segment (pseudonode id)
+    seq: int
+    mask: str                 # segment netmask, e.g. "255.255.255.0"
+    attached_routers: list[str] = field(default_factory=list)  # sorted, DR included
+
+    @property
+    def key(self) -> str:
+        return f"net|{self.dr_ip}"
+
+    @property
+    def wire_size(self) -> int:
+        return 24 + 4 * len(self.attached_routers)
+
+    def copy(self) -> NetworkLsa:
+        return NetworkLsa(self.dr_ip, self.seq, self.mask, list(self.attached_routers))
+
+
+Lsa = RouterLsa | SummaryLsa | NetworkLsa
 
 
 @dataclass(slots=True)
@@ -215,6 +258,15 @@ class OspfProcess:
     def iface_priority(self, iface_name: str) -> int:
         return self.priorities.get(iface_name, 1)
 
+    def _is_lan_iface(self, iface: Interface) -> bool:
+        """Broadcast (LAN) segment vs point-to-point wire (RFC 2328 §9.5):
+        no explicit network-type knob, so this is inferred from topology —
+        the peer is a Switch (several routers can share the segment) or a
+        direct router-router link (peer.device.kind == "router"). Same
+        detection ``isis.py``'s ``_is_lan_iface`` uses; keep both in sync."""
+        peer = iface.peer()
+        return peer is not None and peer.device.kind == "switch"
+
     def my_areas(self) -> list[int]:
         return sorted({self.iface_area(i.name) for i in self._enabled_ifaces()})
 
@@ -241,8 +293,9 @@ class OspfProcess:
             return
         self._started = True
         for iface in self._enabled_ifaces():
-            self._iface_dr[iface.name] = _IfaceDr()
-            self._arm_wait_timer(net, iface.name, self.iface_area(iface.name))
+            if self._is_lan_iface(iface):
+                self._iface_dr[iface.name] = _IfaceDr()
+                self._arm_wait_timer(net, iface.name, self.iface_area(iface.name))
         for area in self.my_areas():
             self._originate_lsa(net, area, flood=False)
         self._tick(net)
@@ -384,6 +437,16 @@ class OspfProcess:
         )
         self._update_adjacencies(net, iface_name, area)
 
+    def _set_full(self, net: Network, nbr: _Neighbor, area: int) -> None:
+        nbr.state = "full"
+        logger.debug(
+            "%s: adjacency FULL with %s (area %s)",
+            self.router_id, nbr.router_id, area,
+        )
+        self._originate_lsa(net, area)
+        # Database sync: give the new neighbor this area's entire LSDB.
+        self._send_lsu(net, nbr, list(self._area_db(area).values()))
+
     def _update_adjacencies(self, net: Network, iface_name: str, area: int) -> None:
         st = self._iface_dr.get(iface_name)
         if st is None:
@@ -393,17 +456,14 @@ class OspfProcess:
                 continue
             should_be_full = self.router_id in (st.dr, st.bdr) or nbr.router_id in (st.dr, st.bdr)
             if should_be_full and nbr.state != "full":
-                nbr.state = "full"
-                logger.debug(
-                    "%s: adjacency FULL with %s (area %s)",
-                    self.router_id, nbr.router_id, area,
-                )
-                self._originate_lsa(net, area)
-                # Database sync: give the new neighbor this area's entire LSDB.
-                self._send_lsu(net, nbr, list(self._area_db(area).values()))
+                self._set_full(net, nbr, area)
             elif not should_be_full and nbr.state == "full":
                 nbr.state = "2-way"
                 self._originate_lsa(net, area)
+        # Broadcast segment only: the DR's Network LSA membership may have
+        # changed (a neighbor reached/left Full) even when its own role
+        # didn't — recompute every time, it's a no-op when unchanged.
+        self._originate_network_lsa(net, iface_name, area)
 
     # ----- hello protocol -------------------------------------------------------
     def _send_hellos(self, net: Network) -> None:
@@ -480,6 +540,10 @@ class OspfProcess:
 
         st = self._iface_dr.get(iface.name)
         if st is None:
+            # Point-to-point (RFC 2328 §9.5): no DR/BDR election at all —
+            # adjacency climbs straight to Full once 2-Way is reached.
+            if nbr.state != "full":
+                self._set_full(net, nbr, area)
             return
         if st.state == "waiting":
             if hello.dr or hello.bdr:
@@ -526,6 +590,23 @@ class OspfProcess:
         bw = att.bandwidth_bps if att else 1e9
         return max(1, int(REF_BANDWIDTH / max(bw, 1.0)))
 
+    def _dr_ip(self, iface: Interface, area: int) -> IPv4Address | None:
+        """The elected DR's interface address on this segment — the target
+        of a ``transit`` Router LSA link and the Network LSA's key."""
+        st = self._iface_dr.get(iface.name)
+        if st is None or not st.dr:
+            return None
+        if st.dr == self.router_id:
+            return iface.ip.ip if iface.ip else None
+        nbr = next(
+            (
+                n for n in self.neighbors.values()
+                if n.iface_name == iface.name and n.area == area and n.router_id == st.dr
+            ),
+            None,
+        )
+        return nbr.ip if nbr else None
+
     def _originate_lsa(self, net: Network, area: int, flood: bool = True) -> None:
         self._seq += 1
         links: list[tuple[str, str, int]] = []
@@ -535,17 +616,66 @@ class OspfProcess:
             cost = self._iface_cost(iface)
             for ip in iface.ips:
                 links.append(("stub", str(ip.network), cost))
-            for nbr in self.neighbors.values():
-                if (
-                    nbr.iface_name == iface.name
-                    and nbr.area == area
-                    and nbr.state == "full"
-                ):
-                    links.append(("ptp", nbr.router_id, cost))
+            if self._is_lan_iface(iface):
+                # Broadcast segment: one link to the pseudonode instead of
+                # one per Full neighbor (P-1c) — only once we're actually
+                # Full with someone there (otherwise there's no pseudonode
+                # to point at yet).
+                has_full = any(
+                    n.iface_name == iface.name and n.area == area and n.state == "full"
+                    for n in self.neighbors.values()
+                )
+                dr_ip = self._dr_ip(iface, area)
+                if has_full and dr_ip is not None:
+                    links.append(("transit", str(dr_ip), cost))
+            else:
+                for nbr in self.neighbors.values():
+                    if (
+                        nbr.iface_name == iface.name
+                        and nbr.area == area
+                        and nbr.state == "full"
+                    ):
+                        links.append(("ptp", nbr.router_id, cost))
         lsa = RouterLsa(router_id=self.router_id, seq=self._seq, links=links)
         self._area_db(area)[lsa.key] = lsa
         if flood:
             self._flood(net, lsa, area, exclude_rid=None)
+        self._schedule_spf(net)
+
+    def _originate_network_lsa(self, net: Network, iface_name: str, area: int) -> None:
+        """Only the DR originates a Network LSA for its segment (RFC 2328
+        §12.4.2), and only once it has >=1 Full neighbor there. Handles
+        origination, membership updates, and withdrawal (DR role lost, or
+        membership drops back to solo) in one pass — each is just "recompute
+        the attached-router list and flood it if it changed"."""
+        st = self._iface_dr.get(iface_name)
+        iface = self.router.interfaces.get(iface_name)
+        if st is None or iface is None or iface.ip is None:
+            return
+        db = self._area_db(area)
+        key = f"net|{iface.ip.ip}"
+        attached: list[str] = []
+        if st.state == "dr":
+            attached = sorted(
+                {self.router_id} | {
+                    n.router_id for n in self.neighbors.values()
+                    if n.iface_name == iface_name and n.area == area and n.state == "full"
+                }
+            )
+            if len(attached) < 2:
+                attached = []  # nobody else attached yet: nothing to advertise
+        current = db.get(key)
+        if isinstance(current, NetworkLsa) and current.attached_routers == attached:
+            return  # unchanged, including "still nothing to advertise"
+        if not attached and current is None:
+            return  # never originated one for this segment — nothing to withdraw
+        self._seq += 1
+        lsa = NetworkLsa(
+            dr_ip=str(iface.ip.ip), seq=self._seq,
+            mask=str(iface.ip.network.netmask), attached_routers=attached,
+        )
+        db[lsa.key] = lsa
+        self._flood(net, lsa, area, exclude_rid=None)
         self._schedule_spf(net)
 
     def _flood(
@@ -611,25 +741,49 @@ class OspfProcess:
         )
 
     def _spf_area(self, area: int) -> tuple[dict[str, int], dict[str, str]]:
-        """Dijkstra over one area's router LSAs: (dist, first_hop) by rid."""
+        """Dijkstra over one area's LSAs: (dist, first_hop) by rid. A
+        broadcast segment's pseudonode (RFC 2328 §16.1) is a vertex keyed
+        "net|<dr_ip>" — cost 0 from pseudonode to each attached router,
+        the interface's cost the other way — but never surfaces in the
+        returned dicts as a hop: ``first_hop`` always names a real router,
+        since that's the only kind of vertex with a ``_Neighbor`` (IP +
+        egress iface) to route through."""
         db = self._area_db(area)
         adj: dict[str, list[tuple[str, int]]] = {}
         for lsa in db.values():
-            if not isinstance(lsa, RouterLsa):
-                continue
-            for kind, target, cost in lsa.links:
-                if kind != "ptp":
-                    continue
-                peer = db.get(f"rtr|{target}")
-                if not isinstance(peer, RouterLsa):
-                    continue
-                if not any(
-                    k == "ptp" and t == lsa.router_id for k, t, _ in peer.links
-                ):
-                    continue  # not bidirectional -> not usable
-                adj.setdefault(lsa.router_id, []).append((target, cost))
+            if isinstance(lsa, RouterLsa):
+                for kind, target, cost in lsa.links:
+                    if kind == "ptp":
+                        peer = db.get(f"rtr|{target}")
+                        if not isinstance(peer, RouterLsa):
+                            continue
+                        if not any(
+                            k == "ptp" and t == lsa.router_id for k, t, _ in peer.links
+                        ):
+                            continue  # not bidirectional -> not usable
+                        adj.setdefault(lsa.router_id, []).append((target, cost))
+                    elif kind == "transit":
+                        net_lsa = db.get(f"net|{target}")
+                        if not isinstance(net_lsa, NetworkLsa):
+                            continue
+                        if lsa.router_id not in net_lsa.attached_routers:
+                            continue  # pseudonode doesn't list us back
+                        adj.setdefault(lsa.router_id, []).append((net_lsa.key, cost))
+            elif isinstance(lsa, NetworkLsa):
+                for rid in lsa.attached_routers:
+                    peer = db.get(f"rtr|{rid}")
+                    if not isinstance(peer, RouterLsa):
+                        continue
+                    if not any(
+                        k == "transit" and t == lsa.dr_ip for k, t, _ in peer.links
+                    ):
+                        continue  # router doesn't point back at this pseudonode
+                    adj.setdefault(lsa.key, []).append((rid, 0))
 
         import heapq
+
+        def is_pseudonode(v: str) -> bool:
+            return v.startswith("net|")
 
         dist: dict[str, int] = {self.router_id: 0}
         first_hop: dict[str, str] = {}
@@ -646,7 +800,10 @@ class OspfProcess:
                 nd = d + cost
                 if nxt not in dist or nd < dist[nxt]:
                     dist[nxt] = nd
-                    heapq.heappush(heap, (nd, nxt, fh if fh is not None else nxt))
+                    # Only lock in a first hop once we land on a real router —
+                    # a pseudonode is a transparent waypoint, not a hop itself.
+                    new_fh = fh if fh is not None else (None if is_pseudonode(nxt) else nxt)
+                    heapq.heappush(heap, (nd, nxt, new_fh))
         return dist, first_hop
 
     def _run_spf(self, net: Network) -> None:

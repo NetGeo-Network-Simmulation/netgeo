@@ -132,8 +132,11 @@ def test_ospf_wait_timer_does_not_duplicate_across_interface_reset():
     net = Network(seed=53)
     r1 = net.add_device(Router("r1"))
     r2 = net.add_device(Router("r2"))
-    net.connect("l", net.add_iface(r1, "eth0", ["10.0.0.1/30"]),
-                net.add_iface(r2, "eth0", ["10.0.0.2/30"]))
+    # A Wait Timer only exists on a broadcast (LAN) interface — P-1c gave
+    # point-to-point interfaces (a direct net.connect) no DR/BDR election
+    # at all, so this test needs the switched topology to still exercise
+    # the timer it's actually about.
+    _lan(net, [(r1, "10.0.0.1/24"), (r2, "10.0.0.2/24")])
     OspfProcess(r1, router_id="1.1.1.1", hello_interval=1.0, dead_interval=20.0,
                 areas={"eth0": 0})
     OspfProcess(r2, router_id="2.2.2.2", hello_interval=1.0, dead_interval=20.0,
