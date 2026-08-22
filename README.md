@@ -133,7 +133,8 @@ Picked by demand, not order: IS-IS / MPLS / Segment Routing / EVPN-VXLAN, twin d
 ## Contributing
 
 Pull requests are welcome. Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** — it covers local setup,
-the commands CI runs, and the branch/PR workflow.
+the commands CI runs, and the branch/PR workflow. For architecture, the engine's determinism
+contract, adding a protocol, testing, and the frontend structure, see **[dev-docs/](dev-docs/)**.
 
 In short: work on a branch (`<scope>/<intent>`), keep `main` green, and open a PR. `main` is protected —
 direct pushes are rejected, and the `test` (backend lint + pytest) and `build` (frontend typecheck +

@@ -4,6 +4,15 @@ Backend NetGeo: **FastAPI (async) + engine simulasi discrete-event**.
 Mengimplementasikan permukaan REST/WebSocket pada MASTER_SPEC §4 dan
 men-*generate* config multi-vendor (ForgeOS: satu intent → banyak NOS, §5).
 
+> Ada **dua jalur simulasi live** di belakang API ini — `/api/simulate`
+> (flow engine sederhana, §4 di bawah) dan `/api/lab` (netstack
+> packet-realistic dengan protokol penuh — OSPF/IS-IS/BGP/MPLS/VRRP/VXLAN,
+> `/seek` time-travel, grading). §4 di bawah hanya mendokumentasikan jalur
+> `/simulate`; untuk arsitektur lengkap kedua jalur (+ status jalur emulasi
+> NOS yang belum berkabel), lihat
+> [`../dev-docs/ARCHITECTURE.md`](../dev-docs/ARCHITECTURE.md) dan
+> [`../dev-docs/ENGINE-GUIDE.md`](../dev-docs/ENGINE-GUIDE.md).
+
 Selaras gaya proyek author (secureops/storagehub): app-factory FastAPI,
 envelope respons `{success,data,message}` / `{success,error}`, settings via
 `pydantic-settings`, hierarki `AppException`.
@@ -51,9 +60,12 @@ envelope respons `{success,data,message}` / `{success,error}`, settings via
 │  model.py       NetworkModel (networkx) ── NodeModel/LinkModel/InterfaceModel│
 │  runtime.py     NodeRuntime (forwarding shortest-path, loss, MTU, TTL) │
 │  packet.py      Packet                                                 │
-│  netstack/protocols/  OSPF/BGP/IS-IS/MPLS/VRRP proses per-Router       │
+│  netstack/            packet-realistic engine, live via app/services/  │
+│                       netlab.py + /api/lab (dev-docs/ENGINE-GUIDE.md)  │
+│  netstack/protocols/  OSPF/BGP/IS-IS/MPLS/VRRP/VXLAN proses per-Router │
 │  emulation/     EmulationAdaptor (ABC) + NullEmulationAdaptor          │
-│                 → containerlab/Docker untuk node mode="emul"           │
+│                 → target: containerlab/Docker untuk node mode="emul",  │
+│                   TAPI belum ada pemanggil di luar engine/ hari ini    │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -156,8 +168,15 @@ vyos/frr/forgeos` — itulah "satu intent → banyak config vendor".
 | POST | `/api/simulate` | jalankan run; `+ /{id}/pause\|resume\|step\|stop` |
 | POST | `/api/configs/generate` | generate config (multi-vendor / ForgeOS) |
 | GET | `/api/configs?node_id=` | riwayat artifact node |
+| GET | `/api/lab/{project_id}/status` | status lab netstack (dibangun on-demand, packet-realistic) |
+| POST | `/api/lab/{project_id}/ping`, `/traceroute`, `/cli` | diagnostik & CLI live di netstack |
+| POST | `/api/lab/{project_id}/seek` | time-travel — rebuild + replay journal ke event tertentu |
 | WS | `/ws/topology` | status node/link, telemetry realtime |
-| WS | `/ws/console/{node_id}` | stream konsol node emulasi |
+| WS | `/ws/console/{node_id}` | stream konsol node (`/lab`) |
+
+`/api/lab/*` lengkap (rute sebenarnya) ada di `app/api/lab.py` — tabel ini
+ringkasan, bukan spesifikasi penuh. Detail alur `/lab` ada di
+`dev-docs/ENGINE-GUIDE.md`, bukan §4 di bawah (yang khusus `/simulate`).
 
 Sukses mengembalikan model §4 langsung; error memakai envelope
 `{"success":false,"error":{"code","message"}}`.

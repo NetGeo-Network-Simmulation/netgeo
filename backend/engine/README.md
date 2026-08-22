@@ -1,9 +1,22 @@
-# NetGeo — Engine Simulasi
+# NetGeo — Engine (`backend/engine/`)
 
-Kernel **discrete-event simulation (DES)** + lapisan **adaptor emulasi** untuk
-NetGeo. Mendukung visi MASTER_SPEC §1: *ribuan node* dengan model hybrid —
-**sim** ringan (deterministik, cepat) ↔ **emul** akurat (NOS nyata via
-containerlab/Docker), dapat beralih per-node.
+> **Scope note:** this file documents only the `model.py`/`runtime.py`/
+> `emulation/` package — the engine behind `POST /api/simulate`. It is
+> **not** where OSPF/IS-IS/BGP/MPLS/VRRP/VXLAN live — those are fully
+> implemented, live protocols in the separate `engine/netstack/` package
+> (behind `/api/lab`), documented in
+> [`../../dev-docs/ENGINE-GUIDE.md`](../../dev-docs/ENGINE-GUIDE.md). See
+> [`../../dev-docs/ARCHITECTURE.md`](../../dev-docs/ARCHITECTURE.md) for how
+> the two packages (plus the still-uncalled `emulation/` adaptor) fit
+> together — read that first if you're new here.
+
+Kernel **discrete-event simulation (DES)** used by the `/simulate` flow
+engine: a `networkx`-backed topology graph with shortest-path forwarding,
+loss/MTU/TTL modeling, no protocol state machines. `emulation/` defines an
+`EmulationAdaptor` ABC for a future NOS-emulation backend
+(containerlab/Docker) — it exists in the type system (`NodeMode.emul`) but
+has **no live caller today**; treat any diagram or claim below about
+sim↔emul switching as the target shape, not current behavior.
 
 > Engine **tidak meng-import lapisan web/DB**. Ia bekerja atas `NetworkModel`
 > in-memory dan menghasilkan hasil/metrik JSON-able. Inilah yang membuatnya
@@ -11,36 +24,28 @@ containerlab/Docker), dapat beralih per-node.
 
 ---
 
-## 1. Model hybrid sim + emul
+## 1. Model saat ini: sim only (emul belum berkabel)
 
 ```
                        NetworkModel (graph topologi, networkx)
                                      │
-              ┌──────────────────────┴───────────────────────┐
-              │                                               │
-        node mode="sim"                                 node mode="emul"
-              │                                               │
-        NodeRuntime                                   EmulationAdaptor (ABC)
-   (control+data plane Python)                  ┌────────────┴───────────┐
-   forwarding shortest-path,              containerlab / Docker / Podman │
-   loss/MTU/TTL, RIB protokol            (NOS nyata: IOS/Junos/FRR/...)  │
-              │                                               │
-              └──────────────► LinkModel ◄────────────────────┘
+                              node mode="sim"
+                                     │
+                               NodeRuntime
+                     (control+data plane Python)
+                forwarding shortest-path, loss/MTU/TTL, RIB protokol
+                                     │
+                                LinkModel
                     (delay propagasi + serialization + loss)
-                    titik temu sim↔emul = batas link (veth shim)
 ```
 
-- **Kernel DES selalu memiliki jam virtual & model link.** Baik node sim maupun
-  emul, propagasi antar-node dimodelkan oleh `LinkModel`
-  (`transit_delay = serialization(size, bandwidth) + delay`).
-- **Node sim**: perilaku berjalan sebagai `NodeRuntime` Python — murah, ribuan
-  node muat dalam satu proses.
-- **Node emul**: internal node berjalan di container nyata; engine meng-*inject*
-  paket yang menyeberang batas sim↔emul ke veth container (dan sebaliknya).
-  Kontraknya `EmulationAdaptor` — engine **tidak** meng-import Docker langsung.
-- `NullEmulationAdaptor`: fallback no-op bila runtime container tak tersedia
-  (CI / run murni-sim). Node `emul` diperlakukan sebagai `sim`, status jelas
-  dilaporkan ke UI ("emulation unavailable").
+`NodeMode.emul` is a valid value on the data model
+(`app/models/schemas.py`) and `Simulation.__init__` accepts an `adaptor:
+EmulationAdaptor | None` — but nothing in `app/` ever constructs or passes
+a real one, so every run today is effectively all-`sim`. The
+`NullEmulationAdaptor` fallback (`emulation/adaptor.py`) is what's active
+by default; wiring a real containerlab/Docker adaptor through and having
+something call it is unbuilt work, not a bug.
 
 ---
 
@@ -48,20 +53,21 @@ containerlab/Docker), dapat beralih per-node.
 
 | Modul | Tanggung jawab |
 |---|---|
-| `events.py` | `SimEvent`, `EventType` (prioritas), `EventQueue` (min-heap) |
-| `scheduler.py` | `Scheduler` — drain queue, majukan jam, dispatch handler |
-| `model.py` | `NetworkModel` (networkx) + `Node/Link/InterfaceModel` (= §4) |
+| `events.py` | `SimEvent`, `EventType` (prioritas), `EventQueue` (min-heap) — shared kernel, also used by `netstack/` |
+| `scheduler.py` | `Scheduler` — drain queue, majukan jam, dispatch handler — shared kernel |
+| `model.py` | `NetworkModel` (networkx) + `Node/Link/InterfaceModel` |
 | `packet.py` | `Packet` — unit data-plane (TTL, ukuran, jalur) |
 | `runtime.py` | `NodeRuntime` — forwarding default (shortest-path, drop-aware) |
-| `protocols/` | subclass `NodeRuntime` per protokol (static, lalu OSPF/BGP) |
-| `emulation/` | `EmulationAdaptor` (ABC) + `NullEmulationAdaptor` |
+| `emulation/` | `EmulationAdaptor` (ABC) + `NullEmulationAdaptor` — no live caller yet |
 | `simulation.py` | `Simulation` — perekat: inject, run, run_realtime, snapshot |
+| `netstack/` | separate, live packet-realistic engine — see `dev-docs/ENGINE-GUIDE.md`, not this file |
 
 ---
 
 ## 3. Determinisme (wajib)
 
-Reproducibility adalah kontrak (§1, dan §5 "verify before deploy"):
+Reproducibility adalah kontrak, shared by this engine and `netstack/`
+(same `events.py`/`scheduler.py` kernel):
 
 1. `EventQueue` mengurut tuple stabil **`(time, type, seq)`**. `seq` monotonik
    sebagai tie-breaker → event di waktu sama selalu pop dalam urutan masuk.
@@ -127,12 +133,15 @@ print(sim.run().as_dict())   # {'delivered': 1, 'dropped': 0, ...}
 
 Integrasi dengan lapisan web: `app/services/sim.py` (`build_model` + `run_once`).
 
+Untuk protokol dinamis (OSPF/BGP/IS-IS/MPLS/VRRP/VXLAN) dan simulasi paket
+lengkap, pakai `engine.netstack` lewat `app/services/netlab.py` — lihat
+`dev-docs/ENGINE-GUIDE.md` dan `dev-docs/ADDING-A-PROTOCOL.md`.
+
 ---
 
 ## 6. Roadmap engine
 
-- Protokol dinamis: OSPFv3, IS-IS, BGP (subclass `NodeRuntime`, populate RIB
-  dari event TIMER/PACKET_RX). Spec protokol dimiliki `network-engineer`
-  (`network/protocols/`) — lihat `../NEEDS.md`.
-- Adaptor `containerlab` konkret di `emulation/`.
+- Adaptor `containerlab` konkret di `emulation/`, plus something in `app/`
+  that actually constructs and passes it — today `EmulationAdaptor` has no
+  caller outside its own package.
 - Flow-level model + sharding multi-worker (Redis-backed run-manager).
