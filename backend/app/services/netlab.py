@@ -344,7 +344,20 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
 
     nat_cfg = intent.get("nat") or {}
     if nat_cfg.get("outside"):
-        dev.enable_nat(list(nat_cfg.get("inside") or []), str(nat_cfg["outside"]))
+        port_forwards = []
+        for pf in nat_cfg.get("port_forwards") or []:
+            try:
+                port_forwards.append((
+                    str(pf["proto"]),
+                    int(pf["outside_port"]),
+                    str(pf["inside_ip"]),
+                    int(pf["inside_port"]),
+                ))
+            except (KeyError, ValueError) as exc:
+                logger.warning("%s: bad nat port_forward %r: %s", dev.name, pf, exc)
+        dev.enable_nat(
+            list(nat_cfg.get("inside") or []), str(nat_cfg["outside"]), port_forwards
+        )
 
     for iface_name, directions in (intent.get("acl") or {}).items():
         for direction in ("in", "out"):
