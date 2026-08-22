@@ -6,15 +6,28 @@ protocol rides directly on L2 (OSI CLNS) instead of over IP: IIHs and LSPs are
 sent to the AllL2ISs multicast MAC and dispatched at the frame edge in
 ``Router.on_frame``.
 
-What is modelled (NG-SIM-07), level-2 single-area only:
-- periodic point-to-point IIH hellos per enabled interface; a P2P 3-way
+What is modelled (NG-SIM-07, DIS election P-1b), level-2 single-area only:
+- periodic IIH hellos per enabled interface; on a point-to-point link a 3-way
   handshake brings the adjacency ``up`` (we hear our own system-id echoed);
 - one flat level-2 LSDB: each router originates an LSP listing its ``is``
   adjacencies and its ``ip`` connected prefixes; LSPs are flooded newest-wins;
 - Dijkstra SPF over the LSDB (fixed per-interface metric, default 10) installs
   routes with ``source="isis"`` (admin distance 115) and the neighbour's
   advertised interface address as next hop;
-- hold-time adjacency expiry, LSP re-origination and route withdrawal.
+- hold-time adjacency expiry, LSP re-origination and route withdrawal;
+- **LAN DIS election** (ISO 10589 §8.4.5): an interface whose peer is a
+  Switch (broadcast segment, several IS's rather than one) carries a LAN
+  priority (default 64, configurable per-interface) and recomputes its
+  Designated IS on every Hello and every neighbour expiry — highest priority
+  wins, tie broken by system-id descending (see deviation note below).
+  Unlike OSPF's DR/BDR there is no backup role and, critically, election is
+  **preemptive**: a higher-priority IS joining later *does* take over the
+  DIS, per §8.4.5 — do not copy OSPF's non-preemptive rule here. A LAN IIH
+  advertises the sender's priority and its current ``lan_id`` (the elected
+  DIS's ``system_id.circuit_id``) so peers converge on the same winner and
+  the election is observable on the wire, not just in local state. Adjacency
+  state (``up``) is unaffected by DIS role — every IS on a LAN still forms a
+  direct adjacency with every other IS (no 2-Way-style gating as in OSPF).
 
 Not modelled (documented deferrals — ponytail, add when a lab needs it):
 - **L1 / L1-L2 routing and route leaking** — level-1 areas, the ATT bit and
@@ -22,7 +35,15 @@ Not modelled (documented deferrals — ponytail, add when a lab needs it):
 - **CSNP / PSNP** — reliable flooding here relies on a full-LSDB dump to each
   newly-up neighbour (the DES is lossless in tests); periodic CSNP resync and
   PSNP retransmit would be the next step for lossy links.
-- **LAN / DIS election** (pseudonode LSP) — P2P links only for now.
+- **Pseudonode LSP** (Type-2-equivalent) the DIS would originate for its LAN
+  segment (P-1c) — SPF here still treats each adjacency as a direct ``is``
+  link, so a LAN just never collapses through a pseudonode.
+- **DIS tiebreak by SNPA (MAC)** — ISO 10589 breaks a priority tie by highest
+  MAC address, not system-id. This repo's L2 dispatch (``Router.on_frame`` ->
+  ``IsisProcess.on_frame``) only forwards the decoded IIH, not the sending
+  interface's MAC, so the tiebreak falls back to system-id descending
+  instead (deliberate, sanctioned deviation — add MAC forwarding if a lab
+  ever needs a MAC-accurate tiebreak).
 - **wide metrics (RFC 5305), metric-style/overload bit, auth** — a single
   narrow-style metric per interface, no 1023 path cap enforced.
 """
@@ -59,6 +80,7 @@ class _Adjacency:
     ip: IPv4Address | None = None   # neighbour's interface address (route NH)
     state: str = "init"             # init | up
     last_seen: float = 0.0
+    priority: int = 64               # neighbour's advertised LAN priority
 
 
 class IsisProcess:
@@ -76,6 +98,7 @@ class IsisProcess:
         ifaces: list[str] | None = None,
         metrics: dict[str, int] | None = None,
         area_id: str = "49.0001",
+        priorities: dict[str, int] | None = None,
     ) -> None:
         self.router = router
         self.system_id = system_id or self._pick_system_id()
@@ -85,10 +108,14 @@ class IsisProcess:
         self.iface_names = ifaces  # None = all L3 interfaces
         self.metrics = {str(k): int(v) for k, v in (metrics or {}).items()}
         self.area_id = area_id
+        self.priorities = {str(k): int(v) for k, v in (priorities or {}).items()}  # iface -> LAN priority
         # (iface_name, system_id) -> adjacency
         self.neighbors: dict[tuple[str, str], _Adjacency] = {}
         # system_id -> LSP  (one flat level-2 database)
         self.lsdb: dict[str, IsisLsp] = {}
+        # iface name -> elected DIS system_id; only present for LAN interfaces
+        # (peer is a Switch) — a point-to-point iface never gets an entry.
+        self._iface_dis: dict[str, str] = {}
         self._seq = 0
         self._started = False
         self._spf_pending = False
@@ -106,6 +133,18 @@ class IsisProcess:
     def _iface_metric(self, iface: Interface) -> int:
         return self.metrics.get(iface.name, DEFAULT_METRIC)
 
+    def iface_priority(self, iface_name: str) -> int:
+        return self.priorities.get(iface_name, 64)
+
+    def _is_lan_iface(self, iface: Interface) -> bool:
+        """A LAN segment is one whose peer is a Switch (several IS's can
+        share it); a direct router<->router link is point-to-point and has
+        no DIS. ponytail: no explicit network-type config knob (real IS-IS
+        has one) — inferred from topology instead, since this repo's link
+        model already tells a broadcast segment apart from a P2P wire."""
+        peer = iface.peer()
+        return peer is not None and peer.device.kind == "switch"
+
     def _enabled_ifaces(self) -> list[Interface]:
         out = []
         for name, iface in self.router.interfaces.items():
@@ -120,6 +159,10 @@ class IsisProcess:
         if self._started:
             return
         self._started = True
+        for iface in self._enabled_ifaces():
+            if self._is_lan_iface(iface):
+                self._iface_dis[iface.name] = ""
+                self._elect_dis(net, iface.name)  # solo on the LAN -> self
         self._originate_lsp(net, flood=False)
         self._tick(net)
 
@@ -150,6 +193,7 @@ class IsisProcess:
                 for a in self.neighbors.values()
                 if a.iface_name == iface.name
             ]
+            dis = self._iface_dis.get(iface.name, "")
             iface.transmit(
                 net,
                 EthernetFrame(
@@ -163,6 +207,8 @@ class IsisProcess:
                         hold_time=self.hold_time,
                         level=self.level,
                         area_id=self.area_id,
+                        priority=self.iface_priority(iface.name),
+                        lan_id=f"{dis}.01" if dis else "",
                     ),
                 ),
             )
@@ -184,6 +230,7 @@ class IsisProcess:
         if hello.ip_addresses:
             adj.ip = IPv4Address(hello.ip_addresses[0])
         adj.last_seen = net.now
+        adj.priority = hello.priority
 
         if self.system_id in hello.neighbors_seen and adj.state != "up":
             adj.state = "up"
@@ -197,6 +244,9 @@ class IsisProcess:
                 self._send_lsp(net, iface.name, lsp)
             self._schedule_spf(net)
 
+        if iface.name in self._iface_dis:
+            self._elect_dis(net, iface.name)
+
     def _expire_neighbors(self, net: Network) -> None:
         dead = [
             key
@@ -209,6 +259,28 @@ class IsisProcess:
             logger.debug("%s: adjacencies dead: %s", self.system_id, dead)
             self._originate_lsp(net)
             self._schedule_spf(net)
+            for iface_name, _sid in dead:
+                if iface_name in self._iface_dis:
+                    self._elect_dis(net, iface_name)  # DIS may have died
+
+    # ----- DIS election (ISO 10589 §8.4.5, LAN segments only) -----------------
+    def _elect_dis(self, net: Network, iface_name: str) -> None:
+        candidates: dict[str, int] = {self.system_id: self.iface_priority(iface_name)}
+        for adj in self.neighbors.values():
+            if adj.iface_name == iface_name:
+                candidates[adj.system_id] = adj.priority
+        # Highest priority wins; tie -> system-id descending (MAC-address
+        # tiebreak deviation documented in the module docstring). No BDIS,
+        # and deliberately re-run from scratch every time (no "current DIS
+        # keeps it on a tie") so a later, truly-higher-priority IS preempts —
+        # ISO 10589 makes DIS election preemptive, unlike OSPF's DR.
+        winner = max(candidates, key=lambda sid: (candidates[sid], sid))
+        if winner != self._iface_dis.get(iface_name):
+            self._iface_dis[iface_name] = winner
+            net.log_event(
+                "isis.dis_election", device=self.router.name, iface=iface_name,
+                dis=winner,
+            )
 
     # ----- LSP origination / flooding ----------------------------------------
     def _originate_lsp(self, net: Network, flood: bool = True) -> None:
@@ -370,4 +442,10 @@ class IsisProcess:
         return [
             {"system_id": lsp.system_id, "seq": lsp.seq, "links": len(lsp.links)}
             for lsp in sorted(self.lsdb.values(), key=lambda l: l.system_id)
+        ]
+
+    def dis_rows(self) -> list[dict]:
+        return [
+            {"iface": name, "dis": dis}
+            for name, dis in self._iface_dis.items()
         ]
