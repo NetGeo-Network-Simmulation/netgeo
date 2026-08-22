@@ -9,6 +9,8 @@ model / empty candidate list → 422.
 """
 from __future__ import annotations
 
+import pytest
+
 from app.models import (
     ProductSelectRequest,
     PtmpCpe,
@@ -16,6 +18,7 @@ from app.models import (
     RadioCandidate,
 )
 from app.services import wireless as wsvc
+from engine.wireless import sector_gain_dbi
 
 
 # --- NG-RF-04 PtMP ----------------------------------------------------------
@@ -41,9 +44,14 @@ def test_ptmp_in_beam_cpe_has_rssi_and_mcs():
 
 
 def test_ptmp_out_of_beam_flagged():
-    # Azimuth 0, beamwidth 60 (±30). A CPE due east (bearing 90) is out of beam.
+    # RF-2: in_beam is now "gain above the TR 38.901 sidelobe floor (A_m=30dB)",
+    # not an angle cutoff — the main lobe rolls off past beamwidth/2 rather
+    # than cutting off sharply, so due-east (bearing 90, ±30 half-beamwidth)
+    # still has -11 dBi gain (above the -14 dBi floor) and reads in_beam=True.
+    # Directly behind the sector (bearing 180) is where gain bottoms out at
+    # the A_m floor, which is the case this test actually wants.
     r = wsvc.ptmp_plan(_ptmp(
-        cpes=[PtmpCpe(id="east", distance_m=500.0, bearing_deg=90.0)]
+        cpes=[PtmpCpe(id="rear", distance_m=500.0, bearing_deg=180.0)]
     ))
     c = r["cpes"][0]
     assert c["in_beam"] is False
@@ -211,3 +219,24 @@ async def test_product_select_endpoint_empty_candidates_422(client):
         },
     )
     assert resp.status_code == 422
+
+
+# --- RF-2: 3GPP TR 38.901 §7.3 sector antenna pattern -----------------------
+def test_sector_gain_on_boresight_is_max_gain():
+    assert sector_gain_dbi(0.0, 60.0, 20.0) == 20.0
+
+
+def test_sector_gain_at_hpbw_edge_is_3db_down():
+    assert sector_gain_dbi(30.0, 60.0, 20.0) == pytest.approx(17.0, abs=0.05)
+
+
+def test_sector_gain_at_rear_hits_sidelobe_floor():
+    assert sector_gain_dbi(180.0, 60.0, 20.0) == pytest.approx(20.0 - 30.0, abs=0.05)
+
+
+def test_sector_gain_is_monotonic_non_increasing_0_to_180():
+    prev = sector_gain_dbi(0.0, 60.0, 20.0)
+    for deg in range(1, 181):
+        cur = sector_gain_dbi(float(deg), 60.0, 20.0)
+        assert cur <= prev + 1e-9
+        prev = cur
