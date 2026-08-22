@@ -6,7 +6,8 @@ protocol rides directly on L2 (OSI CLNS) instead of over IP: IIHs and LSPs are
 sent to the AllL2ISs multicast MAC and dispatched at the frame edge in
 ``Router.on_frame``.
 
-What is modelled (NG-SIM-07, DIS election P-1b), level-2 single-area only:
+What is modelled (NG-SIM-07, DIS election P-1b, pseudonode LSP P-1d),
+level-2 single-area only:
 - periodic IIH hellos per enabled interface; on a point-to-point link a 3-way
   handshake brings the adjacency ``up`` (we hear our own system-id echoed);
 - one flat level-2 LSDB: each router originates an LSP listing its ``is``
@@ -22,12 +23,24 @@ What is modelled (NG-SIM-07, DIS election P-1b), level-2 single-area only:
   wins, tie broken by system-id descending (see deviation note below).
   Unlike OSPF's DR/BDR there is no backup role and, critically, election is
   **preemptive**: a higher-priority IS joining later *does* take over the
-  DIS, per §8.4.5 — do not copy OSPF's non-preemptive rule here. A LAN IIH
-  advertises the sender's priority and its current ``lan_id`` (the elected
-  DIS's ``system_id.circuit_id``) so peers converge on the same winner and
-  the election is observable on the wire, not just in local state. Adjacency
+  DIS, per §8.4.5 — do not copy OSPF's non-preemptive rule here. Adjacency
   state (``up``) is unaffected by DIS role — every IS on a LAN still forms a
-  direct adjacency with every other IS (no 2-Way-style gating as in OSPF).
+  direct adjacency with every other IS (no 2-Way-style gating as in OSPF);
+- **pseudonode LSP** (ISO 10589 §7.2.5/§9.8, P-1d): the DIS of a broadcast
+  circuit (and only the DIS) originates a pseudonode LSP for it, keyed
+  ``<dis_system_id>.<circuit_id>`` (circuit_id non-zero; a normal router LSP
+  uses ``.00``), listing every IS Up-adjacent on that circuit plus itself
+  via ``("is", system_id, 0)`` entries — metric 0, per the standard. A
+  router's own LSP replaces its per-neighbour ``is`` links on that circuit
+  with a single link to the pseudonode; SPF treats the pseudonode as a
+  vertex (cost 0 outbound, the circuit's metric inbound), gated by the same
+  bidirectionality check as a direct ``is`` link. A LAN IIH advertises the
+  sender's own candidate LSP-ID for the circuit (``lan_id``) regardless of
+  whether it is currently DIS, so whoever wins election is immediately
+  identifiable by everyone else. A dead or preempted DIS's old pseudonode
+  LSP is simply left unreferenced once survivors point at the new DIS's —
+  no route leaks through it. Point-to-point links are unaffected: no DIS,
+  no pseudonode, direct ``is`` links as before.
 
 Not modelled (documented deferrals — ponytail, add when a lab needs it):
 - **L1 / L1-L2 routing and route leaking** — level-1 areas, the ATT bit and
@@ -35,9 +48,6 @@ Not modelled (documented deferrals — ponytail, add when a lab needs it):
 - **CSNP / PSNP** — reliable flooding here relies on a full-LSDB dump to each
   newly-up neighbour (the DES is lossless in tests); periodic CSNP resync and
   PSNP retransmit would be the next step for lossy links.
-- **Pseudonode LSP** (Type-2-equivalent) the DIS would originate for its LAN
-  segment (P-1c) — SPF here still treats each adjacency as a direct ``is``
-  link, so a LAN just never collapses through a pseudonode.
 - **DIS tiebreak by SNPA (MAC)** — ISO 10589 breaks a priority tie by highest
   MAC address, not system-id. This repo's L2 dispatch (``Router.on_frame`` ->
   ``IsisProcess.on_frame``) only forwards the decoded IIH, not the sending
@@ -81,6 +91,7 @@ class _Adjacency:
     state: str = "init"             # init | up
     last_seen: float = 0.0
     priority: int = 64               # neighbour's advertised LAN priority
+    lan_id: str = ""                 # neighbour's own candidate pseudonode LSP-ID
 
 
 class IsisProcess:
@@ -116,6 +127,12 @@ class IsisProcess:
         # iface name -> elected DIS system_id; only present for LAN interfaces
         # (peer is a Switch) — a point-to-point iface never gets an entry.
         self._iface_dis: dict[str, str] = {}
+        # iface name -> this router's own local circuit id for that LAN
+        # interface (P-1d), used as the pseudonode LSP-ID suffix if/when this
+        # router is elected DIS there. Assigned once at start(), 1-based in
+        # sorted iface-name order — distinct per LAN interface on this router
+        # so being DIS on two segments at once can't collide on one LSP-ID.
+        self._iface_circuit_id: dict[str, int] = {}
         self._seq = 0
         self._started = False
         self._spf_pending = False
@@ -159,10 +176,13 @@ class IsisProcess:
         if self._started:
             return
         self._started = True
-        for iface in self._enabled_ifaces():
-            if self._is_lan_iface(iface):
-                self._iface_dis[iface.name] = ""
-                self._elect_dis(net, iface.name)  # solo on the LAN -> self
+        lan_ifaces = [i for i in self._enabled_ifaces() if self._is_lan_iface(i)]
+        for idx, iface in enumerate(sorted(lan_ifaces, key=lambda i: i.name), start=1):
+            self._iface_circuit_id[iface.name] = idx
+        for iface in lan_ifaces:
+            self._iface_dis[iface.name] = ""
+            self._elect_dis(net, iface.name)  # solo on the LAN -> self
+            self._originate_pseudonode_lsp(net, iface.name)  # solo -> no-op
         self._originate_lsp(net, flood=False)
         self._tick(net)
 
@@ -193,7 +213,7 @@ class IsisProcess:
                 for a in self.neighbors.values()
                 if a.iface_name == iface.name
             ]
-            dis = self._iface_dis.get(iface.name, "")
+            cid = self._iface_circuit_id.get(iface.name)
             iface.transmit(
                 net,
                 EthernetFrame(
@@ -208,7 +228,7 @@ class IsisProcess:
                         level=self.level,
                         area_id=self.area_id,
                         priority=self.iface_priority(iface.name),
-                        lan_id=f"{dis}.01" if dis else "",
+                        lan_id=f"{self.system_id}.{cid:02d}" if cid else "",
                     ),
                 ),
             )
@@ -231,6 +251,7 @@ class IsisProcess:
             adj.ip = IPv4Address(hello.ip_addresses[0])
         adj.last_seen = net.now
         adj.priority = hello.priority
+        adj.lan_id = hello.lan_id
 
         if self.system_id in hello.neighbors_seen and adj.state != "up":
             adj.state = "up"
@@ -246,6 +267,7 @@ class IsisProcess:
 
         if iface.name in self._iface_dis:
             self._elect_dis(net, iface.name)
+            self._originate_pseudonode_lsp(net, iface.name)
 
     def _expire_neighbors(self, net: Network) -> None:
         dead = [
@@ -262,6 +284,7 @@ class IsisProcess:
             for iface_name, _sid in dead:
                 if iface_name in self._iface_dis:
                     self._elect_dis(net, iface_name)  # DIS may have died
+                    self._originate_pseudonode_lsp(net, iface_name)
 
     # ----- DIS election (ISO 10589 §8.4.5, LAN segments only) -----------------
     def _elect_dis(self, net: Network, iface_name: str) -> None:
@@ -281,6 +304,30 @@ class IsisProcess:
                 "isis.dis_election", device=self.router.name, iface=iface_name,
                 dis=winner,
             )
+            # Our own LSP's pseudonode link on this circuit points at whoever
+            # is DIS — re-originate now rather than waiting for the next
+            # adjacency transition, since election is preemptive and can
+            # change with no Up/down transition of its own.
+            self._originate_lsp(net)
+
+    def _dis_pseudonode_key(self, iface_name: str) -> str | None:
+        """The elected DIS's pseudonode LSP-ID for this circuit — the target
+        of a router LSP's transit ``is`` link. ``None`` while no DIS is known
+        yet, or its LSP-ID hasn't been heard from it yet."""
+        dis = self._iface_dis.get(iface_name)
+        if not dis:
+            return None
+        if dis == self.system_id:
+            cid = self._iface_circuit_id.get(iface_name)
+            return f"{self.system_id}.{cid:02d}" if cid else None
+        adj = next(
+            (
+                a for a in self.neighbors.values()
+                if a.iface_name == iface_name and a.system_id == dis
+            ),
+            None,
+        )
+        return adj.lan_id if adj and adj.lan_id else None
 
     # ----- LSP origination / flooding ----------------------------------------
     def _originate_lsp(self, net: Network, flood: bool = True) -> None:
@@ -290,13 +337,65 @@ class IsisProcess:
             metric = self._iface_metric(iface)
             for ip in iface.ips:
                 links.append(("ip", str(ip.network), metric))
-            for adj in self.neighbors.values():
-                if adj.iface_name == iface.name and adj.state == "up":
-                    links.append(("is", adj.system_id, metric))
+            if iface.name in self._iface_dis:
+                # Broadcast circuit: one link to the pseudonode instead of
+                # one per Up neighbour (P-1d) — only once we actually have a
+                # neighbour there (otherwise there's no pseudonode yet).
+                has_adj = any(
+                    a.iface_name == iface.name and a.state == "up"
+                    for a in self.neighbors.values()
+                )
+                pn_key = self._dis_pseudonode_key(iface.name)
+                if has_adj and pn_key is not None:
+                    links.append(("is", pn_key, metric))
+            else:
+                for adj in self.neighbors.values():
+                    if adj.iface_name == iface.name and adj.state == "up":
+                        links.append(("is", adj.system_id, metric))
         lsp = IsisLsp(system_id=self.system_id, seq=self._seq, links=links, level=self.level)
-        self.lsdb[self.system_id] = lsp
+        self.lsdb[lsp.key] = lsp
         if flood:
             self._flood(net, lsp, exclude_iface=None)
+        self._schedule_spf(net)
+
+    def _originate_pseudonode_lsp(self, net: Network, iface_name: str) -> None:
+        """Only the DIS originates a *non-empty* pseudonode LSP for its
+        circuit (ISO 10589 §7.2.5), and only once it has >=1 Up neighbour
+        there — but every router still owns the key ``<own_sysid>.<own
+        circuit_id>`` and re-originates it (possibly empty) on every call.
+        That's what makes losing the DIS role a proper withdrawal: if this
+        router authored a non-empty pseudonode LSP earlier and is no longer
+        DIS, ``attached`` is now ``[]`` and differs from what's in the LSDB,
+        so an empty version goes out — same "recompute and flood if changed"
+        shape origination and membership updates use."""
+        cid = self._iface_circuit_id.get(iface_name)
+        if cid is None:
+            return
+        key = f"{self.system_id}.{cid:02d}"
+        attached: list[str] = []
+        if self._iface_dis.get(iface_name) == self.system_id:
+            attached = sorted(
+                {self.system_id} | {
+                    a.system_id for a in self.neighbors.values()
+                    if a.iface_name == iface_name and a.state == "up"
+                }
+            )
+            if len(attached) < 2:
+                attached = []  # solo on the circuit: nothing to advertise yet
+        current = self.lsdb.get(key)
+        current_attached = [t for _, t, _ in current.links] if current is not None else None
+        if current_attached == attached:
+            return  # unchanged, including "still nothing to advertise"
+        if not attached and current is None:
+            return  # never originated one for this circuit -> nothing to withdraw
+        self._seq += 1
+        lsp = IsisLsp(
+            system_id=self.system_id, seq=self._seq,
+            links=[("is", sid, 0) for sid in attached],
+            level=self.level, circuit_id=cid,
+        )
+        self.lsdb[lsp.key] = lsp
+        self._flood(net, lsp, exclude_iface=None)
         self._schedule_spf(net)
 
     def _flood(self, net: Network, lsp: IsisLsp, exclude_iface: str | None) -> None:
@@ -324,9 +423,9 @@ class IsisProcess:
         )
 
     def _on_lsp(self, net: Network, iface: Interface, lsp: IsisLsp) -> None:
-        current = self.lsdb.get(lsp.system_id)
+        current = self.lsdb.get(lsp.key)
         if current is None or lsp.seq > current.seq:
-            self.lsdb[lsp.system_id] = lsp.copy()
+            self.lsdb[lsp.key] = lsp.copy()
             self._flood(net, lsp, exclude_iface=iface.name)
             self._schedule_spf(net)
 
@@ -347,19 +446,28 @@ class IsisProcess:
         )
 
     def _dijkstra(self) -> tuple[dict[str, int], dict[str, str]]:
-        """Dijkstra over the LSDB's ``is`` adjacencies: (dist, first_hop)."""
+        """Dijkstra over the LSDB's ``is`` adjacencies: (dist, first_hop) by
+        system-id. A circuit's pseudonode LSP (ISO 10589 §7.2.5) is a vertex
+        keyed by its own LSP-ID (``<dis_sysid>.<circuit_id>``) — reachable
+        from a router at that router's interface metric, and reaching every
+        attached router back at cost 0 — but never surfaces in ``first_hop``:
+        only a real router (one with an ``_Adjacency`` to route through) is
+        ever locked in as a hop."""
         db = self.lsdb
+        pseudonodes = {lsp.key for lsp in db.values() if lsp.circuit_id}
         adj: dict[str, list[tuple[str, int]]] = {}
         for lsp in db.values():
+            vtx = lsp.key if lsp.circuit_id else lsp.system_id
             for kind, target, cost in lsp.links:
                 if kind != "is":
                     continue
-                peer = db.get(target)
-                if peer is None:
+                peer = db.get(target) or db.get(f"{target}.00")
+                if not isinstance(peer, IsisLsp):
                     continue
-                if not any(k == "is" and t == lsp.system_id for k, t, _ in peer.links):
+                if not any(k == "is" and t == vtx for k, t, _ in peer.links):
                     continue  # not bidirectional -> not usable
-                adj.setdefault(lsp.system_id, []).append((target, cost))
+                peer_vtx = peer.key if peer.circuit_id else peer.system_id
+                adj.setdefault(vtx, []).append((peer_vtx, cost))
 
         import heapq
 
@@ -368,17 +476,20 @@ class IsisProcess:
         heap: list[tuple[int, str, str | None]] = [(0, self.system_id, None)]
         visited: set[str] = set()
         while heap:
-            d, sid, fh = heapq.heappop(heap)
-            if sid in visited:
+            d, vtx, fh = heapq.heappop(heap)
+            if vtx in visited:
                 continue
-            visited.add(sid)
+            visited.add(vtx)
             if fh is not None:
-                first_hop[sid] = fh
-            for nxt, cost in adj.get(sid, ()):
+                first_hop[vtx] = fh
+            for nxt, cost in adj.get(vtx, ()):
                 nd = d + cost
                 if nxt not in dist or nd < dist[nxt]:
                     dist[nxt] = nd
-                    heapq.heappush(heap, (nd, nxt, fh if fh is not None else nxt))
+                    # Only lock in a first hop once we land on a real router —
+                    # a pseudonode is a transparent waypoint, not a hop itself.
+                    new_fh = fh if fh is not None else (None if nxt in pseudonodes else nxt)
+                    heapq.heappush(heap, (nd, nxt, new_fh))
         return dist, first_hop
 
     def _adj_for(self, first_hop_sid: str | None) -> _Adjacency | None:
@@ -397,6 +508,8 @@ class IsisProcess:
         desired: dict[IPv4Network, tuple[IPv4Address, str, int]] = {}
 
         for lsp in self.lsdb.values():
+            if lsp.circuit_id:
+                continue  # pseudonode LSP: no "ip" links, nothing to collect
             sid = lsp.system_id
             if sid == self.system_id or sid not in dist:
                 continue
