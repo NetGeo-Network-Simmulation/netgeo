@@ -354,8 +354,11 @@ class IsisHello:
     ``neighbors_seen`` drives the P2P 3-way handshake. ``priority`` and
     ``lan_id`` (TLV 129/6 territory, simplified) only carry meaning on a LAN
     IIH: ``priority`` is the sender's LAN priority for DIS election (ISO
-    10589 §8.4.5), ``lan_id`` is the elected DIS's ``system_id.circuit_id``
-    as that sender currently sees it ("" = no DIS elected yet)."""
+    10589 §8.4.5); ``lan_id`` is the sender's own candidate pseudonode LSP-ID
+    for this circuit (``system_id.circuit_id``, P-1d) — advertised whether or
+    not the sender is currently DIS, so that whoever *is* elected DIS on this
+    segment tells everyone else which LSP-ID its pseudonode LSP will use
+    ("" = not a LAN interface)."""
 
     system_id: str
     neighbors_seen: list[str] = field(default_factory=list)
@@ -383,24 +386,32 @@ class IsisHello:
 @dataclass(slots=True)
 class IsisLsp:
     """IS-IS Link State PDU. ``links`` mirrors OSPF's router-LSA link list:
-    ("is", neighbour_system_id, metric) for adjacencies and
-    ("ip", "a.b.c.d/nn", metric) for reachable prefixes."""
+    ("is", neighbour_system_id, metric) for a direct/pseudonode adjacency and
+    ("ip", "a.b.c.d/nn", metric) for reachable prefixes.
+
+    ``circuit_id`` (P-1d, ISO 10589 §7.2.5) is 0 for a normal router LSP and
+    non-zero for a **pseudonode LSP** — the LAN's DIS originates one of
+    these per broadcast circuit, keyed by ``key`` below, listing every IS
+    attached to the segment (itself included) via ``("is", system_id, 0)``
+    entries. A router's own LSP then carries a single ``("is", pseudonode_
+    key, metric)`` link for that circuit instead of one per neighbour."""
 
     system_id: str
     seq: int
     links: list[tuple[str, str, int]] = field(default_factory=list)
     level: int = 2
+    circuit_id: int = 0
 
     @property
     def key(self) -> str:
-        return self.system_id
+        return f"{self.system_id}.{self.circuit_id:02d}"
 
     @property
     def wire_size(self) -> int:
         return 27 + 12 * len(self.links)
 
     def copy(self) -> IsisLsp:
-        return IsisLsp(self.system_id, self.seq, list(self.links), self.level)
+        return IsisLsp(self.system_id, self.seq, list(self.links), self.level, self.circuit_id)
 
     def summary(self) -> str:
         return (
