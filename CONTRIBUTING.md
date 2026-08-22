@@ -7,7 +7,7 @@ Terima kasih sudah mau berkontribusi. Dokumen ini memuat semua yang kamu butuhka
 Butuh Python 3.12+ dan Node 20+.
 
 ```bash
-git clone https://github.com/suryaex/netgeo.git
+git clone https://github.com/NetGeo-Network-Simmulation/netgeo.git
 cd netgeo
 
 # Backend — venv dibuat manual (installer Docker tidak membuatnya)
@@ -27,18 +27,22 @@ Untuk menjalankan stack lengkap (Postgres, Redis, nginx) pakai Docker: `make ins
 ```bash
 # Backend — tidak butuh database
 cd backend && .venv/bin/python -m pytest -q -W ignore::DeprecationWarning
+.venv/bin/ruff check .
 
 # Frontend
 cd frontend && npm run typecheck && npm run build
 ```
 
+`ruff` ada di `backend/requirements.txt` (bagian dev/test), jadi `pip install -r requirements.txt` di atas sudah mencakupnya.
+
 CI di GitHub Actions menjalankan hal yang sama di tiap PR — PR yang gagal CI tidak di-merge.
 
 ## Branch & PR
 
-- Tiap kontributor kerja di **branch sendiri** (bukan langsung ke `main`). Pola nama: `<scope>/<intent>` — mis. `fix/rf-fallback-flag`, `feat/intent-sr`, `docs/refresh-engine-notes`.
+- Tiap kontributor kerja di **branch sendiri** (bukan langsung ke `main`). Pola nama: `<area>/<slug>`, awalan `area` sesuai `CODEOWNERS`: `proto/` (protokol di `netstack/protocols/`), `rf/` (RF/wireless), `emul/` (jalur emulasi NOS), `ui/` (frontend), `docs/`, `fix/` (bugfix lintas-area). Contoh: `proto/isis-lsp-refresh`, `ui/rack-panel-resize`.
+- **Satu PR = satu slice.** Jangan gabung beberapa perubahan tak berkaitan dalam satu PR — memudahkan review dan revert.
 - Push branch → buka PR ke `main`. PR **wajib** lewat review Surya (satu-satunya maintainer).
-- Squash merge direkomendasikan; histori branch pribadi dihapus otomatis setelah merge.
+- **Squash merge** — selalu, bukan rekomendasi; histori branch pribadi dihapus otomatis setelah merge.
 - **Branch `main` dilindungi**: tidak bisa push langsung, tidak bisa force-push.
 
 ## Aturan commit
@@ -53,6 +57,14 @@ CI di GitHub Actions menjalankan hal yang sama di tiap PR — PR yang gagal CI t
 - `docs/` (folder lokal-only — lihat `docs/README.md`): berisi catatan internal, screenshot, hostname/IP, kredensial.
 - File apa pun berisi password, token, PAT, IP host internal.
 - Hasil tes lokal (`__pycache__/`, `node_modules/`, `.pytest_cache/` sudah masuk `.gitignore`).
+
+## Kode ada di mana
+
+- `backend/engine/netstack/` — engine protokol (device, frames, routing, `protocols/*.py`). Simulasi paket sesungguhnya.
+- `backend/app/` — API FastAPI + service layer di atas engine.
+- `frontend/src/` — UI React.
+
+Dua file adalah **choke-point yang disengaja**, bukan area kerja bebas: `backend/app/services/netlab.py` (satu-satunya jembatan `app/` ↔ `engine/netstack/` — protokol baru wajib didaftarkan di sini) dan `frontend/src/api/client.ts` (satu-satunya API client — endpoint baru wajib nambah baris di sini). Keduanya selalu butuh review pemilik area (lihat `.github/CODEOWNERS`), jangan kaget kalau PR yang menyentuhnya diminta perubahan.
 
 ## Scope slice
 

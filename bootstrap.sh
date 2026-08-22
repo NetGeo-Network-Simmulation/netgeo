@@ -6,8 +6,8 @@
 # checkout), then hands off to ./install.sh. install.sh itself can't be piped to
 # bash because it needs the repo's files (infra/ compose, backend/, frontend/).
 #
-#   curl -fsSL https://raw.githubusercontent.com/suryaex/netgeo/main/bootstrap.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/suryaex/netgeo/main/bootstrap.sh | bash -s -- --prod
+#   curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/bootstrap.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/bootstrap.sh | bash -s -- --prod
 #
 # Env:
 #   NETGEO_DIR     where to clone (default: $HOME/netgeo)
@@ -16,7 +16,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
-REPO_URL="${NETGEO_REPO_URL:-https://github.com/suryaex/netgeo.git}"
+REPO_URL="${NETGEO_REPO_URL:-https://github.com/NetGeo-Network-Simmulation/netgeo.git}"
 BRANCH="${NETGEO_BRANCH:-main}"
 TARGET_DIR="${NETGEO_DIR:-$HOME/netgeo}"
 

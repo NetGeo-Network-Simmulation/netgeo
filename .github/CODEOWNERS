@@ -1,0 +1,13 @@
+# Area kepemilikan (lihat docs/qa/code-teamwork-audit-2026-08-22.md §c untuk rasional).
+# Semua @suryaex untuk sekarang — belum ada kontributor tetap lain.
+# Baris netlab.py dan client.ts sengaja dipisah: keduanya choke-point yang
+# SELALU butuh review pemilik area, bukan sekadar bagian dari glob di atasnya.
+
+backend/engine/netstack/                    @suryaex
+backend/app/services/netlab.py              @suryaex
+frontend/src/api/client.ts                  @suryaex
+backend/app/api/                            @suryaex
+backend/engine/wireless.py                  @suryaex
+backend/app/services/wireless.py            @suryaex
+frontend/src/components/map/                @suryaex
+frontend/src/components/shell/              @suryaex

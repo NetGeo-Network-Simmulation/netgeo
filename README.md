@@ -6,7 +6,7 @@
 
 *Packet-realistic simulation · RF/fiber planning · config-import digital twin — one cross-platform app.*
 
-[![CI](https://github.com/suryaex/netgeo/actions/workflows/backend.yml/badge.svg)](https://github.com/suryaex/netgeo/actions)
+[![CI](https://github.com/NetGeo-Network-Simmulation/netgeo/actions/workflows/backend.yml/badge.svg)](https://github.com/NetGeo-Network-Simmulation/netgeo/actions)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
 ![Version](https://img.shields.io/badge/version-1.2.37-brightgreen)
 ![Channel](https://img.shields.io/badge/channel-beta-blueviolet)
@@ -25,13 +25,13 @@ On Linux the installer auto-installs Docker (Fedora, Ubuntu, Debian, RHEL, Arch)
 **One command (Linux / macOS)** — clones the repo and runs the installer:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/suryaex/netgeo/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/bootstrap.sh | bash
 ```
 
 **Manual (all platforms)**:
 
 ```bash
-git clone https://github.com/suryaex/netgeo.git
+git clone https://github.com/NetGeo-Network-Simmulation/netgeo.git
 cd netgeo
 ./install.sh          # Linux / macOS
 .\install.ps1         # Windows PowerShell
@@ -60,7 +60,7 @@ API docs         ->  http://<LAN-IP>:8090/docs
 > Already deleted the repo folder? `--purge` still cleans up — it finds NetGeo's
 > Docker footprint by name, no compose files needed:
 > ```bash
-> curl -fsSL https://raw.githubusercontent.com/suryaex/netgeo/main/uninstall.sh | sudo bash -s -- --purge --yes
+> curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/uninstall.sh | sudo bash -s -- --purge --yes
 > ```
 
 <details>
@@ -139,7 +139,7 @@ In short: work on a branch (`<scope>/<intent>`), keep `main` green, and open a P
 direct pushes are rejected, and the `test` (backend lint + pytest) and `build` (frontend typecheck +
 build) checks must pass before a PR can merge.
 
-Bug reports and feature ideas go to [Issues](https://github.com/suryaex/netgeo/issues) using the
+Bug reports and feature ideas go to [Issues](https://github.com/NetGeo-Network-Simmulation/netgeo/issues) using the
 templates provided.
 
 ---
