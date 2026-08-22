@@ -21,7 +21,7 @@ WorkingDirectory=__REPO_DIR__
 ExecStart=/usr/bin/env bash __REPO_DIR__/scripts/self-update.sh --watch
 Restart=always
 RestartSec=10
-Environment=GITHUB_REPO=suryaex/netgeo
+Environment=GITHUB_REPO=NetGeo-Network-Simmulation/netgeo
 Environment=UPDATE_BRANCH=main
 Environment=NETGEO_STATE_DIR=/var/lib/netgeo
 

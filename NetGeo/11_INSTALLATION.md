@@ -35,13 +35,13 @@ The gateway port is `8090` by default — chosen to avoid conflicts with SecureO
 Clone and install in one command:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/suryaex/netgeo/main/bootstrap.sh | bash
+curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/bootstrap.sh | bash
 ```
 
 Or clone first, then run the installer:
 
 ```bash
-git clone https://github.com/suryaex/netgeo.git
+git clone https://github.com/NetGeo-Network-Simmulation/netgeo.git
 cd netgeo
 ./install.sh
 ```
@@ -49,7 +49,7 @@ cd netgeo
 **Windows (PowerShell):**
 
 ```powershell
-git clone https://github.com/suryaex/netgeo.git
+git clone https://github.com/NetGeo-Network-Simmulation/netgeo.git
 cd netgeo
 .\install.ps1
 ```
@@ -143,7 +143,7 @@ git pull
 `--purge` works even if the repo directory has already been deleted — it finds NetGeo's Docker footprint by compose-project label and name prefix:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/suryaex/netgeo/main/uninstall.sh \
+curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/uninstall.sh \
   | sudo bash -s -- --purge --yes
 ```
 

@@ -517,5 +517,5 @@ echo -e "  ${GREEN}Health${NC}              →  http://${IP}:${HTTP_PORT}/api/h
 echo ""
 echo "  TCP ${HTTP_PORT} is auto-opened in the host firewall; if a device still can't"
 echo "  reach it, check your router/cloud security group allows TCP ${HTTP_PORT}."
-echo "  Logs: $COMPOSE $CF logs -f   |   Stop: ./install.sh --down${PROD:+  (--prod)}   |   https://github.com/suryaex/netgeo"
+echo "  Logs: $COMPOSE $CF logs -f   |   Stop: ./install.sh --down${PROD:+  (--prod)}   |   https://github.com/NetGeo-Network-Simmulation/netgeo"
 echo ""

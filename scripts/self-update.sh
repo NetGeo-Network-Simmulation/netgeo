@@ -12,7 +12,7 @@
 #   scripts/self-update.sh --watch     # poll for the trigger file, then --apply
 #
 # Env:
-#   GITHUB_REPO          owner/name to compare releases against (default: suryaex/netgeo)
+#   GITHUB_REPO          owner/name to compare releases against (default: NetGeo-Network-Simmulation/netgeo)
 #   UPDATE_BRANCH        branch to fast-forward when no tag is targeted (default: main)
 #   UPDATE_TRIGGER_FILE  sentinel written by the backend (default: /var/lib/netgeo/update.request)
 #   UPDATE_STATUS_FILE   progress file the UI reads      (default: /var/lib/netgeo/update.status)
@@ -33,7 +33,7 @@ export GIT_CONFIG_COUNT=1
 export GIT_CONFIG_KEY_0="safe.directory"
 export GIT_CONFIG_VALUE_0="$REPO_DIR"
 
-GITHUB_REPO="${GITHUB_REPO:-suryaex/netgeo}"
+GITHUB_REPO="${GITHUB_REPO:-NetGeo-Network-Simmulation/netgeo}"
 UPDATE_BRANCH="${UPDATE_BRANCH:-main}"
 STATE_DIR="${NETGEO_STATE_DIR:-/var/lib/netgeo}"
 UPDATE_TRIGGER_FILE="${UPDATE_TRIGGER_FILE:-${STATE_DIR}/update.request}"

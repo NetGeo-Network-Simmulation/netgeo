@@ -14,7 +14,7 @@
 #
 # Already deleted the repo? --purge still works from anywhere (it finds NetGeo's
 # Docker footprint by label/name, no compose files needed). Fetch + run:
-#   curl -fsSL https://raw.githubusercontent.com/suryaex/netgeo/main/uninstall.sh \
+#   curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/uninstall.sh \
 #     | sudo bash -s -- --purge --yes
 #
 # Deliberately NOT touched (shared, host-level — not created for NetGeo alone):

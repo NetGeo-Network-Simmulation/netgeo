@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Pertanyaan / diskusi kontribusi
+    url: https://github.com/NetGeo-Network-Simmulation/netgeo/blob/main/CONTRIBUTING.md
+    about: Baca CONTRIBUTING.md dulu — kalau masih ada pertanyaan, buka issue dengan template yang paling cocok.
