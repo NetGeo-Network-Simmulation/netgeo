@@ -408,3 +408,22 @@ def rain_specific_attenuation_db_km(freq_ghz: float, rain_rate_mm_hr: float) -> 
 def rain_attenuation_db(freq_ghz: float, rain_rate_mm_hr: float, distance_m: float) -> float:
     """Total rain attenuation over a path of ``distance_m`` metres (dB)."""
     return rain_specific_attenuation_db_km(freq_ghz, rain_rate_mm_hr) * (distance_m / 1000.0)
+
+
+def sector_gain_dbi(
+    angle_off_axis_deg: float,
+    beamwidth_deg: float,
+    gain_max_dbi: float,
+    front_back_db: float = 30.0,
+) -> float:
+    """3GPP TR 38.901 §7.3 sector antenna element pattern (horizontal cut).
+
+        A(theta) = min(12*(theta/HPBW)^2, A_m)
+        gain     = Gmax - A(theta)
+
+    ``angle_off_axis_deg`` is the (already sign-agnostic) angle from boresight;
+    the roll-off is symmetric so only its magnitude matters. ``front_back_db``
+    is the sidelobe floor A_m (spec default 30 dB)."""
+    theta = abs(angle_off_axis_deg)
+    a = min(12.0 * (theta / beamwidth_deg) ** 2, front_back_db)
+    return gain_max_dbi - a

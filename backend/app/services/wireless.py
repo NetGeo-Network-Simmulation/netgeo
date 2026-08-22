@@ -408,19 +408,27 @@ def _angular_diff(a: float, b: float) -> float:
     return d if d <= 180.0 else 360.0 - d
 
 
+# Sidelobe floor A_m for the TR 38.901 sector pattern (RF-2) — matches
+# engine.wireless.sector_gain_dbi's own default, kept in sync here since
+# in_beam needs the same floor to know when gain has bottomed out.
+_SECTOR_FRONT_BACK_DB = 30.0
+
+
 def ptmp_plan(req: PtmpRequest) -> dict:
     """Plan one AP sector over its CPEs (NG-RF-04).
 
-    Per CPE: resolve distance+bearing (explicit or from coords), test in-beam
-    (bearing within azimuth ± beamwidth/2), path loss THROUGH the registry, RSSI
-    = Ptx + Gtx + Grx − loss − Lmisc, then an MCS from :func:`mcs_for_rssi`.
+    Per CPE: resolve distance+bearing (explicit or from coords), a real sector
+    antenna gain via :func:`engine.wireless.sector_gain_dbi` (3GPP TR 38.901
+    §7.3 roll-off, RF-2) replaces the old binary in-beam gate, path loss
+    THROUGH the registry, RSSI = Ptx + Gsector + Grx − loss − Lmisc, then an
+    MCS from :func:`mcs_for_rssi`. ``in_beam`` is now "gain above the sidelobe
+    floor", not an angle cutoff.
 
     Sector capacity rolls up served CPEs two ways: ``sum_phy_mbps`` (contention-
     free upper bound) and ``airtime_fair_mbps`` (mean served rate = equal-airtime
     share of one shared medium). Raises ``ValueError`` (→ 422) on an unknown
     model, out-of-range freq, or a CPE missing both coords and distance+bearing.
     """
-    half = req.beamwidth_deg / 2.0
     cpes: list[dict] = []
     served_rates: list[float] = []
     for c in req.cpes:
@@ -431,11 +439,19 @@ def ptmp_plan(req: PtmpRequest) -> dict:
             brg = _bearing_deg(req.lat, req.lon, c.lat, c.lon)
         else:
             raise ValueError(f"cpe {c.id!r}: provide lat/lon or distance_m+bearing_deg")
-        in_beam = _angular_diff(brg, req.azimuth_deg) <= half
+        # RF-2: real 3GPP TR 38.901 §7.3 sector pattern (roll-off + sidelobe
+        # floor) replaces the old binary "within HPBW/2" gate. ``in_beam`` is
+        # now a gain threshold (above the A_m sidelobe floor), not an angle
+        # cutoff — the main lobe extends past beamwidth_deg/2 with reduced
+        # (not zero) gain, same as a real antenna.
+        gain = rf.sector_gain_dbi(
+            _angular_diff(brg, req.azimuth_deg), req.beamwidth_deg, req.tx_gain_dbi
+        )
+        in_beam = gain > req.tx_gain_dbi - _SECTOR_FRONT_BACK_DB
         loss = prop.path_loss(
             req.model_id, dist, req.freq_mhz, req.height_m, c.height_m, **req.params
         )
-        rssi = req.tx_power_dbm + req.tx_gain_dbi + c.rx_gain_dbi - loss - c.misc_loss_db
+        rssi = req.tx_power_dbm + gain + c.rx_gain_dbi - loss - c.misc_loss_db
         mcs = mcs_for_rssi(rssi, req.bandwidth_mhz)
         served = in_beam and mcs["mcs"] is not None and rssi >= req.rx_sensitivity_dbm
         if served:
