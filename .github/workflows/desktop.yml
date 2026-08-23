@@ -1,0 +1,83 @@
+# =============================================================================
+# NetGeo CI — Desktop artifact (C1-a skeleton, UNSIGNED)
+# =============================================================================
+# Builds the PyInstaller all-in-one bundle (D1 edition, docs/design/13) for
+# Windows and Linux and uploads it as a workflow artifact. No installer
+# (NSIS/AppImage/deb/rpm) yet — that is track C2/C3. No signing yet — see the
+# stub step below.
+#
+# Trigger: manual + release tags only (not every push — desktop builds are
+# comparatively expensive wall-clock).
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci || npm install
+          npm run build
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            backend/requirements.txt
+            packaging/requirements.txt
+
+      - name: Install backend + packaging dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+          pip install -r packaging/requirements.txt
+
+      - name: PyInstaller build
+        working-directory: packaging
+        run: pyinstaller netgeo.spec --distpath ./dist --workpath ./build --noconfirm
+
+      - name: Upload unsigned artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgeo-desktop-${{ matrix.os }}-unsigned
+          path: packaging/dist/netgeo/
+          if-no-files-found: error
+
+      # -----------------------------------------------------------------
+      # Windows code signing — SIGNPATH STUB, NOT WIRED UP.
+      #
+      # Per docs/design/13-DISTRIBUTION-PLAN.md "SignPath OSS — concrete
+      # integration notes": apply at signpath.org (OSS program, free, cert
+      # issued to "SignPath Foundation"), then use
+      # signpath/github-action-submit-signing-request with:
+      #   api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+      #   organization-id: <SignPath org id>
+      #   project-slug: netgeo
+      #   signing-policy-slug: release-signing
+      #   artifact-configuration-slug: <config slug>
+      #   github-artifact-id: <id from the upload-artifact step above>
+      #   wait-for-completion: true
+      #   output-artifact-directory: packaging/dist-signed
+      # This step is intentionally disabled (if: false) until the SignPath
+      # OSS application is approved and the above secrets exist in this repo.
+      - name: Submit Windows signing request (SignPath, DISABLED)
+        if: false
+        run: echo "signing not wired up yet — see comment above"
