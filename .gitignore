@@ -41,3 +41,7 @@ NetGeo/Unconfirmed*.crdownload
 
 # Dev/design docs are local-only (never pushed)
 docs/
+
+# --- Desktop packaging (C1-a) ---
+packaging/build/
+packaging/dist/
