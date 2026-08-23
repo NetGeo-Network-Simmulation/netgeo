@@ -338,19 +338,35 @@ class LacpFrame:
 
 @dataclass(slots=True)
 class BpduFrame:
-    """802.1D configuration BPDU (simplified)."""
+    """RST BPDU (IEEE 802.1w §9.3.3, simplified: one flags byte modelled as
+    four separate booleans instead of a bitfield).
+
+    ``port_role``/``learning``/``forwarding`` mirror the sending port's own
+    role/state at transmit time (see ``Switch._hello``). ``proposal`` and
+    ``agreement`` are carried on the wire for the rapid-transition handshake
+    but are RSTP-b's job to consume — this slice only transmits them (always
+    False here); nothing reads them yet, so don't mistake that for dead code.
+    """
 
     root_id: str                 # bridge id of the claimed root ("prio.mac")
     root_cost: int
     bridge_id: str               # sender bridge id
     port_id: int
+    port_role: str = "designated"          # role of the *sending* port
+    learning: bool = False
+    forwarding: bool = False
+    proposal: bool = False       # unused until RSTP-b (see class docstring)
+    agreement: bool = False      # unused until RSTP-b (see class docstring)
 
     @property
     def wire_size(self) -> int:
-        return 35
+        return 36                # +1 byte flags octet vs. plain 802.1D
 
     def summary(self) -> str:
-        return f"STP BPDU root={self.root_id} cost={self.root_cost} from={self.bridge_id}"
+        return (
+            f"RST BPDU root={self.root_id} cost={self.root_cost} "
+            f"from={self.bridge_id} role={self.port_role}"
+        )
 
 
 # ---------------------------------------------------------------------------

@@ -145,8 +145,8 @@ class Interface:
         self._queues: tuple[deque[EthernetFrame], ...] = (deque(), deque(), deque())
         self._transmitting = False
         self.queue_depth = queue_depth
-        self.stp_state: str = "forwarding"       # forwarding | blocking | learning
-        self.stp_role: str = "designated"        # root | designated | blocked
+        self.stp_state: str = "forwarding"       # forwarding | learning | listening | blocking
+        self.stp_role: str = "designated"        # root | designated | alternate | backup | blocked
         self.lag_parent: Interface | None = None
 
     # ----- addressing ----------------------------------------------------

@@ -1,20 +1,33 @@
-"""L2 switching: MAC learning, 802.1Q VLANs and simplified 802.1D STP.
+"""L2 switching: MAC learning, 802.1Q VLANs and RSTP (802.1w) port roles.
 
 The switch floods unknown/broadcast frames within a VLAN, learns source MACs
 per VLAN, and runs a compact spanning-tree implementation (root election via
-configuration BPDUs, root/designated/blocked port roles) so redundant L2
+BPDUs, root/designated/alternate/backup port roles) so redundant L2
 topologies converge instead of melting down in a broadcast storm.
 
-Port state transitions (802.1D §8.4): a port moving onto the forwarding
-track (root or designated) passes through Listening (no forwarding, no MAC
-learning) then Learning (MAC learning, still no forwarding) before
-Forwarding, each phase lasting one Forward Delay. A port moving to Blocking
-does so immediately — the whole point is to stop forwarding fast enough to
-avoid a loop.
+Port roles (IEEE 802.1w / 802.1D-2004 §17): every non-root bridge has one
+root port (best path to root) and zero-or-more designated ports (one per
+segment it wins). A port that loses the comparison discards instead — which
+of the two discarding roles it gets is decided by *who* sent the superior
+BPDU it lost to: the same neighbour bridge already used by the root port
+(a second link to a bridge we already reach) is a **backup** port; a
+different neighbour bridge (a path to root via someone else entirely) is an
+**alternate** port. See ``_recompute_roles`` for the comparison.
 
-Simplifications vs. real 802.1D (documented, deliberate):
+Port state transitions (802.1D §8.4, unchanged by the RSTP role split): a
+port moving onto the forwarding track (root or designated) passes through
+Listening (no forwarding, no MAC learning) then Learning (MAC learning,
+still no forwarding) before Forwarding, each phase lasting one Forward
+Delay. A port moving to discarding (alternate/backup/blocked) does so
+immediately — the whole point is to stop forwarding fast enough to avoid a
+loop.
+
+Simplifications vs. real 802.1w (documented, deliberate):
 - topology-change notifications are not modelled;
-- BPDU max-age pruning uses the same dead-interval mechanism as hellos.
+- BPDU max-age pruning uses the same dead-interval mechanism as hellos;
+- the Proposal/Agreement rapid-transition handshake is carried on the wire
+  (``BpduFrame.proposal``/``.agreement``) but not yet acted on — ports still
+  converge on Forward Delay timing, not sync/agreement (RSTP-b).
 """
 from __future__ import annotations
 
@@ -133,6 +146,9 @@ class Switch(Device):
                         root_cost=cost,
                         bridge_id=self.bridge_id,
                         port_id=idx,
+                        port_role=iface.stp_role,
+                        learning=iface.stp_state in ("learning", "forwarding"),
+                        forwarding=iface.stp_state == "forwarding",
                     ),
                 ),
             )
@@ -178,6 +194,13 @@ class Switch(Device):
                     best_vec = vec
                     root_port = name
 
+        # Reference bridge for the alternate/backup split below: the
+        # neighbour bridge our root port already reaches (or our own bridge
+        # mac if we have no root port — i.e. we're root, where this never
+        # actually gets used since we win on every port).
+        root_pb = self._port_best.get(root_port) if root_port else None
+        root_bridge_mac = root_pb.bridge_mac if root_pb is not None else self.bridge_mac
+
         my_prio, my_mac = self.priority, self.bridge_mac
         for name, iface in self.interfaces.items():
             if not self.stp_enabled:
@@ -198,14 +221,25 @@ class Switch(Device):
             if ours < theirs:
                 self._enter_forwarding_track(net, iface, "designated")
             else:
-                self._enter_blocking(iface)
+                # Lost the comparison: discarding, but which flavour depends
+                # on whether the bridge that beat us here is the *same*
+                # neighbour our root port already goes through (a second
+                # link to a bridge we already reach -> backup) or some
+                # other bridge entirely (a genuinely different path to
+                # root -> alternate).
+                role = "backup" if pb.bridge_mac == root_bridge_mac else "alternate"
+                self._enter_blocking(iface, role)
 
-    def _enter_blocking(self, iface: Interface) -> None:
+    def _enter_blocking(self, iface: Interface, role: str = "blocked") -> None:
         """To-blocking is always immediate (§8.4) — a port must stop
-        forwarding fast enough to prevent a loop, never wait out a delay."""
-        if iface.stp_role == "blocked" and iface.stp_state == "blocking":
+        forwarding fast enough to prevent a loop, never wait out a delay.
+        ``role`` defaults to the generic "blocked" tag for callers (tests)
+        that just want *a* discarding state without classifying it; real
+        role selection always comes from ``_recompute_roles`` and passes
+        "alternate" or "backup" explicitly."""
+        if iface.stp_role == role and iface.stp_state == "blocking":
             return  # already there; nothing in flight to abort
-        iface.stp_role, iface.stp_state = "blocked", "blocking"
+        iface.stp_role, iface.stp_state = role, "blocking"
         # Force-abort: invalidate any in-flight Listening/Learning chain for
         # this port so its delayed callback recognizes itself as stale.
         self._delay_seq[iface.name] = self._delay_seq.get(iface.name, 0) + 1
