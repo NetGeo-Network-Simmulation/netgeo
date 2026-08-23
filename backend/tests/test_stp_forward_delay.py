@@ -97,7 +97,10 @@ def test_stp_transition_to_blocking_is_immediate():
 
     blocked = [i for i in (p1, p2) if i.stp_state == "blocking"]
     assert len(blocked) == 1, f"expected exactly one blocked port, got {blocked}"
-    assert blocked[0].stp_role == "blocked"
+    # RSTP-a (802.1w): both links go to the same neighbour bridge ("root"),
+    # so the losing port is specifically a backup, not the generic "blocked"
+    # tag — see switching.py's _recompute_roles docstring.
+    assert blocked[0].stp_role == "backup"
     assert _pending_forward_delay_timers(net, blocked[0]) == 0
 
 
