@@ -343,9 +343,8 @@ class BpduFrame:
 
     ``port_role``/``learning``/``forwarding`` mirror the sending port's own
     role/state at transmit time (see ``Switch._hello``). ``proposal`` and
-    ``agreement`` are carried on the wire for the rapid-transition handshake
-    but are RSTP-b's job to consume — this slice only transmits them (always
-    False here); nothing reads them yet, so don't mistake that for dead code.
+    ``agreement`` drive the RSTP-b rapid-transition handshake — see
+    ``Switch._handle_bpdu``/``_sync_and_agree`` for how they're consumed.
     """
 
     root_id: str                 # bridge id of the claimed root ("prio.mac")

@@ -20,14 +20,28 @@ Listening (no forwarding, no MAC learning) then Learning (MAC learning,
 still no forwarding) before Forwarding, each phase lasting one Forward
 Delay. A port moving to discarding (alternate/backup/blocked) does so
 immediately — the whole point is to stop forwarding fast enough to avoid a
-loop.
+loop. Two shortcuts around that slow path (RSTP-b, §17.3):
+
+- **Proposal/Agreement rapid transition** on point-to-point links: a
+  designated port not yet forwarding sets ``proposal`` on its BPDUs. A
+  bridge whose port becomes root port on receiving a superior proposal
+  first *syncs* (forces its own other non-edge designated ports back to
+  discarding, so nothing can loop) then jumps that root port straight to
+  forwarding and replies with ``agreement``. The proposer, on seeing that
+  agreement, jumps its own designated port to forwarding too — no Forward
+  Delay wait on either side. If the agreement never arrives, the normal
+  Listening/Learning chain (already armed in parallel) still completes it.
+- **Edge ports**: a port that has never received a BPDU is assumed to have
+  no bridge on the other end and goes straight to forwarding. Receiving a
+  BPDU permanently revokes edge status and the port follows the normal
+  role/state machine (including the handshake above) from then on.
 
 Simplifications vs. real 802.1w (documented, deliberate):
-- topology-change notifications are not modelled;
+- topology-change notifications (TC/TCA) are not modelled;
 - BPDU max-age pruning uses the same dead-interval mechanism as hellos;
-- the Proposal/Agreement rapid-transition handshake is carried on the wire
-  (``BpduFrame.proposal``/``.agreement``) but not yet acted on — ports still
-  converge on Forward Delay timing, not sync/agreement (RSTP-b).
+- no BPDU guard / root guard, no MSTP / per-VLAN STP;
+- every link is treated as point-to-point (no half-duplex/shared-media
+  detection — there's no hub device in this engine anyway).
 """
 from __future__ import annotations
 
@@ -100,6 +114,13 @@ class Switch(Device):
         # advancing a state that has since moved on (re-election, or
         # re-blocked) mid-delay.
         self._delay_seq: dict[str, int] = {}
+        # Sticky per-port "has this port ever received a BPDU" marker
+        # (RSTP-b edge-port detection, §17.3): absence means edge — no
+        # bridge has ever been heard on the other end, so the port can
+        # jump straight to forwarding. Receiving one BPDU revokes it for
+        # good (matches real hardware: only an admin/link-flap reset would
+        # bring it back, which this engine doesn't need to model).
+        self._not_edge: set[str] = set()
 
     # ----- identity ----------------------------------------------------------
     @property
@@ -135,22 +156,17 @@ class Switch(Device):
             # Only designated ports originate BPDUs (root port listens).
             if iface.stp_role != "designated":
                 continue
-            iface.transmit(
+            self._send_bpdu(
                 net,
-                EthernetFrame(
-                    src_mac=iface.mac,
-                    dst_mac=STP_MULTICAST_MAC,
-                    ethertype=0x0027,
-                    payload=BpduFrame(
-                        root_id=f"{root_prio}.{root_mac}",
-                        root_cost=cost,
-                        bridge_id=self.bridge_id,
-                        port_id=idx,
-                        port_role=iface.stp_role,
-                        learning=iface.stp_state in ("learning", "forwarding"),
-                        forwarding=iface.stp_state == "forwarding",
-                    ),
-                ),
+                iface,
+                idx,
+                root_prio,
+                root_mac,
+                cost,
+                # RSTP-b: propose while not yet forwarding — this is how a
+                # peer learns it's safe to sync+agree instead of waiting
+                # out Forward Delay. Stops on its own once forwarding.
+                proposal=iface.stp_state != "forwarding",
             )
         net.scheduler.schedule_after(
             STP_HELLO,
@@ -163,6 +179,41 @@ class Switch(Device):
         )
 
     # ----- STP machinery ------------------------------------------------------------
+    def _port_index(self, iface: Interface) -> int:
+        return list(self.interfaces).index(iface.name)
+
+    def _send_bpdu(
+        self,
+        net: Network,
+        iface: Interface,
+        idx: int,
+        root_prio: int,
+        root_mac: str,
+        cost: int,
+        *,
+        proposal: bool = False,
+        agreement: bool = False,
+    ) -> None:
+        iface.transmit(
+            net,
+            EthernetFrame(
+                src_mac=iface.mac,
+                dst_mac=STP_MULTICAST_MAC,
+                ethertype=0x0027,
+                payload=BpduFrame(
+                    root_id=f"{root_prio}.{root_mac}",
+                    root_cost=cost,
+                    bridge_id=self.bridge_id,
+                    port_id=idx,
+                    port_role=iface.stp_role,
+                    learning=iface.stp_state in ("learning", "forwarding"),
+                    forwarding=iface.stp_state == "forwarding",
+                    proposal=proposal,
+                    agreement=agreement,
+                ),
+            ),
+        )
+
     def _current_root(self, net: Network) -> tuple[int, str, int]:
         """(root_prio, root_mac, my_cost_to_root)."""
         best = (self.priority, self.bridge_mac, 0)
@@ -251,8 +302,14 @@ class Switch(Device):
         if iface.stp_role == role and iface.stp_state in ("listening", "learning", "forwarding"):
             return
         iface.stp_role = role
-        iface.stp_state = "listening"
         self._delay_seq[iface.name] = self._delay_seq.get(iface.name, 0) + 1
+        if iface.name not in self._not_edge:
+            # Edge port (RSTP-b §17.3): nobody has ever sent a BPDU here,
+            # so there's no bridge on the other end to sync/negotiate
+            # with — go straight to Forwarding, no Listening/Learning.
+            iface.stp_state = "forwarding"
+            return
+        iface.stp_state = "listening"
         seq = self._delay_seq[iface.name]
         net.scheduler.schedule_after(
             STP_FORWARD_DELAY,
@@ -286,6 +343,7 @@ class Switch(Device):
     def _handle_bpdu(self, net: Network, iface: Interface, bpdu: BpduFrame) -> None:
         if not self.stp_enabled:
             return
+        self._not_edge.add(iface.name)  # a bridge exists on the other end
         root_prio, root_mac = _parse_bridge_id(bpdu.root_id)
         bprio, bmac = _parse_bridge_id(bpdu.bridge_id)
         incoming = _PortBpdu(
@@ -300,6 +358,46 @@ class Switch(Device):
         current = self._port_best.get(iface.name)
         if current is None or incoming.vector() <= current.vector():
             self._port_best[iface.name] = incoming
+        self._recompute_roles(net)
+
+        # RSTP-b rapid transition (§17.3), point-to-point links only (this
+        # engine models none other). Two independent triggers:
+        if bpdu.proposal and iface.stp_role == "root" and iface.stp_state != "forwarding":
+            # This port just became our root port on a superior proposal:
+            # sync, jump to forwarding, tell the proposer it's safe too.
+            self._sync_and_agree(net, iface)
+        if bpdu.agreement and iface.stp_role == "designated" and iface.stp_state != "forwarding":
+            # Our proposal was agreed to: skip straight to forwarding
+            # instead of waiting out the Listening/Learning chain already
+            # armed by _recompute_roles above.
+            self._delay_seq[iface.name] = self._delay_seq.get(iface.name, 0) + 1
+            iface.stp_state = "forwarding"
+
+    def _sync_and_agree(self, net: Network, root_port: Interface) -> None:
+        """Force our other non-edge designated ports to discarding first
+        (no loop window while the new root port jumps ahead), then move
+        ``root_port`` straight to Forwarding and reply with agreement."""
+        for name, other in self.interfaces.items():
+            if other is root_port:
+                continue
+            if other.stp_role == "designated" and name in self._not_edge:
+                self._enter_blocking(other, "designated")
+
+        self._delay_seq[root_port.name] = self._delay_seq.get(root_port.name, 0) + 1
+        root_port.stp_state = "forwarding"
+        root_prio, root_mac, cost = self._current_root(net)
+        self._send_bpdu(
+            net,
+            root_port,
+            self._port_index(root_port),
+            root_prio,
+            root_mac,
+            cost,
+            agreement=True,
+        )
+
+        # Let the just-blocked ports start reconverging immediately instead
+        # of waiting up to one Hello Time for the next periodic recompute.
         self._recompute_roles(net)
 
     # ----- data plane -----------------------------------------------------------------

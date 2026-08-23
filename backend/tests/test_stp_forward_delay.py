@@ -21,14 +21,23 @@ from engine.netstack.switching import STP_FORWARD_DELAY, Switch
 
 
 def _pair(seed: int = 1) -> tuple[Network, Switch, object]:
-    """A switch with one port to a (passive) peer switch."""
+    """A switch with one port to a genuinely passive peer switch (STP
+    disabled on the peer, so it never sends a BPDU of its own -- these
+    tests drive ``p``'s Listening/Learning chain directly and a live peer
+    could otherwise answer with its own proposal/agreement, per RSTP-b,
+    and race the very timing being tested)."""
     net = Network(seed=seed)
     sw = net.add_device(Switch("sw"))
-    peer = net.add_device(Switch("peer"))
+    peer = net.add_device(Switch("peer", stp_enabled=False))
     p = net.add_iface(sw, "gi0/1")
     q = net.add_iface(peer, "gi0/1")
     net.connect("l1", p, q)
     net.start()  # settles ports to their default designated/forwarding state
+    # This port has a real switch peer, not a host -- mark it non-edge so
+    # the tests below (which force it back to blocking to observe the
+    # Listening/Learning chain) exercise that chain rather than RSTP-b's
+    # edge fast-forward.
+    sw._not_edge.add(p.name)
     return net, sw, p
 
 
