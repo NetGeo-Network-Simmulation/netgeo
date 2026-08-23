@@ -736,6 +736,11 @@ class LabRunManager:
         run = _LabRun(project_id=pid, lab=lab, state="running")
         run.gate.set()
         self._runs[pid] = run
+        # Publish the "running" tick synchronously, before the background
+        # driver starts: the frontend transport bar needs an immediate
+        # confirmation on Play, not a wait for the first batch to dispatch
+        # (mirrors Jalur A's SimManager, which ticks before its first await).
+        self._publish(run)
         run.task = asyncio.create_task(self._drive(run))
         return run.status()
 
