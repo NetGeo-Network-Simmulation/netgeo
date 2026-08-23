@@ -13,7 +13,7 @@ routes with their administrative distance.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from ipaddress import (
     IPv4Address,
     IPv4Network,
@@ -257,6 +257,30 @@ class DhcpPool:
         return None
 
 
+FRAG_REASSEMBLY_TIMEOUT = 30.0   # seconds (RFC 791 typical 15-255s)
+
+
+@dataclass(slots=True)
+class _FragBuf:
+    """In-flight reassembly of one IPv4 datagram (RFC 791 sec 3.2), keyed by
+    (src, dst, proto, identification)."""
+
+    parts: dict[int, int] = field(default_factory=dict)   # offset -> frag_len
+    payload0: object = None        # real L4 object, from the offset=0 fragment
+    template: Ipv4Packet | None = None   # any received fragment (src/dst/ttl/...)
+    total_len: int | None = None   # known once the MF=0 fragment arrives
+
+    def complete(self) -> bool:
+        if self.total_len is None:
+            return False
+        covered = 0
+        for offset in sorted(self.parts):
+            if offset > covered:
+                return False
+            covered = max(covered, offset + self.parts[offset])
+        return covered >= self.total_len
+
+
 class Router(L3Device):
     """A router: LPM forwarding, ICMP errors, NAT44, ACLs, DHCP/DNS server."""
 
@@ -297,6 +321,13 @@ class Router(L3Device):
         # QoS marking rules (NG-SIM-11 §2.3): applied on the egress forward path.
         # Each rule: {"match": {"proto": "udp", "dst_port": 5060}, "set_dscp": 46}
         self.qos_marking: list[dict] = []
+        # IPv4 fragment reassembly (P-4): (src, dst, proto, ident) -> buffer.
+        self._frag_bufs: dict[tuple, _FragBuf] = {}
+        # Same key -> generation counter, so a stale timeout from a buffer
+        # already completed/reused can't fire against the wrong generation
+        # (the buffer itself is deleted on completion, so the guard can't
+        # live on the buffer object the way OSPF's wait_seq does).
+        self._frag_timer_seq: dict[tuple, int] = {}
 
     # ----- route table management -------------------------------------------------
     def sync_connected_routes(self) -> None:
@@ -681,6 +712,12 @@ class Router(L3Device):
         # would deadlock on the partially-initialized routing module.
         from engine.netstack.protocols.vrrp import PROTO_VRRP
 
+        if pkt.more_fragments or pkt.fragment_offset:
+            reassembled = self._reassemble(net, pkt)
+            if reassembled is None:
+                return  # buffered, awaiting more fragments (or already done)
+            pkt = reassembled
+
         if pkt.proto == PROTO_ICMP:
             icmp = pkt.payload
             if isinstance(icmp, IcmpMessage) and icmp.type == 0:
@@ -727,6 +764,59 @@ class Router(L3Device):
             if isinstance(app, DnsMessage) and udp.dst_port == 53 and app.op == "query":
                 self._dns_serve(net, iface, pkt, udp, app)
                 return
+
+    # ----- IPv4 fragment reassembly (P-4, RFC 791 sec 3.2) -----------------------------
+    def _reassemble(self, net: Network, pkt: Ipv4Packet) -> Ipv4Packet | None:
+        key = (pkt.src, pkt.dst, pkt.proto, pkt.identification)
+        buf = self._frag_bufs.get(key)
+        if buf is None:
+            buf = _FragBuf()
+            self._frag_bufs[key] = buf
+            self._arm_frag_timer(net, key)
+        buf.parts[pkt.fragment_offset] = pkt.frag_len
+        if pkt.fragment_offset == 0:
+            buf.payload0 = pkt.payload
+            buf.template = pkt
+        if not pkt.more_fragments:
+            buf.total_len = pkt.fragment_offset + pkt.frag_len
+
+        if not buf.complete():
+            return None
+
+        del self._frag_bufs[key]
+        self._frag_timer_seq.pop(key, None)
+        tmpl = buf.template if buf.template is not None else pkt
+        return replace(
+            tmpl,
+            payload=buf.payload0,
+            payload_len=buf.total_len or 0,
+            identification=0,
+            more_fragments=False,
+            fragment_offset=0,
+            frag_len=0,
+        )
+
+    def _arm_frag_timer(self, net: Network, key: tuple) -> None:
+        seq = self._frag_timer_seq.get(key, 0) + 1
+        self._frag_timer_seq[key] = seq
+        net.scheduler.schedule_after(
+            FRAG_REASSEMBLY_TIMEOUT,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e: self._frag_timeout(net, key, seq),
+                node_id=self.node_id,
+            ),
+        )
+
+    def _frag_timeout(self, net: Network, key: tuple, seq: int) -> None:
+        if self._frag_timer_seq.get(key) != seq:
+            return  # superseded: reassembled already, or a newer datagram reused this key
+        buf = self._frag_bufs.pop(key, None)
+        self._frag_timer_seq.pop(key, None)
+        if buf is None or buf.template is None:
+            return
+        self._send_icmp_error(net, buf.template, icmp_type=11, code=1)  # reassembly timeout
 
     # ----- IPv6 ingress + forwarding pipeline ----------------------------------------
     def _on_ipv6(self, net: Network, iface: Interface, pkt: Ipv6Packet) -> None:

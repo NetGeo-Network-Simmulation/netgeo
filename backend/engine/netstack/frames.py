@@ -235,9 +235,22 @@ class Ipv4Packet:
     dont_fragment: bool = True
     payload: IcmpMessage | UdpSegment | TcpSegment | Any = None
     payload_len: int = 0        # used when payload has no wire_size
+    # Fragmentation (RFC 791 sec 3.2). All fragments of one datagram share
+    # ``identification``; ``fragment_offset`` is the byte offset of this
+    # fragment's data within the original payload (always a multiple of 8).
+    identification: int = 0
+    more_fragments: bool = False
+    fragment_offset: int = 0
+    # Byte length of *this fragment's* data. Only meaningful when the packet
+    # is a fragment (more_fragments or fragment_offset set) -- drives
+    # wire_size then, independent of whatever ``payload`` still carries
+    # (only the offset-0 fragment keeps the real L4 object, for reassembly).
+    frag_len: int = 0
 
     @property
     def wire_size(self) -> int:
+        if self.more_fragments or self.fragment_offset:
+            return 20 + self.frag_len
         inner = getattr(self.payload, "wire_size", None)
         return 20 + (inner if inner is not None else self.payload_len)
 
@@ -248,7 +261,12 @@ class Ipv4Packet:
     def summary(self) -> str:
         inner = getattr(self.payload, "summary", None)
         tail = f" {inner()}" if callable(inner) else f" proto={self.proto_name}"
-        return f"IPv4 {self.src} -> {self.dst} ttl={self.ttl}{tail}"
+        frag = (
+            f" frag[id={self.identification} off={self.fragment_offset} mf={int(self.more_fragments)}]"
+            if self.more_fragments or self.fragment_offset
+            else ""
+        )
+        return f"IPv4 {self.src} -> {self.dst} ttl={self.ttl}{tail}{frag}"
 
 
 @dataclass(slots=True)
@@ -711,6 +729,9 @@ class EthernetFrame:
                 "ttl": p.ttl,
                 "proto": p.proto_name,
                 "dscp": p.dscp,
+                "identification": p.identification,
+                "more_fragments": p.more_fragments,
+                "fragment_offset": p.fragment_offset,
             }
             l4 = p.payload
             if isinstance(l4, IcmpMessage):

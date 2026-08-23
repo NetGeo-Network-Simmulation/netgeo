@@ -19,7 +19,7 @@ All transmission state lives here so devices only decide *what* to send and
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from ipaddress import IPv4Address, IPv4Interface, IPv6Address, IPv6Interface
 from typing import TYPE_CHECKING
 
@@ -214,6 +214,9 @@ class Interface:
 
         # MTU check on the L3 payload (L2 headers don't count against MTU).
         if isinstance(frame.payload, (Ipv4Packet, Ipv6Packet)) and frame.payload.wire_size > att.mtu:
+            if isinstance(frame.payload, Ipv4Packet) and not frame.payload.dont_fragment:
+                self._fragment_and_transmit(net, frame, att.mtu)
+                return
             self.counters.drops_mtu += 1
             net.record_drop("mtu_exceeded")
             self.device.on_mtu_drop(net, self, frame)
@@ -254,6 +257,44 @@ class Interface:
             )
         if not self._transmitting:
             self._start_next(net)
+
+    def _fragment_and_transmit(self, net: Network, frame: EthernetFrame, mtu: int) -> None:
+        """DF=0 and oversized: split into RFC 791 sec 3.2 fragments and
+        transmit each (recursing through :meth:`transmit`, so a fragment
+        that is still too big for a later, smaller-MTU hop is split again)."""
+        pkt = frame.payload
+        assert isinstance(pkt, Ipv4Packet)
+        inner = getattr(pkt.payload, "wire_size", None)
+        total_len = inner if inner is not None else pkt.payload_len
+        max_data = ((mtu - 20) // 8) * 8
+        if max_data <= 0:
+            # ponytail: no lab topology configures an MTU this small; treat
+            # it like DF=1 rather than emit zero-length fragments forever.
+            self.counters.drops_mtu += 1
+            net.record_drop("mtu_exceeded")
+            self.device.on_mtu_drop(net, self, frame)
+            return
+        ident = pkt.identification or net.next_frame_id()
+        offset = 0
+        while offset < total_len:
+            chunk = min(max_data, total_len - offset)
+            frag = replace(
+                pkt,
+                payload=pkt.payload if offset == 0 else None,
+                payload_len=0,
+                identification=ident,
+                more_fragments=(offset + chunk) < total_len,
+                fragment_offset=offset,
+                frag_len=chunk,
+            )
+            self.transmit(
+                net,
+                EthernetFrame(
+                    src_mac=frame.src_mac, dst_mac=frame.dst_mac,
+                    ethertype=frame.ethertype, vlan=frame.vlan, payload=frag,
+                ),
+            )
+            offset += chunk
 
     def _start_next(self, net: Network) -> None:
         # Strict-priority drain: EF first, then AF, then BE.

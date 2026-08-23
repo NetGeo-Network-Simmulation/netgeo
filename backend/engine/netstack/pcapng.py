@@ -261,7 +261,13 @@ def _vrrp_bytes(pkt: Ipv4Packet, pseudo: bytes) -> bytes:
 
 def _ipv4_bytes(pkt: Ipv4Packet) -> bytes:
     pseudo = pkt.src.packed + pkt.dst.packed + struct.pack("!BB", 0, pkt.proto)
-    if pkt.proto == PROTO_ICMP and isinstance(pkt.payload, IcmpMessage):
+    is_frag = pkt.more_fragments or pkt.fragment_offset
+    if is_frag:
+        # ponytail: a non-zero-offset fragment carries no L4 header on the
+        # real wire either; zero-fill rather than truncate a serialized
+        # header mid-way, the length/flags/offset fields are what matters.
+        payload = bytes(pkt.frag_len)
+    elif pkt.proto == PROTO_ICMP and isinstance(pkt.payload, IcmpMessage):
         payload = _icmp_bytes(pkt.payload)
     elif pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):
         payload = _udp_bytes(pkt.payload, pseudo)
@@ -274,9 +280,13 @@ def _ipv4_bytes(pkt: Ipv4Packet) -> bytes:
     else:
         payload = bytes(getattr(pkt.payload, "wire_size", pkt.payload_len))
     total_len = 20 + len(payload)
-    flags = 0x4000 if pkt.dont_fragment else 0
-    head = struct.pack("!BBHHHBBH4s4s", 0x45, pkt.dscp << 2, total_len, 0,
-                       flags, pkt.ttl, pkt.proto, 0,
+    flags = (
+        (0x4000 if pkt.dont_fragment else 0)
+        | (0x2000 if pkt.more_fragments else 0)
+        | ((pkt.fragment_offset // 8) & 0x1FFF)
+    )
+    head = struct.pack("!BBHHHBBH4s4s", 0x45, pkt.dscp << 2, total_len,
+                       pkt.identification & 0xFFFF, flags, pkt.ttl, pkt.proto, 0,
                        pkt.src.packed, pkt.dst.packed)
     head = head[:10] + struct.pack("!H", _cksum(head)) + head[12:]
     return head + payload
