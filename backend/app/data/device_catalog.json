@@ -1,6 +1,6 @@
 {
   "version": "1.0.0",
-  "description": "ISP wireless device catalog with real-world specs. Sources: Ubiquiti, MikroTik, TP-Link, Cambium official datasheets.",
+  "description": "ISP wireless device catalog with real-world specs, drawn from a mix of vendor datasheets, product pages, and FCC filings with varying verification depth. Per-field verification status is tracked in each device's `evidence` block (status legend: V, V(2nd), derived, UNVERIFIED, low-confidence).",
   "devices": [
     {
       "id": "ubnt-airfiber60",
@@ -15,7 +15,47 @@
       "max_range_km": 2,
       "max_throughput_mbps": 1700,
       "standard": "802.11ad",
-      "notes": "60 GHz mmWave PTP. Requires clear LOS. Best for last-mile aggregation < 2 km."
+      "notes": "60 GHz mmWave PTP. Requires clear LOS. Best for last-mile aggregation < 2 km.",
+      "evidence": {
+        "max_throughput_mbps": {
+          "status": "V",
+          "source_url": "https://fccid.io/SWX-AF60/User-Manual/User-Manual-4422162.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Official FCC-filed manual says 1800 Mbps, NOT 1700 — catalog value not corrected."
+        },
+        "max_range_km": {
+          "status": "V",
+          "source_url": "https://fccid.io/SWX-AF60/User-Manual/User-Manual-4422162.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Manual says '2+ km' — matches catalog's 2 as a rounded figure."
+        },
+        "antenna_gain_dbi": {
+          "status": "V",
+          "source_url": "https://fccid.io/SWX-AF60/User-Manual/User-Manual-4422162.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "60 GHz radio gain matches (38 dBi), but this device also has a 5 GHz backup radio at 11 dBi gain that the catalog's single-radio model omits entirely."
+        },
+        "tx_power_dbm": {
+          "status": "V",
+          "source_url": "https://fccid.io/SWX-AF60/User-Manual/User-Manual-4422162.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Manual says 25 dBm max conducted TX power (5/60 GHz combined), NOT 27 — catalog value not corrected."
+        },
+        "frequency_ghz": {
+          "status": "low-confidence",
+          "source_url": "https://fccid.io/SWX-AF60/User-Manual/User-Manual-4422162.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Device is dual-radio: 60 GHz AND 5 GHz (U-NII) backup. Catalog's single `frequency_ghz:60` field cannot represent this — the 5 GHz backup radio is missing from the model entirely, not just imprecise."
+        },
+        "rx_sensitivity_dbm": {
+          "status": "UNVERIFIED",
+          "note": "Not published in the official manual."
+        },
+        "standard": {
+          "status": "UNVERIFIED",
+          "note": "Manual doesn't mention 802.11ad — OS is 'airOS GP', protocol proprietary."
+        }
+      }
     },
     {
       "id": "ubnt-airfiber60-lr",
@@ -30,7 +70,45 @@
       "max_range_km": 3.5,
       "max_throughput_mbps": 1700,
       "standard": "802.11ad",
-      "notes": "Extended-range version of airFiber 60 with higher gain antenna."
+      "notes": "Extended-range version of airFiber 60 with higher gain antenna.",
+      "evidence": {
+        "max_throughput_mbps": {
+          "status": "V",
+          "source_url": "https://dl.ui.com/ds/af60-lr_ds.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Current official datasheet says 1950 Mbps, NOT 1700 — catalog value has not been corrected; this entry flags the mismatch, not a confirmation."
+        },
+        "max_range_km": {
+          "status": "V",
+          "source_url": "https://dl.ui.com/ds/af60-lr_ds.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Current official datasheet says 12+ km, NOT 3.5 km — large discrepancy, catalog value not corrected."
+        },
+        "antenna_gain_dbi": {
+          "status": "V",
+          "source_url": "https://fccid.io/SWX-AF60LR/User-Manual/Users-Manual-rev3-4760559.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Older FCC-filed manual says 38 dBi, NOT 43 — current datasheet doesn't publish this figure at all."
+        },
+        "tx_power_dbm": {
+          "status": "UNVERIFIED",
+          "note": "Not found in the current official datasheet or the older FCC manual — catalog's 27 dBm is not backed by any source found."
+        },
+        "rx_sensitivity_dbm": {
+          "status": "UNVERIFIED",
+          "note": "Same as tx_power_dbm — not published by the vendor for this UISP-era model."
+        },
+        "frequency_ghz": {
+          "status": "derived",
+          "source_url": "https://dl.ui.com/ds/af60-lr_ds.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor publishes a 57-71 GHz band, not a single figure — catalog's 60 is a loose simplification."
+        },
+        "standard": {
+          "status": "UNVERIFIED",
+          "note": "Neither official document mentions 802.11ad — vendor calls the radio proprietary 'Wave Technology' under airOS."
+        }
+      }
     },
     {
       "id": "ubnt-litebeam5ac",
@@ -45,7 +123,49 @@
       "max_range_km": 15,
       "max_throughput_mbps": 450,
       "standard": "802.11ac Wave 2",
-      "notes": "Low-cost CPE for WISP subscribers. airMAX AC protocol."
+      "notes": "Low-cost CPE for WISP subscribers. airMAX AC protocol.",
+      "evidence": {
+        "max_throughput_mbps": {
+          "status": "V",
+          "source_url": "https://techspecs.ui.com/uisp/wireless/litebeam-5ac",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor page says '450+ Mbps' — matches catalog."
+        },
+        "antenna_gain_dbi": {
+          "status": "V",
+          "source_url": "https://dl.ubnt.com/datasheets/LiteBeam/LiteBeam_AC_Gen2_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet and techspecs page agree: 23 dBi — matches catalog."
+        },
+        "tx_power_dbm": {
+          "status": "V",
+          "source_url": "https://dl.ubnt.com/datasheets/LiteBeam/LiteBeam_AC_Gen2_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet says 25 dBm output power, NOT 23 — catalog value not corrected."
+        },
+        "rx_sensitivity_dbm": {
+          "status": "low-confidence",
+          "source_url": "https://dl.ubnt.com/datasheets/LiteBeam/LiteBeam_AC_Gen2_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet gives a per-modulation table from -96 dBm (best, BPSK 1/2) to -65 dBm (worst, 256QAM 5/6) — no single published figure. Catalog's -95 is close to the best-case end but not a value the vendor states directly."
+        },
+        "max_range_km": {
+          "status": "UNVERIFIED",
+          "note": "Vendor does not publish a maximum range figure anywhere (confirmed absent from both the datasheet PDF and the techspecs page)."
+        },
+        "frequency_ghz": {
+          "status": "derived",
+          "source_url": "https://dl.ubnt.com/datasheets/LiteBeam/LiteBeam_AC_Gen2_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor publishes a 5150-5875 MHz band, not a single figure — catalog's 5.8 is a loose simplification."
+        },
+        "standard": {
+          "status": "low-confidence",
+          "source_url": "https://dl.ubnt.com/datasheets/LiteBeam/LiteBeam_AC_Gen2_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet calls it 'airMAX ac Protocol' (proprietary TDMA over 802.11ac PHY), not '802.11ac Wave 2' verbatim — plausible characterization, not the vendor's own term."
+        }
+      }
     },
     {
       "id": "ubnt-powerbeam5ac-400",
@@ -60,7 +180,49 @@
       "max_range_km": 25,
       "max_throughput_mbps": 450,
       "standard": "802.11ac Wave 2",
-      "notes": "Dual-feed dish for point-to-point links. Compact form factor."
+      "notes": "Dual-feed dish for point-to-point links. Compact form factor.",
+      "evidence": {
+        "tx_power_dbm": {
+          "status": "V",
+          "source_url": "https://dl.ubnt.com/datasheets/PowerBeam_ac/PowerBeam5ac_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet (PBE-5AC-400 row): 25 dBm output power — matches catalog."
+        },
+        "antenna_gain_dbi": {
+          "status": "V",
+          "source_url": "https://dl.ubnt.com/datasheets/PowerBeam_ac/PowerBeam5ac_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet: 25 dBi — matches catalog."
+        },
+        "rx_sensitivity_dbm": {
+          "status": "V",
+          "source_url": "https://dl.ubnt.com/datasheets/PowerBeam_ac/PowerBeam5ac_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Per-modulation table row '2x QPSK (1/2)' is literally -95 dBm — matches catalog (not the best-case figure, but a value printed verbatim in the table)."
+        },
+        "max_throughput_mbps": {
+          "status": "V",
+          "source_url": "https://dl.ubnt.com/datasheets/PowerBeam_ac/PowerBeam5ac_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet: 'up to 450+ Mbps real TCP/IP throughput' (family-wide claim) — matches catalog."
+        },
+        "max_range_km": {
+          "status": "UNVERIFIED",
+          "note": "No range figure (km or miles) anywhere in the 11-page datasheet."
+        },
+        "frequency_ghz": {
+          "status": "derived",
+          "source_url": "https://dl.ubnt.com/datasheets/PowerBeam_ac/PowerBeam5ac_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor publishes 5150-5875 MHz worldwide band — catalog's 5.8 is a loose simplification."
+        },
+        "standard": {
+          "status": "low-confidence",
+          "source_url": "https://dl.ubnt.com/datasheets/PowerBeam_ac/PowerBeam5ac_DS.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet calls it 'airMAX ac' (proprietary), not '802.11ac Wave 2' verbatim."
+        }
+      }
     },
     {
       "id": "ubnt-powerbeam5ac-620",
@@ -75,7 +237,13 @@
       "max_range_km": 35,
       "max_throughput_mbps": 450,
       "standard": "802.11ac Wave 2",
-      "notes": "Higher-gain dish variant. Ideal for long backhaul links."
+      "notes": "Higher-gain dish variant. Ideal for long backhaul links.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "ubnt-airmax-m5",
@@ -90,7 +258,13 @@
       "max_range_km": 50,
       "max_throughput_mbps": 150,
       "standard": "802.11n",
-      "notes": "Base station radio. Paired with sector antenna. TDMA airMAX protocol."
+      "notes": "Base station radio. Paired with sector antenna. TDMA airMAX protocol.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "ubnt-rocket-ac-prism",
@@ -105,7 +279,13 @@
       "max_range_km": 30,
       "max_throughput_mbps": 500,
       "standard": "802.11ac Wave 2",
-      "notes": "High-capacity PTMP base station. Supports 4x4 MIMO sector antennas."
+      "notes": "High-capacity PTMP base station. Supports 4x4 MIMO sector antennas.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "mikrotik-sxtsq5",
@@ -120,7 +300,49 @@
       "max_range_km": 10,
       "max_throughput_mbps": 300,
       "standard": "802.11n",
-      "notes": "Budget PTMP CPE. RouterOS based. Good for dense subscriber deployments."
+      "notes": "Budget PTMP CPE. RouterOS based. Good for dense subscriber deployments.",
+      "evidence": {
+        "antenna_gain_dbi": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/sxtsq_5_high_power",
+          "retrieved_date": "2026-08-23",
+          "note": "Official product page: 16 dBi — matches catalog."
+        },
+        "tx_power_dbm": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/sxtsq_5_high_power",
+          "retrieved_date": "2026-08-23",
+          "note": "Product page: 28 dBm max (at 6 Mbit/s / MCS0), NOT 23 — catalog value not corrected."
+        },
+        "rx_sensitivity_dbm": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/sxtsq_5_high_power",
+          "retrieved_date": "2026-08-23",
+          "note": "Product page: -96 dBm best-case, catalog says -94 — 2 dB off from the best-case point, minor mismatch."
+        },
+        "max_throughput_mbps": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/sxtsq_5_high_power",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor's own MEASURED bridging throughput (1518-byte, fast path) is 98.4 Mbps — same pattern as mikrotik-lhg5: catalog's 300 is roughly 3x the vendor's measured figure."
+        },
+        "standard": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/sxtsq_5_high_power",
+          "retrieved_date": "2026-08-23",
+          "note": "Product page says '802.11a/n' — catalog drops the 802.11a mode."
+        },
+        "frequency_ghz": {
+          "status": "derived",
+          "source_url": "https://mikrotik.com/product/sxtsq_5_high_power",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor publishes a 5 GHz band, not a single figure."
+        },
+        "max_range_km": {
+          "status": "UNVERIFIED",
+          "note": "Not listed on the official product page. Product is also marked 'Discontinued' by the vendor (no lifecycle field exists in this catalog schema)."
+        }
+      }
     },
     {
       "id": "mikrotik-lhg5",
@@ -135,7 +357,49 @@
       "max_range_km": 20,
       "max_throughput_mbps": 300,
       "standard": "802.11n",
-      "notes": "Lightweight grid antenna CPE. Excellent range-to-cost ratio."
+      "notes": "Lightweight grid antenna CPE. Excellent range-to-cost ratio.",
+      "evidence": {
+        "antenna_gain_dbi": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/RBLHG-5nD",
+          "retrieved_date": "2026-08-23",
+          "note": "Official product page: 24.5 dBi — matches catalog."
+        },
+        "tx_power_dbm": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/RBLHG-5nD",
+          "retrieved_date": "2026-08-23",
+          "note": "Product page: 25 dBm max (at 6 Mbit/s / MCS0), NOT 23 — catalog value not corrected."
+        },
+        "rx_sensitivity_dbm": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/RBLHG-5nD",
+          "retrieved_date": "2026-08-23",
+          "note": "Product page: -96 dBm best-case (6 Mbit/s / MCS0), catalog says -95 — 1 dB off, minor mismatch."
+        },
+        "max_throughput_mbps": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/RBLHG-5nD",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor's own MEASURED bridging throughput (1518-byte packets) is 98.4 Mbps — catalog claims 300, roughly 3x higher than the vendor's measured figure."
+        },
+        "standard": {
+          "status": "V",
+          "source_url": "https://mikrotik.com/product/RBLHG-5nD",
+          "retrieved_date": "2026-08-23",
+          "note": "Product page says '802.11a/n' — catalog drops the 802.11a mode, minor but not strictly correct."
+        },
+        "frequency_ghz": {
+          "status": "derived",
+          "source_url": "https://mikrotik.com/product/RBLHG-5nD",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor publishes a band (5150-5875 MHz intl / 5170-5250 & 5725-5835 MHz US) — catalog's 5.8 is a loose simplification."
+        },
+        "max_range_km": {
+          "status": "UNVERIFIED",
+          "note": "Not listed on the official product page."
+        }
+      }
     },
     {
       "id": "mikrotik-lhg5-ac",
@@ -150,7 +414,13 @@
       "max_range_km": 20,
       "max_throughput_mbps": 500,
       "standard": "802.11ac",
-      "notes": "AC upgrade of LHG. 2x2 MIMO chain. Suitable for high-throughput backhaul."
+      "notes": "AC upgrade of LHG. 2x2 MIMO chain. Suitable for high-throughput backhaul.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "mikrotik-dynadish5",
@@ -165,7 +435,13 @@
       "max_range_km": 30,
       "max_throughput_mbps": 700,
       "standard": "802.11ac",
-      "notes": "High-gain dish for long-distance PTP. Dual-chain AC radio."
+      "notes": "High-gain dish for long-distance PTP. Dual-chain AC radio.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "mikrotik-rb911g",
@@ -180,7 +456,13 @@
       "max_range_km": 20,
       "max_throughput_mbps": 300,
       "standard": "802.11n",
-      "notes": "High-power basestation board. Requires external sector antenna."
+      "notes": "High-power basestation board. Requires external sector antenna.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "tplink-cpe510",
@@ -195,7 +477,13 @@
       "max_range_km": 15,
       "max_throughput_mbps": 300,
       "standard": "802.11n",
-      "notes": "Entry-level outdoor CPE. 13 dBi dual-polarized antenna. Pharos protocol."
+      "notes": "Entry-level outdoor CPE. 13 dBi dual-polarized antenna. Pharos protocol.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "tplink-cpe610",
@@ -210,7 +498,13 @@
       "max_range_km": 20,
       "max_throughput_mbps": 300,
       "standard": "802.11n",
-      "notes": "Higher-gain 23 dBi panel variant. Good for suburban WISP deployments."
+      "notes": "Higher-gain 23 dBi panel variant. Good for suburban WISP deployments.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "tplink-cpe710",
@@ -225,7 +519,13 @@
       "max_range_km": 25,
       "max_throughput_mbps": 867,
       "standard": "802.11ac",
-      "notes": "AC upgrade of CPE610. Dual-band capable. Best value AC CPE from TP-Link."
+      "notes": "AC upgrade of CPE610. Dual-band capable. Best value AC CPE from TP-Link.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "cambium-epmp1000",
@@ -240,7 +540,53 @@
       "max_range_km": 25,
       "max_throughput_mbps": 200,
       "standard": "802.11n",
-      "notes": "GPS-synchronized TDD PTMP base station. Reduces co-channel interference in dense deployments."
+      "notes": "GPS-synchronized TDD PTMP base station. Reduces co-channel interference in dense deployments.",
+      "evidence": {
+        "model": {
+          "status": "UNVERIFIED",
+          "source_url": "https://www.cambiumnetworks.com/wp-content/uploads/2015/08/SS_ePMP_1000_GPSsyncRadio_06282018_2.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Catalog's model 'C050900C001A' does NOT appear among the 5 official sales model numbers for the ePMP 1000 GPS Sync Radio family (C050900A011A / C050900A112A / C050900A013A / C050900A211A / C050900P011A), nor in a separate web search for the exact string. Could be a typo, an older/unindexed revision, or fabricated — not resolved."
+        },
+        "tx_power_dbm": {
+          "status": "low-confidence",
+          "source_url": "https://www.cambiumnetworks.com/wp-content/uploads/2015/08/SS_ePMP_1000_GPSsyncRadio_06282018_2.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Spec sheet gives a range (-17 to +30 dBm combined, to regional EIRP limit). Catalog's 27 falls inside that range but is not a published single figure."
+        },
+        "rx_sensitivity_dbm": {
+          "status": "low-confidence",
+          "source_url": "https://www.cambiumnetworks.com/wp-content/uploads/2015/08/SS_ePMP_1000_GPSsyncRadio_06282018_2.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Spec sheet gives -93 dBm (MCS0, 20 MHz) down to -69 dBm (MCS15) — catalog's -94 is close to but not an exact match for any published row."
+        },
+        "max_throughput_mbps": {
+          "status": "V",
+          "source_url": "https://www.cambiumnetworks.com/wp-content/uploads/2015/08/SS_ePMP_1000_GPSsyncRadio_06282018_2.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Spec sheet: 'more than 200 Mbps of real user throughput' — consistent with catalog's 200 (vendor says '>200', catalog states it as an exact figure)."
+        },
+        "standard": {
+          "status": "V",
+          "source_url": "https://www.cambiumnetworks.com/wp-content/uploads/2015/08/SS_ePMP_1000_GPSsyncRadio_06282018_2.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Spec sheet explicitly says 'Cambium Proprietary' MAC layer, NOT 802.11n — catalog's standard label does not match."
+        },
+        "antenna_gain_dbi": {
+          "status": "derived",
+          "note": "This radio is sold without an integrated antenna (paired with an external sector) — 0 is a reasonable convention for a 'radio-only' SKU, not verified against a specific published figure."
+        },
+        "frequency_ghz": {
+          "status": "derived",
+          "source_url": "https://www.cambiumnetworks.com/wp-content/uploads/2015/08/SS_ePMP_1000_GPSsyncRadio_06282018_2.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor publishes a 4910-5970 MHz band, not a single figure."
+        },
+        "max_range_km": {
+          "status": "UNVERIFIED",
+          "note": "Not listed in the spec sheet."
+        }
+      }
     },
     {
       "id": "cambium-epmp3000",
@@ -255,7 +601,13 @@
       "max_range_km": 30,
       "max_throughput_mbps": 800,
       "standard": "802.11ac Wave 2",
-      "notes": "MU-MIMO 4x4 sector AP. Serves up to 120 SMs per sector."
+      "notes": "MU-MIMO 4x4 sector AP. Serves up to 120 SMs per sector.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "cambium-pmp450i",
@@ -270,7 +622,13 @@
       "max_range_km": 40,
       "max_throughput_mbps": 300,
       "standard": "Proprietary OFDM",
-      "notes": "Carrier-grade PTMP platform. Higher reliability and range than 802.11 PTMP. Licensed-band variants available."
+      "notes": "Carrier-grade PTMP platform. Higher reliability and range than 802.11 PTMP. Licensed-band variants available.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "cambium-pmp450m",
@@ -285,7 +643,49 @@
       "max_range_km": 40,
       "max_throughput_mbps": 2000,
       "standard": "Proprietary MU-MIMO",
-      "notes": "Massive MIMO 16x2 AP. Highest capacity Cambium PMP platform. Up to 2 Gbps aggregate."
+      "notes": "Massive MIMO 16x2 AP. Highest capacity Cambium PMP platform. Up to 2 Gbps aggregate.",
+      "evidence": {
+        "rx_sensitivity_dbm": {
+          "status": "V",
+          "source_url": "https://brandcentral.cambiumnetworks.com/asset/aebc9948-efb5-4204-a718-d656d8614854/Cambium_Networks_data_sheet_5GHz_PMP_450m.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet: 'Ultimate Sensitivity: -94 dBm' — matches catalog exactly."
+        },
+        "max_throughput_mbps": {
+          "status": "V",
+          "source_url": "https://www.cambiumnetworks.com/resource/pmp-450m/",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor's own highest published claim is 'more than 1.2 Gbps in a 40 MHz channel' — catalog's 2000 Mbps EXCEEDS the vendor's own stated maximum (1200)."
+        },
+        "max_range_km": {
+          "status": "V",
+          "source_url": "https://brandcentral.cambiumnetworks.com/asset/aebc9948-efb5-4204-a718-d656d8614854/Cambium_Networks_data_sheet_5GHz_PMP_450m.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet: 'Maximum Deployment Range: Up to 64 km (40 miles)'. Catalog's 40 looks like it was taken from the miles column and mislabeled as km — a suspected unit-confusion bug, not corrected here."
+        },
+        "standard": {
+          "status": "V",
+          "source_url": "https://brandcentral.cambiumnetworks.com/asset/aebc9948-efb5-4204-a718-d656d8614854/Cambium_Networks_data_sheet_5GHz_PMP_450m.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet: MAC 'Cambium Networks proprietary', PHY '14x14 Multi-User MIMO OFDM' — catalog's 'Proprietary MU-MIMO' label is the most accurate of any SKU in this audit."
+        },
+        "tx_power_dbm": {
+          "status": "low-confidence",
+          "source_url": "https://brandcentral.cambiumnetworks.com/asset/aebc9948-efb5-4204-a718-d656d8614854/Cambium_Networks_data_sheet_5GHz_PMP_450m.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Datasheet states Maximum EIRP +45 dBm for the integrated 90-degree sector antenna — catalog's tx_power_dbm:30 + antenna_gain_dbi:0 (implying ~30 dBm EIRP) is architecturally inconsistent with this being a sectorized AP, not a bare radio; ~15 dB short of the published EIRP."
+        },
+        "antenna_gain_dbi": {
+          "status": "low-confidence",
+          "note": "Same inconsistency as tx_power_dbm above — this SKU has an integrated sector antenna, so gain 0 doesn't fit the product architecture."
+        },
+        "frequency_ghz": {
+          "status": "derived",
+          "source_url": "https://brandcentral.cambiumnetworks.com/asset/aebc9948-efb5-4204-a718-d656d8614854/Cambium_Networks_data_sheet_5GHz_PMP_450m.pdf",
+          "retrieved_date": "2026-08-23",
+          "note": "Vendor publishes a 5150-5925 MHz band. Also note: this datasheet verifies the 5 GHz variant (14x14 MIMO); Cambium also sells a 3 GHz PMP 450m variant (8x8 MIMO, per registry.md B07) with different specs — catalog's generic id doesn't state which band, so this evidence may not apply if the SKU is meant to represent the 3 GHz variant."
+        }
+      }
     },
     {
       "id": "cambium-cnpilot-e500",
@@ -300,7 +700,13 @@
       "max_range_km": 0.3,
       "max_throughput_mbps": 867,
       "standard": "802.11ac Wave 2",
-      "notes": "Outdoor dual-band Wi-Fi AP for hotspot and enterprise campus deployments. IP67."
+      "notes": "Outdoor dual-band Wi-Fi AP for hotspot and enterprise campus deployments. IP67.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "cambium-cnreach-n500",
@@ -315,7 +721,13 @@
       "max_range_km": 80,
       "max_throughput_mbps": 8,
       "standard": "Proprietary OFDM",
-      "notes": "Sub-GHz NLOS backhaul for rural and remote sites. Extreme range capability."
+      "notes": "Sub-GHz NLOS backhaul for rural and remote sites. Extreme range capability.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "ubnt-airmax-ac-sector",
@@ -330,7 +742,13 @@
       "max_range_km": 0,
       "max_throughput_mbps": 0,
       "standard": "passive",
-      "notes": "60-degree sector antenna. Pairs with Rocket AC base station radios."
+      "notes": "60-degree sector antenna. Pairs with Rocket AC base station radios.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     },
     {
       "id": "mikrotik-omnitik5",
@@ -345,7 +763,13 @@
       "max_range_km": 5,
       "max_throughput_mbps": 300,
       "standard": "802.11n",
-      "notes": "Omnidirectional 360-degree PTMP AP. RouterOS built-in 5-port switch."
+      "notes": "Omnidirectional 360-degree PTMP AP. RouterOS built-in 5-port switch.",
+      "evidence": {
+        "_all": {
+          "status": "UNVERIFIED",
+          "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
+        }
+      }
     }
   ]
 }
