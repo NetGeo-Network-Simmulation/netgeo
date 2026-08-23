@@ -82,18 +82,30 @@ async def test_lab_step_advances_deterministically():
 
 async def test_lab_emits_sim_tick_with_metrics():
     """Same capture pattern as test_sim_service.py's
-    test_realtime_run_streams_sim_tick_and_completes: subscribe to the bus,
-    start a run, drain a few loop turns, assert on the last sim.tick."""
+    test_realtime_run_streams_sim_tick_and_completes, but deterministic:
+    wait on an event the collector sets when the first sim.tick lands,
+    instead of draining a fixed number of loop turns.
+
+    Regression: with a fixed ``for _ in range(20): await asyncio.sleep(0)``
+    budget, ``stop()`` could race ahead of the background driver's first
+    batch on a loaded machine, so ``received`` was sometimes still empty
+    (flaky ~3/8 runs). ``start()`` now also publishes a "running" tick
+    synchronously before the driver task starts, so the wait below resolves
+    immediately in practice — but it still stays bounded via a timeout so a
+    genuine regression fails fast instead of hanging."""
     topo = _topo("p-tick")
     pid = topo.project.id
     bus = get_bus()
     mgr = get_lab_run_manager()
     received: list[dict] = []
+    first_tick = asyncio.Event()
 
     async def collect() -> None:
         async with bus.subscription(pid) as events:
             async for ev in events:
                 received.append(ev)
+                if ev.get("type") == "sim.tick":
+                    first_tick.set()
 
     collector = asyncio.create_task(collect())
     await asyncio.sleep(0)  # let the subscription register before we publish
@@ -101,15 +113,14 @@ async def test_lab_emits_sim_tick_with_metrics():
     try:
         started = await mgr.start(topo)
         assert started["state"] == "running"
-        for _ in range(20):
-            await asyncio.sleep(0)
+        await asyncio.wait_for(first_tick.wait(), timeout=5)
     finally:
         await mgr.stop(pid)
         collector.cancel()
 
     ticks = [e for e in received if e.get("type") == "sim.tick"]
     assert ticks, "expected at least one sim.tick to be broadcast"
-    tick = ticks[-1]
+    tick = ticks[0]
     assert set(tick) == {"type", "t", "metrics", "state"}
     assert "delivered" in tick["metrics"]
     assert "dropped" in tick["metrics"]
