@@ -95,7 +95,16 @@ class Device:
         """Called when a frame is fully received on ``iface``. Override."""
 
     def on_mtu_drop(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
-        """Hook: an egress frame exceeded the link MTU (routers send ICMP)."""
+        """Hook: an egress frame exceeded the link MTU with DF set.
+
+        Base no-op (P-4b): a plain host has no forwarding role to report
+        back to, so it stays silent here — the frame's own application
+        (e.g. ping) already learns of the loss by timeout. The drop is
+        still observable via ``net.drops["mtu_exceeded"]``, incremented by
+        the caller in :meth:`Interface.transmit` before this hook runs.
+        :class:`~engine.netstack.routing.Router` overrides this to send
+        ICMP "fragmentation needed"/"packet too big".
+        """
 
     def on_start(self, net: Network) -> None:
         """Hook: the network started — kick off periodic/bootstrap behaviour."""
@@ -291,6 +300,7 @@ class L3Device(Device):
                     dst=packet.src,
                     proto=PROTO_ICMP,
                     ttl=64,
+                    dont_fragment=packet.dont_fragment,  # reply inherits request's DF (P-4b)
                     payload=IcmpMessage(
                         type=0, ident=icmp.ident, seq=icmp.seq, data_len=icmp.data_len
                     ),
