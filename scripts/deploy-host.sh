@@ -40,7 +40,20 @@ sudo_ chown -R "$USER:$USER" .git
 git checkout -- frontend/package-lock.json 2>/dev/null || true
 git checkout -q main
 git fetch /tmp/netgeo.bundle +main:main-in
-git merge --ff-only main-in
+# Host is a deploy mirror, not a workspace: no commit is ever born here, so
+# forcing main to match the incoming ref is correct — and it's the only thing
+# that survives SHAs rewritten by GitHub's rebase-merge on every PR batch.
+# GitHub's ruleset rebases each PR batch onto main, which rewrites the SHA of
+# every prior commit; a raw SHA diff (main-in..main) would flag all of those
+# as "stray" every single time. --cherry-pick drops commits that are
+# patch-equivalent on both sides, so only commits truly unique to host (by
+# content, not SHA) survive the count.
+stray=$(git rev-list --right-only --cherry-pick --count main-in...main)
+if [[ "$stray" -gt 0 ]]; then
+  echo "abort: $stray commit(s) on host main not in incoming ref; inspect with: git log main-in...main --right-only --cherry-pick" >&2
+  exit 1
+fi
+git reset --hard main-in
 rm -f /tmp/netgeo.bundle
 sudo_ docker compose -p netgeo-dev -f infra/docker-compose.yml -f infra/docker-compose.lan.yml build backend
 sudo_ docker compose -p netgeo-dev -f infra/docker-compose.yml -f infra/docker-compose.lan.yml up -d
