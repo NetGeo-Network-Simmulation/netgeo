@@ -47,6 +47,8 @@ Node ``intent`` fields understood by the builder (all optional):
 """
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import hashlib
 import logging
 import threading
@@ -55,7 +57,10 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 
+from fastapi.concurrency import run_in_threadpool
+
 from app.models import Topology
+from app.services.events import get_bus
 from engine.netstack import Network
 from engine.netstack.cli import CliSession
 from engine.netstack.device import Device, Host
@@ -630,6 +635,193 @@ class LabManager:
 @lru_cache(maxsize=1)
 def get_lab_manager() -> LabManager:
     return LabManager()
+
+
+# ---------------------------------------------------------------------------
+# Continuous lab runner (S3-a) — the netstack (Jalur B) equivalent of
+# ``app.services.sim.SimManager``. Jalur A's realtime run drives an
+# in-process ``Simulation`` scheduler; this drives the same living ``Lab``
+# used by ping/traceroute/CLI, so continuous "play" and one-shot diagnostics
+# never diverge. Pattern (gate for pause, batched dispatch, best-effort
+# sim.tick publish) is copied from SimManager on purpose — do not invent a
+# second concurrency style.
+# ---------------------------------------------------------------------------
+
+_LAB_TICK_BATCH = 128  # same batch size as SimManager._TICK_BATCH
+
+
+def _lab_metrics(net: Network) -> dict[str, float]:
+    """Metrics shaped like ``app.services.sim._metrics`` but sourced from real
+    netstack counters (no invented numbers):
+
+    - ``delivered``/``injected``: summed across every :class:`PingReport` the
+      Lab has run (``net.pings``), i.e. real ICMP echo replies/requests
+      accounted by ``Network.ping_reply_received``/``Network.ping``. This is
+      netstack's only global per-packet delivery counter today — traffic that
+      never rides a tracked ping (raw protocol chatter, CLI-only frames) is
+      not reflected here.
+    - ``dropped``: sum of ``Network.drops`` (populated by
+      ``Network.record_drop``, e.g. ``mtu_exceeded`` — real, not guessed).
+    - ``avg_latency_s``: mean of every ping's ``rtts_ms`` in seconds; ``0.0``
+      when no ping has completed yet (absence of data, not a fabricated
+      value).
+    - ``pending_events``/``events_dispatched``: direct netstack scheduler
+      counters, same meaning as Jalur A's.
+    """
+    reports = list(net.pings.values())
+    rtts = [r for rep in reports for r in rep.rtts_ms]
+    return {
+        "delivered": sum(rep.received for rep in reports),
+        "dropped": sum(net.drops.values()),
+        "injected": sum(rep.sent for rep in reports),
+        "pending_events": len(net.scheduler.queue),
+        "events_dispatched": net.scheduler.dispatched,
+        "avg_latency_s": round(sum(rtts) / len(rtts) / 1000.0, 6) if rtts else 0.0,
+    }
+
+
+@dataclass
+class _LabRun:
+    project_id: str
+    lab: Lab
+    state: str = "running"          # running|paused|stopped|completed|error
+    stopped: bool = False
+    task: asyncio.Task | None = None
+    # gate is *set* while running, *cleared* while paused; the driver awaits it.
+    gate: asyncio.Event = field(default_factory=asyncio.Event)
+
+    def status(self) -> dict:
+        return {
+            "project_id": self.project_id,
+            "state": self.state,
+            "sim_time": round(self.lab.net.now, 6),
+            "metrics": _lab_metrics(self.lab.net),
+        }
+
+
+class LabRunManager:
+    """Owns the at-most-one live background run per project's Lab."""
+
+    def __init__(self) -> None:
+        self._runs: dict[str, _LabRun] = {}
+
+    def _publish(self, run: _LabRun) -> None:
+        try:
+            get_bus().publish(
+                {
+                    "type": "sim.tick",
+                    "t": round(run.lab.net.now, 6),
+                    "metrics": _lab_metrics(run.lab.net),
+                    "state": run.state,
+                },
+                run.project_id,
+            )
+        except Exception:  # pragma: no cover - telemetry is best-effort
+            logger.exception("sim.tick publish failed for %s", run.project_id)
+
+    def _batch(self, run: _LabRun) -> int:
+        """Dispatch one batch of events. Runs under the project's Lab lock
+        (F62): the Lab is mutated by other ``/lab/*`` requests on worker
+        threads too, so this must never touch it unlocked."""
+
+        def work() -> int:
+            return run.lab.do_run(until=None, max_events=_LAB_TICK_BATCH)
+
+        return get_lab_manager().call_locked(run.project_id, work)
+
+    async def start(self, topo: Topology) -> dict:
+        pid = topo.project.id
+        await self._cancel(pid)
+        lab = await run_in_threadpool(get_lab_manager().get, topo)
+        run = _LabRun(project_id=pid, lab=lab, state="running")
+        run.gate.set()
+        self._runs[pid] = run
+        run.task = asyncio.create_task(self._drive(run))
+        return run.status()
+
+    async def _drive(self, run: _LabRun) -> None:
+        try:
+            while not run.stopped:
+                await run.gate.wait()           # parks here while paused
+                if run.stopped:
+                    break
+                n = await run_in_threadpool(self._batch, run)
+                self._publish(run)
+                if n == 0:                       # nothing left queued
+                    break
+                await asyncio.sleep(0)           # cooperative yield
+            run.state = "stopped" if run.stopped else "completed"
+            self._publish(run)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            run.state = "error"
+            self._publish(run)
+            logger.exception("lab driver crashed for %s", run.project_id)
+
+    def pause(self, project_id: str) -> dict:
+        run = self._runs.get(project_id)
+        if run and run.state == "running":
+            run.gate.clear()
+            run.state = "paused"
+            self._publish(run)
+        return self.status(project_id)
+
+    def resume(self, project_id: str) -> dict:
+        run = self._runs.get(project_id)
+        if run and run.state == "paused":
+            run.state = "running"
+            run.gate.set()
+            self._publish(run)
+        return self.status(project_id)
+
+    async def step(self, topo: Topology) -> dict:
+        """Advance one batch of events, leaving the run paused. Bootstraps a
+        fresh paused run if none exists — mirrors ``SimManager.step``."""
+        pid = topo.project.id
+        run = self._runs.get(pid)
+        if run is None or run.state in ("completed", "stopped", "error"):
+            lab = await run_in_threadpool(get_lab_manager().get, topo)
+            run = _LabRun(project_id=pid, lab=lab, state="paused")
+            run.gate.clear()
+            self._runs[pid] = run
+            run.task = asyncio.create_task(self._drive(run))
+        else:
+            run.state = "paused"
+            run.gate.clear()
+
+        n = await run_in_threadpool(self._batch, run)
+        if n == 0:
+            run.state = "completed"
+        self._publish(run)
+        return run.status()
+
+    async def stop(self, project_id: str) -> dict:
+        await self._cancel(project_id)
+        return {"project_id": project_id, "state": "idle", "sim_time": 0.0, "metrics": {}}
+
+    async def _cancel(self, project_id: str) -> None:
+        run = self._runs.pop(project_id, None)
+        if run is None:
+            return
+        run.stopped = True
+        run.gate.set()  # unblock a paused driver so it can observe `stopped`
+        if run.task is not None:
+            run.task.cancel()
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await run.task
+
+    def status(self, project_id: str) -> dict:
+        run = self._runs.get(project_id)
+        if run is None:
+            return {"project_id": project_id, "state": "idle", "sim_time": 0.0, "metrics": {}}
+        return run.status()
+
+
+@lru_cache(maxsize=1)
+def get_lab_run_manager() -> LabRunManager:
+    """Process-wide singleton, mirrors ``app.services.sim.get_manager``."""
+    return LabRunManager()
 
 
 # ---------------------------------------------------------------------------

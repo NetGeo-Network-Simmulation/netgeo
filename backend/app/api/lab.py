@@ -503,3 +503,50 @@ async def lab_auto_address(
         "plan": plan,
         "summary": netlab.summarize_plan(plan),
     }
+
+
+# ---------------------------------------------------------------------------
+# Continuous run lifecycle (S3-a) — Jalur B's equivalent of ``/simulate/*``.
+# Nested under ``/run`` (not reusing ``/{project_id}/step`` or
+# ``/{project_id}/status`` above) because those already mean something else:
+# a single synchronous dispatch and a stats snapshot, not a background-run
+# lifecycle. Response shape mirrors ``app/api/simulate.py`` exactly.
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{project_id}/run")
+async def lab_run(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
+    topo = await _topo(r, project_id)
+    try:
+        return await netlab.get_lab_run_manager().start(topo)
+    except Exception as exc:
+        raise SimulationError(str(exc)) from exc
+
+
+@router.post("/{project_id}/run/pause")
+async def lab_run_pause(project_id: str):
+    return netlab.get_lab_run_manager().pause(project_id)
+
+
+@router.post("/{project_id}/run/resume")
+async def lab_run_resume(project_id: str):
+    return netlab.get_lab_run_manager().resume(project_id)
+
+
+@router.post("/{project_id}/run/step")
+async def lab_run_step(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
+    topo = await _topo(r, project_id)
+    try:
+        return await netlab.get_lab_run_manager().step(topo)
+    except Exception as exc:
+        raise SimulationError(str(exc)) from exc
+
+
+@router.post("/{project_id}/run/stop")
+async def lab_run_stop(project_id: str):
+    return await netlab.get_lab_run_manager().stop(project_id)
+
+
+@router.get("/{project_id}/run/status")
+async def lab_run_status(project_id: str):
+    return netlab.get_lab_run_manager().status(project_id)
