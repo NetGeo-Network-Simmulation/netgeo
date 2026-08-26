@@ -332,11 +332,24 @@ export const twinApi = {
 
 /* ----------------------------- Simulation -------------------------------- */
 export const simApi = {
-  start: (body: SimulateRequest) => http.post('/simulate', body).then((r) => r.data),
-  pause: (projectId: string) => http.post(`/simulate/${projectId}/pause`).then((r) => r.data),
-  resume: (projectId: string) => http.post(`/simulate/${projectId}/resume`).then((r) => r.data),
-  step: (projectId: string) => http.post(`/simulate/${projectId}/step`).then((r) => r.data),
-  stop: (projectId: string) => http.post(`/simulate/${projectId}/stop`).then((r) => r.data),
+  start: (body: SimulateRequest) => {
+    const { project_id, realtime = true } = body;
+    // Ignore seed and horizon as per instructions
+    if (realtime) {
+      // Set mode to realtime first, then start simulation
+      return http.post(`/lab/${project_id}/mode`, { mode: 'realtime' })
+        .then(() => http.post(`/lab/${project_id}/run`))
+        .then(r => r.data);
+    } else {
+      // For simulation mode, just start (could also set mode to simulation if needed)
+      return http.post(`/lab/${project_id}/run`).then(r => r.data);
+    }
+  },
+  pause: (projectId: string) => http.post(`/lab/${projectId}/run/pause`).then(r => r.data),
+  resume: (projectId: string) => http.post(`/lab/${projectId}/run/resume`).then(r => r.data),
+  step: (projectId: string) => http.post(`/lab/${projectId}/run/step`).then(r => r.data),
+  stop: (projectId: string) => http.post(`/lab/${projectId}/run/stop`).then(r => r.data),
+  status: (projectId: string) => http.get(`/lab/${projectId}/run/status`).then(r => r.data),
 };
 
 /* ------------------------------ Live lab ---------------------------------- */
