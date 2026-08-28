@@ -63,6 +63,17 @@ jobs:
           path: packaging/dist/netgeo/
           if-no-files-found: error
 
+      - name: Ensure Inno Setup (iscc) is available
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          if (-not (Get-Command iscc -ErrorAction SilentlyContinue)) {
+            choco install innosetup -y
+            # ponytail: choco updates machine PATH, not this job's env — append
+            # its known install dir so the next step's `iscc` call resolves.
+            echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
       - name: Build Windows installer (Inno Setup, unsigned)
         if: matrix.os == 'windows-latest'
         working-directory: packaging/windows
