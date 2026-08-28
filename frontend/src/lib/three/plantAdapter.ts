@@ -67,6 +67,27 @@ const MEDIA_MAP: Record<CableMedia, string> = {
   gpon_drop: 'os2apc',
 };
 
+/** rack3d `MEDIA` key → backend `CableMedia`, for saving a new patch made in
+ *  the 3D view (NG-PH3D P2). `MEDIA_MAP` above is lossy (9 backend values →
+ *  7 visual ones), so this is a representative preimage per visual key, not
+ *  a true inverse. Only covers the keys `mediaFor()` in rack3d.ts can
+ *  actually produce; 'mpo' has no backend media at all (P1 §5 dead code) so
+ *  it falls back to the closest real fiber trunk type. */
+const VISUAL_TO_CABLE_MEDIA: Record<string, CableMedia> = {
+  cat6a: 'cat6a',
+  os2: 'smf_os2',
+  om3: 'mmf_om3',
+  om4: 'mmf_om4',
+  dac: 'dac',
+  coax: 'coax',
+  os2apc: 'gpon_drop',
+  mpo: 'mmf_om4',
+};
+
+export function cableMediaForVisual(visualKey: string): CableMedia {
+  return VISUAL_TO_CABLE_MEDIA[visualKey] ?? 'cat6a';
+}
+
 const DEAD_LINK_STATUS = new Set(['down', 'admin_down', 'errored']);
 
 function hexNum(hex: string, fallback: number): number {
@@ -99,9 +120,10 @@ function dominantPtype(node: NodeModel): PortType | undefined {
 function adaptRackDevices(
   rack: Rack,
   nodes: NodeModel[],
-): { devices: DeviceDef[]; ordinals: Map<string, number> } {
+): { devices: DeviceDef[]; ordinals: Map<string, number>; ifaceByDevPort: Map<string, string> } {
   const devices: DeviceDef[] = [];
   const ordinals = new Map<string, number>();
+  const ifaceByDevPort = new Map<string, string>();
   const occupied = new Set<number>();
 
   for (const node of nodes) {
@@ -115,7 +137,10 @@ function adaptRackDevices(
 
     const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
     const orderedIfaceIds = [...frontPortFractions(node, span).keys()];
-    orderedIfaceIds.forEach((ifaceId, ordinal) => ordinals.set(ifaceId, ordinal));
+    orderedIfaceIds.forEach((ifaceId, ordinal) => {
+      ordinals.set(ifaceId, ordinal);
+      ifaceByDevPort.set(`${node.id}:${ordinal}`, ifaceId);
+    });
 
     devices.push({
       id: node.id,
@@ -130,7 +155,7 @@ function adaptRackDevices(
       ptype: orderedIfaceIds.length ? dominantPtype(node) : undefined,
     });
   }
-  return { devices, ordinals };
+  return { devices, ordinals, ifaceByDevPort };
 }
 
 /**
@@ -144,7 +169,7 @@ export function adaptTopology(
   topology: Topology,
   rackAId: string | null,
   rackBId: string | null,
-): BuildOptions | null {
+): (BuildOptions & { ifaceByDevPort: Map<string, string> }) | null {
   const racks = topology.racks ?? [];
   const rackA = racks.find((r) => r.id === rackAId);
   const rackB = racks.find((r) => r.id === rackBId);
@@ -159,12 +184,14 @@ export function adaptTopology(
   const fitout: Record<string, DeviceDef[]> = { A: [], B: [] };
   const ordinalsByIface = new Map<string, number>();
   const devIdToSlot = new Map<string, string>();
+  const ifaceByDevPort = new Map<string, string>();
   for (const [slot, rack] of [['A', rackA], ['B', rackB]] as const) {
     if (!rack) continue;
-    const { devices, ordinals } = adaptRackDevices(rack, nodes);
+    const { devices, ordinals, ifaceByDevPort: devPorts } = adaptRackDevices(rack, nodes);
     fitout[slot] = devices;
     for (const d of devices) devIdToSlot.set(d.id, slot);
     for (const [ifaceId, ordinal] of ordinals) ordinalsByIface.set(ifaceId, ordinal);
+    for (const [key, ifaceId] of devPorts) ifaceByDevPort.set(key, ifaceId);
   }
 
   const linkById = new Map<string, LinkModel>((topology.links ?? []).map((l) => [l.id, l]));
@@ -192,6 +219,7 @@ export function adaptTopology(
     rackB: rackB?.enclosure_profile ?? DEFAULT_ENCLOSURE,
     fitout,
     links,
+    ifaceByDevPort,
   };
 }
 
