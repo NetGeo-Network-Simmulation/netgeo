@@ -10,6 +10,17 @@
 #
 # Trigger: manual + release tags only (not every push — desktop builds are
 # comparatively expensive wall-clock).
+#
+# Linux glibc floor: a PyInstaller bundle links against the *build host's*
+# glibc, which is forward-compatible only. `ubuntu-latest` drifts forward
+# over time (24.04/glibc 2.39 as of this writing) while our supported floor
+# is glibc 2.35 (see packaging/linux/build-in-container.sh). Pinning to
+# `ubuntu-22.04` keeps the CI-built bundle at or below that floor without
+# needing a container inside CI — actions/setup-python's Linux interpreter
+# is already a portable prebuilt (not the OS package), so the only extra
+# risk was the runner's own (drifting) glibc; pinning removes it. Local dev
+# builds on this machine (Fedora, glibc 2.43) MUST use
+# packaging/linux/build-in-container.sh instead — see packaging/README.md.
 on:
   workflow_dispatch:
   push:
@@ -20,7 +31,7 @@ jobs:
   build:
     strategy:
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
 
     steps:
@@ -88,7 +99,7 @@ jobs:
           if-no-files-found: error
 
       - name: Build Linux install-ready tarball
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         run: |
           mkdir -p packaging/tarball/netgeo
           cp -r packaging/dist/netgeo packaging/tarball/netgeo/netgeo
@@ -97,7 +108,7 @@ jobs:
           tar -C packaging/tarball -czf packaging/netgeo-linux-x86_64.tar.gz netgeo
 
       - name: Upload Linux install-ready tarball
-        if: matrix.os == 'ubuntu-latest'
+        if: matrix.os == 'ubuntu-22.04'
         uses: actions/upload-artifact@v4
         with:
           name: netgeo-installer-linux-unsigned

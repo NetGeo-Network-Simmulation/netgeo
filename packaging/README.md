@@ -21,12 +21,15 @@ This is a **kerangka** — the simplest thing that runs, not a finished product.
 - `requirements.txt` — pins `pyinstaller==6.22.2` (build-time only, not a
   runtime dependency — don't add it to `backend/requirements.txt`).
 - `linux/` — per-user desktop integration: `netgeo.desktop` (XDG entry),
-  `install.sh` / `uninstall.sh`.
+  `install.sh` / `uninstall.sh`, `build-in-container.sh` (portable Linux
+  build via rootless Podman — see "Installing" below, **use this, not a
+  direct `pyinstaller netgeo.spec` on this machine**).
 - `windows/netgeo.iss` — Inno Setup script producing a per-user
   `netgeo-<version>-setup.exe` (Start Menu + optional Desktop shortcut,
   uninstaller, no admin rights required).
 - `../.github/workflows/desktop.yml` — builds the unsigned onedir bundle on
-  `windows-latest` + `ubuntu-latest`, then wraps it into an install-ready
+  `windows-latest` + `ubuntu-22.04` (pinned, not `ubuntu-latest` — see
+  comment in the workflow for why), then wraps it into an install-ready
   artifact per platform (Windows: Inno Setup `.exe`; Linux: tarball of the
   bundle + `linux/`), uploads both. Triggers: `workflow_dispatch` and `v*`
   tags only (not every push). Windows *signing* (separate from the
@@ -35,24 +38,50 @@ This is a **kerangka** — the simplest thing that runs, not a finished product.
 
 ## Installing
 
-### Linux — tested, working (Fedora 44, 2026-08-28)
+### Linux — DO NOT build the release bundle on this dev machine
+
+**`pyinstaller netgeo.spec` run directly on this machine (Fedora 44, glibc
+2.43) produces a binary that will not start on any older distro.** Proven,
+not theoretical: a Fedora-built bundle shipped to a fresh Ubuntu 24.04 VM
+(glibc 2.39) failed with
+`GLIBC_ABI_GNU2_TLS' not found (required by libpython3.14.so.1.0)` — full
+repro in `docs/qa/launcher-vm-ubuntu-2026-08-28.md` (local-only). Reason:
+PyInstaller statically links the *build host's* glibc, and glibc only runs
+forward (older glibc → newer distro is fine; newer glibc → older distro is
+not).
+
+**Fix: build inside `packaging/linux/build-in-container.sh`.** It runs the
+same `pyinstaller netgeo.spec` inside a rootless Podman container based on
+`ubuntu:22.04` (glibc 2.35, python3.11 — the newest available there), so the
+resulting binary's glibc floor is 2.35 instead of whatever this machine
+happens to be running. No new dependency: Podman is already installed and
+already used on this machine (see vault `research/spike-frr-podman.md`).
 
 ```
-cd packaging && ../backend/.venv/bin/pyinstaller netgeo.spec   # build the bundle
-cd linux && ./install.sh                                        # per-user, no root
+./packaging/linux/build-in-container.sh          # → packaging/dist-container/dist/netgeo
+cd packaging/linux && ./install.sh                # per-user, no root
 ```
 
-Installs the bundle to `~/.local/share/netgeo/`, adds
-`~/.local/share/applications/netgeo.desktop`, and hicolor icons
-(128/256/512). Verified end-to-end on this machine: `.desktop` passes
-`desktop-file-validate`, launching via its exact `Exec=` line serves `/`
-(200, real built `index.html` + hashed JS asset also 200) and
-`/api/health` (200), and `uninstall.sh` removes everything it installed
-(idempotent, run twice cleanly) while leaving `~/.config/netgeo/` (the
-user's projects/auth state — a different, unrelated directory) untouched.
-A CI-built tarball (`netgeo-installer-linux-unsigned` artifact) has the
-same `linux/install.sh` layout but has **not itself** been run from CI
-output — only from a local build on this machine.
+`frontend/dist` is built on the host first (Node is here; not installed in
+the container) and bind-mounted in. Named Podman volumes
+(`netgeo-build-apt-cache`, `netgeo-build-pip-cache`) persist apt/pip
+downloads across re-runs — this environment's egress was measured at
+~115 KB/s, so re-downloading everything on every retry is otherwise brutal.
+
+**Verified working, both directions, 2026-08-28:**
+- Built in the container, run **on this machine (Fedora 44)**: `/` → 200,
+  `/api/health` → 200, built JS asset → 200.
+- Same binary, shipped to a fresh **Ubuntu 24.04.4 VM** (headless,
+  1 vCPU/3.3 GB): `install.sh` as non-root, `NETGEO_NO_BROWSER=1`, `/` → 200,
+  `/api/health` → `{"status":"ok","app":"NetGeo","version":"1.2.99","channel":"beta"}`,
+  built JS asset (`/assets/index-BTJLwYj6.js`) → 200. `uninstall.sh` ran
+  twice cleanly (idempotent), VM left with zero `netgeo` remnants.
+- `objdump -T` across every bundled `.so` tops out at `GLIBC_2.35` — matches
+  the container base exactly, nothing higher leaked in.
+
+Not yet tested: Debian 12, Ubuntu 20.04 or older (glibc 2.31, below this
+build's 2.35 floor — would need a still-older base image), any distro other
+than Fedora/Ubuntu.
 
 Uninstall: `packaging/linux/uninstall.sh` (or the copy under
 `~/.local/share/netgeo/` is not kept — re-run the one from a checkout/tarball).
