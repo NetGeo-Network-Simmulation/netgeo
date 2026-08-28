@@ -48,18 +48,24 @@ export interface MediaSpec {
   r: number;
 }
 
-/* ─── Cable media: jacket colour per TIA-598 / datacenter practice ───────── */
+/* ─── Cable media: jacket colour per TIA-598 / datacenter practice ─────────
+ * os2/os2apc/om3/om4/cat6a/dac/coax map onto the 9 backend `CableMedia`
+ * values (see plantAdapter.ts). om5/mpo/cat6a_xc/cat6a_oob/aoc/pwrA/pwrB have
+ * no backend counterpart yet — dead in the P1 production path, kept for
+ * P5/P6 (backend enum growth, patch-panel hops, PDU visuals). */
 export const MEDIA: Record<string, MediaSpec> = {
   os2: { label: 'OS2 single-mode · LC/UPC', jacket: 0xf2c21b, boot: 0x1e6fd9, r: 0.0017 },
   os2apc: { label: 'OS2 single-mode · LC/APC', jacket: 0xf2c21b, boot: 0x1fa34a, r: 0.0017 },
   om3: { label: 'OM3 multimode · aqua', jacket: 0x36c6c0, boot: 0x36c6c0, r: 0.0017 },
   om4: { label: 'OM4 multimode · violet', jacket: 0xae7bc6, boot: 0xae7bc6, r: 0.0017 },
+  cat6a: { label: 'Cat6A horizontal · blue', jacket: 0x2f6bff, boot: 0x2f6bff, r: 0.0034 },
+  dac: { label: 'DAC twinax 25/100G · black', jacket: 0x16150f, boot: 0x2a2a26, r: 0.0042 },
+  coax: { label: 'Coax 50Ω · black', jacket: 0x16150f, boot: 0x1a1a1c, r: 0.004 },
+  // DEAD CODE — P6: no backend CableMedia counterpart today.
   om5: { label: 'OM5 wideband · lime', jacket: 0xa6d608, boot: 0xa6d608, r: 0.0017 },
   mpo: { label: 'MPO/MTP trunk 12F', jacket: 0x36c6c0, boot: 0x15171b, r: 0.0032 },
-  cat6a: { label: 'Cat6A horizontal · blue', jacket: 0x2f6bff, boot: 0x2f6bff, r: 0.0034 },
   cat6a_xc: { label: 'Cat6A cross-connect · orange', jacket: 0xf07020, boot: 0xf07020, r: 0.0034 },
   cat6a_oob: { label: 'Cat6A mgmt / OOB · green', jacket: 0x27c28b, boot: 0x27c28b, r: 0.003 },
-  dac: { label: 'DAC twinax 25/100G · black', jacket: 0x16150f, boot: 0x2a2a26, r: 0.0042 },
   aoc: { label: 'AOC active optical · aqua', jacket: 0x2fa9a4, boot: 0x15171b, r: 0.0026 },
   pwrA: { label: 'Power C13/C14 · feed A', jacket: 0x121211, boot: 0x121211, r: 0.0038 },
   pwrB: { label: 'Power C13/C14 · feed B', jacket: 0xc0392b, boot: 0xc0392b, r: 0.0038 },
@@ -87,66 +93,6 @@ export interface LinkDef {
   m: string;
   live: boolean;
 }
-
-/* ─── Rack fit-out: real models, RU positions, port counts ──────────────── */
-export const FITOUT: Record<string, DeviceDef[]> = {
-  A: [
-    { id: 'odf-a', u: 42, h: 1, kind: 'odf', brand: 'Corning', model: 'EDGE8 ODF 1U', accent: 0xf2c21b, ports: 12, ptype: 'lc' },
-    { id: 'mpo-a', u: 41, h: 1, kind: 'odf', brand: 'Panduit', model: 'FLEX MPO cassette', accent: 0x36c6c0, ports: 8, ptype: 'mpo' },
-    { id: 'pp-a1', u: 40, h: 1, kind: 'patch', brand: 'Panduit', model: 'PP-24 Cat6A panel', accent: 0x847e75, ports: 24, ptype: 'rj45' },
-    { id: 'cm-a1', u: 39, h: 1, kind: 'duct', brand: 'Panduit', model: 'HCM 1U finger duct', accent: 0x847e75, ports: 0 },
-    { id: 'c9500', u: 38, h: 1, kind: 'switch', brand: 'Cisco', model: 'Catalyst 9500-48Y', accent: 0x1ba0d7, ports: 24, ptype: 'sfp28', chassis: 0x1a1a18 },
-    { id: 'c9300', u: 37, h: 1, kind: 'switch', brand: 'Cisco', model: 'Catalyst 9300-48P', accent: 0x1ba0d7, ports: 24, ptype: 'rj45', chassis: 0x1a1a18 },
-    { id: 'cm-a2', u: 36, h: 1, kind: 'duct', brand: 'Panduit', model: 'HCM 1U finger duct', accent: 0x847e75, ports: 0 },
-    { id: 'crs328', u: 35, h: 1, kind: 'switch', brand: 'MikroTik', model: 'CRS328-24P-4S+RM', accent: 0xe4002b, ports: 24, ptype: 'rj45', chassis: 0xe6e3db },
-    { id: 'fg100f', u: 33, h: 1, kind: 'fw', brand: 'Fortinet', model: 'FortiGate-100F', accent: 0xee3124, ports: 16, ptype: 'rj45', chassis: 0x2a2d33 },
-    { id: 'r740-a1', u: 30, h: 2, kind: 'server', brand: 'Dell', model: 'PowerEdge R740', accent: 0x007db8, ports: 8, ptype: 'bay', chassis: 0x17171a },
-    { id: 'r740-a2', u: 28, h: 2, kind: 'server', brand: 'Dell', model: 'PowerEdge R740', accent: 0x007db8, ports: 8, ptype: 'bay', chassis: 0x17171a },
-    { id: 'dl380', u: 26, h: 2, kind: 'server', brand: 'HPE', model: 'ProLiant DL380 Gen10', accent: 0x01a982, ports: 8, ptype: 'bay', chassis: 0x1b1c1e },
-  ],
-  B: [
-    { id: 'odf-b', u: 42, h: 1, kind: 'odf', brand: 'Corning', model: 'EDGE8 ODF 1U', accent: 0xf2c21b, ports: 12, ptype: 'lc' },
-    { id: 'pp-b1', u: 41, h: 1, kind: 'patch', brand: 'Panduit', model: 'PP-24 Cat6A panel', accent: 0x847e75, ports: 24, ptype: 'rj45' },
-    { id: 'cm-b1', u: 40, h: 1, kind: 'duct', brand: 'Panduit', model: 'HCM 1U finger duct', accent: 0x847e75, ports: 0 },
-    { id: 'qfx', u: 39, h: 1, kind: 'switch', brand: 'Juniper', model: 'QFX5120-48Y', accent: 0x84b135, ports: 24, ptype: 'sfp28', chassis: 0x1a1a18 },
-    { id: 'arista', u: 38, h: 1, kind: 'switch', brand: 'Arista', model: '7050CX3-32S', accent: 0x2a6ebb, ports: 16, ptype: 'qsfp28', chassis: 0x141414 },
-    { id: 'cm-b2', u: 37, h: 1, kind: 'duct', brand: 'Panduit', model: 'HCM 1U finger duct', accent: 0x847e75, ports: 0 },
-    { id: 'crs317', u: 36, h: 1, kind: 'switch', brand: 'MikroTik', model: 'CRS317-1G-16S+RM', accent: 0xe4002b, ports: 16, ptype: 'sfp28', chassis: 0xe6e3db },
-    { id: 'olt', u: 34, h: 1, kind: 'olt', brand: 'NetGeo', model: 'Generic OLT 8-PON', accent: 0xf5a623, ports: 8, ptype: 'pon', chassis: 0x1f1e1d },
-    { id: 'r740-b1', u: 31, h: 2, kind: 'server', brand: 'Dell', model: 'PowerEdge R740', accent: 0x007db8, ports: 8, ptype: 'bay', chassis: 0x17171a },
-    { id: 'r740-b2', u: 29, h: 2, kind: 'server', brand: 'Dell', model: 'PowerEdge R740', accent: 0x007db8, ports: 8, ptype: 'bay', chassis: 0x17171a },
-    { id: 'r650', u: 27, h: 1, kind: 'server', brand: 'Dell', model: 'PowerEdge R650', accent: 0x007db8, ports: 10, ptype: 'bay', chassis: 0x17171a },
-  ],
-};
-
-/* a → b port links, with the media actually used for that hop */
-export const LINKS: LinkDef[] = [
-  { a: ['c9300', 2], b: ['pp-a1', 0], m: 'cat6a', live: true },
-  { a: ['c9300', 3], b: ['pp-a1', 1], m: 'cat6a', live: true },
-  { a: ['c9300', 4], b: ['pp-a1', 2], m: 'cat6a', live: true },
-  { a: ['c9300', 5], b: ['pp-a1', 3], m: 'cat6a', live: false },
-  { a: ['crs328', 1], b: ['pp-a1', 6], m: 'cat6a', live: true },
-  { a: ['crs328', 2], b: ['pp-a1', 7], m: 'cat6a_oob', live: true },
-  { a: ['fg100f', 1], b: ['c9300', 20], m: 'cat6a_xc', live: true },
-  { a: ['c9500', 0], b: ['qfx', 0], m: 'dac', live: true },
-  { a: ['c9500', 1], b: ['arista', 0], m: 'om4', live: true },
-  { a: ['c9500', 2], b: ['arista', 1], m: 'om4', live: true },
-  { a: ['qfx', 4], b: ['crs317', 2], m: 'om3', live: true },
-  { a: ['arista', 4], b: ['odf-b', 2], m: 'om5', live: true },
-  { a: ['mpo-a', 1], b: ['odf-b', 5], m: 'mpo', live: true },
-  { a: ['mpo-a', 2], b: ['odf-b', 6], m: 'mpo', live: true },
-  { a: ['odf-a', 3], b: ['olt', 1], m: 'os2apc', live: true },
-  { a: ['odf-a', 4], b: ['olt', 2], m: 'os2apc', live: false },
-  { a: ['pp-a1', 12], b: ['pp-b1', 12], m: 'cat6a_xc', live: true },
-  { a: ['pp-a1', 13], b: ['pp-b1', 13], m: 'cat6a_xc', live: true },
-  { a: ['r740-a1', 0], b: ['c9300', 8], m: 'cat6a', live: true },
-  { a: ['r740-a2', 0], b: ['c9300', 9], m: 'cat6a', live: true },
-  { a: ['dl380', 0], b: ['c9300', 10], m: 'cat6a', live: true },
-  { a: ['r740-b1', 0], b: ['qfx', 10], m: 'aoc', live: true },
-  { a: ['r740-b2', 0], b: ['qfx', 11], m: 'aoc', live: true },
-  { a: ['r650', 0], b: ['arista', 8], m: 'dac', live: true },
-  { a: ['crs317', 8], b: ['odf-b', 8], m: 'os2', live: true },
-];
 
 export interface CableMeta {
   name: string;

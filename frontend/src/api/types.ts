@@ -288,6 +288,9 @@ export interface Rack {
   site_id: string | null;
   name: string;
   ru_height: number;
+  /** Enclosure look for the 2.5D view (NG-PH3D P1). Keys mirror
+   *  `RACK_SPECS` in lib/three/rack3d.ts; null => renderer's default. */
+  enclosure_profile?: string | null;
 }
 
 /** A physical run realizing a logical link (NG-PH-02). `length_m` feeds
@@ -322,6 +325,12 @@ export interface RackCreate {
   site_id?: string | null;
   name: string;
   ru_height?: number;
+  enclosure_profile?: string | null;
+}
+
+/** PATCH body — every field optional, only provided keys are applied. */
+export interface RackUpdate {
+  enclosure_profile?: string | null;
 }
 
 export interface CableCreate {

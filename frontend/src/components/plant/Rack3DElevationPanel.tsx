@@ -3,16 +3,29 @@
  *
  * Owns one WebGL renderer and one orthographic camera on a fixed isometric
  * POV: no perspective convergence, so the rack reads like the elevation view
- * it replaces. The scene graph itself lives in lib/three/rack3d.
+ * it replaces. The scene graph itself lives in lib/three/rack3d; the
+ * translation from the project's real topology into that scene graph's input
+ * lives in lib/three/plantAdapter (NG-PH3D P1).
  *
  * ponytail: plain three.js, no react-three-fiber. The scene is imperative and
  * rebuilt wholesale on a rack/link change; wrapping it in a reconciler would
  * add a dependency and buy nothing — React owns the chrome, three owns the
  * canvas.
+ *
+ * rack3d.ts only lays out two rack bays side by side (registry keys 'A'/'B').
+ * This panel now fills those two bays with the project's *real* racks
+ * (chosen from a dropdown) instead of a fixed sample fit-out; a project with
+ * more than two racks can view any pair, not all of them at once — full
+ * N-rack layout is bigger than a data-binding slice (see docs/design/22).
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { AlertTriangle, Cable, DoorClosed, Plus, RotateCcw, Server, Tag, Zap } from 'lucide-react';
 import * as THREE from 'three';
-import { Cable, DoorClosed, Plus, RotateCcw, Tag, Zap } from 'lucide-react';
+import { physicalApi, projectsApi } from '@/api/client';
+import { useUiStore } from '@/store/uiStore';
+import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
+import { adaptTopology, DEFAULT_ENCLOSURE, ENCLOSURE_KEYS } from '@/lib/three/plantAdapter';
 import {
   applyDoors,
   applyLabels,
@@ -21,8 +34,6 @@ import {
   disposeScene,
   mediaFor,
   tick,
-  FITOUT,
-  LINKS,
   MEDIA,
   RACK_SPECS,
   U,
@@ -33,9 +44,11 @@ import {
 
 const POV_KEY = 'netgeo.rack3d.pov.v2';
 const POV = { az: (10 * Math.PI) / 180, elev: (10 * Math.PI) / 180, span: 0.75, dist: 14 };
+const EMPTY_FITOUT: Record<string, DeviceDef[]> = { A: [], B: [] };
 
 type Mode = 'cable' | 'adddev' | null;
 type Face = 'front' | 'back';
+type Slot = 'A' | 'B';
 
 interface Pov {
   baseAz: number;
@@ -61,6 +74,8 @@ function loadPov(): Pov {
 }
 
 export function Rack3DElevationPanel() {
+  const projectId = useUiStore((s) => s.projectId);
+  const queryClient = useQueryClient();
   const hostRef = useRef<HTMLDivElement>(null);
   const builtRef = useRef<BuiltScene | null>(null);
   const camRef = useRef<THREE.OrthographicCamera | null>(null);
@@ -70,13 +85,67 @@ export function Rack3DElevationPanel() {
   const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: 'A' });
   const povRef = useRef<Pov>(loadPov());
 
-  const [rackA, setRackA] = useState('apc');
-  const [rackB, setRackB] = useState('vertiv');
-  const [links, setLinks] = useState<LinkDef[]>(() => LINKS.map((l) => ({ ...l })));
-  const [fitout, setFitout] = useState<Record<string, DeviceDef[]>>(() => ({
-    A: FITOUT.A!.map((d) => ({ ...d })),
-    B: FITOUT.B!.map((d) => ({ ...d })),
-  }));
+  // Same query keys as RackElevationPanel.tsx (the 2D panel), on purpose:
+  // when the 2D panel mutates and invalidates ['topology', projectId] /
+  // ['plant', projectId], this panel's cache entries are the same entries,
+  // so it refetches too without any cross-panel event wiring.
+  const topoQ = useQuery({
+    queryKey: ['topology', projectId],
+    queryFn: () => projectsApi.topology(projectId!),
+    enabled: !!projectId,
+  });
+  // Not consumed yet — kept warm for P3 (over-length cable warnings), which
+  // reads this same query the 2D panel already fetches.
+  useQuery({
+    queryKey: ['plant', projectId],
+    queryFn: () => physicalApi.plant(projectId!),
+    enabled: !!projectId,
+  });
+
+  const racks = topoQ.data?.racks ?? [];
+
+  // Which two real racks fill the scene's two bays.
+  const [rackAId, setRackAId] = useState<string | null>(null);
+  const [rackBId, setRackBId] = useState<string | null>(null);
+  useEffect(() => {
+    if (racks.length === 0) {
+      setRackAId(null);
+      setRackBId(null);
+      return;
+    }
+    setRackAId((cur) => (cur && racks.some((r) => r.id === cur) ? cur : (racks[0]?.id ?? null)));
+    setRackBId((cur) => (cur && racks.some((r) => r.id === cur) ? cur : (racks[1]?.id ?? null)));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, racks.map((r) => r.id).join(',')]);
+
+  const rackA = racks.find((r) => r.id === rackAId) ?? null;
+  const rackB = racks.find((r) => r.id === rackBId) ?? null;
+  const adapted = useMemo(
+    () => (topoQ.data ? adaptTopology(topoQ.data, rackAId, rackBId) : null),
+    [topoQ.data, rackAId, rackBId],
+  );
+
+  // Cable Mode / Add-device write nothing to the backend yet (P2) — these are
+  // session-only overlays on top of the real data so the tools stay usable
+  // without pretending to persist.
+  const [localFitout, setLocalFitout] = useState<Record<string, DeviceDef[]>>({ A: [], B: [] });
+  const [localLinks, setLocalLinks] = useState<LinkDef[]>([]);
+  useEffect(() => {
+    setLocalFitout({ A: [], B: [] });
+    setLocalLinks([]);
+  }, [rackAId, rackBId]);
+
+  const fitout = useMemo<Record<string, DeviceDef[]>>(() => ({
+    A: [...(adapted?.fitout.A ?? EMPTY_FITOUT.A!), ...localFitout.A!],
+    B: [...(adapted?.fitout.B ?? EMPTY_FITOUT.B!), ...localFitout.B!],
+  }), [adapted, localFitout]);
+  const links = useMemo<LinkDef[]>(
+    () => [...(adapted?.links ?? []), ...localLinks],
+    [adapted, localLinks],
+  );
+  const rackASpec = adapted?.rackA ?? DEFAULT_ENCLOSURE;
+  const rackBSpec = adapted?.rackB ?? DEFAULT_ENCLOSURE;
+
   const [pov, setPov] = useState<Pov>(povRef.current);
   const [face, setFace] = useState<Face>('front');
   const [mode, setMode] = useState<Mode>(null);
@@ -86,11 +155,19 @@ export function Rack3DElevationPanel() {
   const [sel, setSel] = useState<string | null>(null);
   const [pick, setPick] = useState<{ devId: string; portIx: number } | null>(null);
   const [status, setStatus] = useState('Klik perangkat di scene');
+  const [error, setError] = useState<string | null>(null);
+
+  const updateEnclosure = useMutation({
+    mutationFn: (v: { rackId: string; profile: string }) =>
+      physicalApi.updateRack(v.rackId, { enclosure_profile: v.profile }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['topology', projectId] }),
+    onError: () => setError('Gagal menyimpan profil enclosure.'),
+  });
 
   /** Half-height the shot needs: the tallest rack plus tray headroom. */
   const spanFor = useCallback((scale: number, zoomed: boolean) => {
-    const racks = builtRef.current ? Object.values(builtRef.current.registry.racks) : [];
-    const top = (racks.length ? Math.max(...racks.map((r) => r.h)) : 2.0) + 0.3;
+    const racksBuilt = builtRef.current ? Object.values(builtRef.current.registry.racks) : [];
+    const top = (racksBuilt.length ? Math.max(...racksBuilt.map((r) => r.h)) : 2.0) + 0.3;
     return ((top + 0.08) / 2 / Math.max(0.2, scale)) * (zoomed ? 0.42 : 1);
   }, []);
 
@@ -183,15 +260,18 @@ export function Rack3DElevationPanel() {
     const scene = (renderer as unknown as { _sceneRef?: THREE.Scene } | null)?._sceneRef;
     if (!scene) return;
     if (builtRef.current) disposeScene(builtRef.current);
-    const built = buildScene({ rackA, rackB, fitout, links });
-    scene.add(built.root);
-    builtRef.current = built;
-    applyDoors(built.registry, view.current.doors);
-    applyLabels(built.registry, view.current.labels, view.current.sel);
-    applySelection(built.registry, view.current.sel);
+    builtRef.current = null;
+    if (adapted) {
+      const built = buildScene({ rackA: rackASpec, rackB: rackBSpec, fitout, links });
+      scene.add(built.root);
+      builtRef.current = built;
+      applyDoors(built.registry, view.current.doors);
+      applyLabels(built.registry, view.current.labels, view.current.sel);
+      applySelection(built.registry, view.current.sel);
+    }
     fitCamera();
     placeCamera();
-  }, [rackA, rackB, fitout, links, fitCamera, placeCamera]);
+  }, [adapted, rackASpec, rackBSpec, fitout, links, fitCamera, placeCamera]);
 
   /* ─── toggles: mirror React state into the scene ───────────────────────── */
   useEffect(() => {
@@ -267,7 +347,8 @@ export function Rack3DElevationPanel() {
     setStatus(`${d.def.brand} ${d.def.model} · U${d.def.u} · ${d.def.h}U · rack ${d.rackKey} · ${cables.length} kabel${media.length ? ' · ' + media.join(', ') : ''}`);
   }, []);
 
-  /** Cable Mode: first click arms a port, second click patches the pair. */
+  /** Cable Mode: first click arms a port, second click patches the pair.
+   *  Session-only — nothing is sent to the backend (P2). */
   const handlePortPick = useCallback((devId: string, portIx: number) => {
     const built = builtRef.current;
     if (!built) return;
@@ -280,41 +361,41 @@ export function Rack3DElevationPanel() {
     const a = pick;
     setPick(null);
     if (a.devId === devId && a.portIx === portIx) {
-      setStatus('Cable Mode: pilih dua port');
+      setStatus('Cable Mode: pilih dua port (belum tersimpan)');
       return;
     }
     const m = mediaFor(built.registry.devices[a.devId]!.def, built.registry.devices[devId]!.def);
-    setLinks((prev) => [...prev, { a: [a.devId, a.portIx], b: [devId, portIx], m, live: true }]);
-    setStatus(`Patched ${MEDIA[m]!.label.split(' · ')[0]}: ${a.devId}:${a.portIx} → ${devId}:${portIx}`);
+    setLocalLinks((prev) => [...prev, { a: [a.devId, a.portIx], b: [devId, portIx], m, live: true }]);
+    setStatus(`Patched ${MEDIA[m]!.label.split(' · ')[0]}: ${a.devId}:${a.portIx} → ${devId}:${portIx} (belum tersimpan — hilang saat refresh)`);
   }, [pick]);
 
-  /** Add device: click a free U on a rack, get a 1U switch there. */
-  const handleAddDevice = useCallback((rackKey: string, y: number) => {
+  /** Add device: click a free U on a rack, get a 1U switch there.
+   *  Session-only — nothing is sent to the backend (P2). */
+  const handleAddDevice = useCallback((rackKey: Slot, y: number) => {
     const built = builtRef.current;
     const rack = built?.registry.racks[rackKey];
-    if (!rack) return;
+    const realRack = rackKey === 'A' ? rackA : rackB;
+    if (!rack || !realRack) {
+      setStatus('Pilih rak nyata untuk bay itu dulu');
+      return;
+    }
     const u = Math.floor((y - 0.055) / U) + 1;
     if (u < 1 || u > rack.spec.u) {
       setStatus('Di luar rail — pilih U yang kosong');
       return;
     }
-    const list = fitout[rackKey];
-    if (!list) {
-      setStatus('Rak itu tidak bisa diedit');
-      return;
-    }
-    if (list.some((d) => u >= d.u && u < d.u + d.h)) {
+    if (fitout[rackKey]!.some((d) => u >= d.u && u < d.u + d.h)) {
       setStatus(`U${u} sudah terisi — pilih U yang kosong`);
       return;
     }
-    const id = `new-${rackKey}-${u}`;
+    const id = `local-${rackKey}-${u}-${Date.now()}`;
     const dev: DeviceDef = {
       id, u, h: 1, kind: 'switch', brand: 'NetGeo', model: 'NG-4800 1U switch',
       accent: 0xd97757, ports: 24, ptype: 'rj45', chassis: 0x1e1e1c,
     };
-    setFitout((prev) => ({ ...prev, [rackKey]: [...(prev[rackKey] ?? []), dev] }));
-    setStatus(`Ditambahkan NG-4800 di U${u} rak ${rackKey}`);
-  }, [fitout]);
+    setLocalFitout((prev) => ({ ...prev, [rackKey]: [...prev[rackKey]!, dev] }));
+    setStatus(`Ditambahkan NG-4800 di U${u} rak ${rackKey} (belum tersimpan — hilang saat refresh)`);
+  }, [fitout, rackA, rackB]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -344,8 +425,8 @@ export function Rack3DElevationPanel() {
       if (mode === 'adddev') {
         const any = hits[0];
         if (!any) return;
-        let best: string | null = null, bd = Infinity;
-        for (const k of ['A', 'B']) {
+        let best: Slot | null = null, bd = Infinity;
+        for (const k of ['A', 'B'] as const) {
           const rk = built.registry.racks[k];
           if (!rk) continue;
           const dx = Math.abs(any.point.x - rk.x);
@@ -366,7 +447,7 @@ export function Rack3DElevationPanel() {
     setMode((prev) => {
       const on = prev !== id;
       setStatus(on
-        ? id === 'cable' ? 'Cable Mode: pilih dua port' : 'Add device: pilih U yang kosong'
+        ? id === 'cable' ? 'Cable Mode: pilih dua port (belum tersimpan)' : 'Tambah perangkat: pilih U yang kosong (belum tersimpan)'
         : 'Klik perangkat di scene');
       return on ? id : null;
     });
@@ -378,26 +459,46 @@ export function Rack3DElevationPanel() {
       on ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-recess hover:bg-fg/5 hover:text-fg'
     }`;
 
+  const slotPicker = (slot: Slot) => {
+    const rackId = slot === 'A' ? rackAId : rackBId;
+    const setRackId = slot === 'A' ? setRackAId : setRackBId;
+    const rack = slot === 'A' ? rackA : rackB;
+    return (
+      <div key={slot} className="flex items-center gap-1">
+        <label className="flex items-center gap-1.5 text-xs text-recess">
+          {slot}
+          <select
+            value={rackId ?? ''}
+            onChange={(e) => setRackId(e.target.value || null)}
+            className="rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
+          >
+            <option value="">— kosong —</option>
+            {racks.map((r) => (
+              <option key={r.id} value={r.id}>{r.name}</option>
+            ))}
+          </select>
+        </label>
+        <select
+          value={rack?.enclosure_profile ?? DEFAULT_ENCLOSURE}
+          disabled={!rack}
+          onChange={(e) => rack && updateEnclosure.mutate({ rackId: rack.id, profile: e.target.value })}
+          className="rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50 disabled:opacity-40"
+          title="Profil enclosure"
+        >
+          {ENCLOSURE_KEYS.filter((k) => k !== 'cpi' || rack?.enclosure_profile === 'cpi').map((k) => (
+            <option key={k} value={k}>{RACK_SPECS[k]!.label.replace(/ \d+U.*/, '')}</option>
+          ))}
+        </select>
+      </div>
+    );
+  };
+
   return (
     <div className="absolute inset-0 flex flex-col">
       {/* toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-2">
-        {(['A', 'B'] as const).map((key) => (
-          <label key={key} className="flex items-center gap-1.5 text-xs text-recess">
-            {key}
-            <select
-              value={key === 'A' ? rackA : rackB}
-              onChange={(e) => (key === 'A' ? setRackA : setRackB)(e.target.value)}
-              className="rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
-            >
-              {Object.entries(RACK_SPECS)
-                .filter(([k]) => k !== 'cpi')
-                .map(([k, s]) => (
-                  <option key={k} value={k}>{s.label.replace(/ \d+U.*/, '')}</option>
-                ))}
-            </select>
-          </label>
-        ))}
+        {slotPicker('A')}
+        {slotPicker('B')}
         <div className="mx-1 h-5 w-px bg-fg/10" />
         <button type="button" className={btn(face === 'front')} onClick={() => setFace('front')}>Depan</button>
         <button type="button" className={btn(face === 'back')} onClick={() => setFace('back')}>Belakang</button>
@@ -412,11 +513,11 @@ export function Rack3DElevationPanel() {
           <Zap className="size-3.5" /> Animasi
         </button>
         <div className="mx-1 h-5 w-px bg-fg/10" />
-        <button type="button" className={btn(mode === 'cable')} onClick={() => toggleMode('cable')}>
-          <Cable className="size-3.5" /> Cable Mode
+        <button type="button" className={btn(mode === 'cable')} onClick={() => toggleMode('cable')} title="Belum tersimpan — hilang saat refresh (P2)">
+          <Cable className="size-3.5" /> Cable Mode <span className="text-[10px] opacity-60">(sesi ini)</span>
         </button>
-        <button type="button" className={btn(mode === 'adddev')} onClick={() => toggleMode('adddev')}>
-          <Plus className="size-3.5" /> Tambah perangkat
+        <button type="button" className={btn(mode === 'adddev')} onClick={() => toggleMode('adddev')} title="Belum tersimpan — hilang saat refresh (P2)">
+          <Plus className="size-3.5" /> Tambah perangkat <span className="text-[10px] opacity-60">(sesi ini)</span>
         </button>
         <div className="ml-auto flex items-center gap-3">
           {([
@@ -448,8 +549,27 @@ export function Rack3DElevationPanel() {
         </div>
       </div>
 
+      {error && (
+        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400">
+          <AlertTriangle size={13} /> {error}
+        </div>
+      )}
+      {topoQ.isError && (
+        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400">
+          <AlertTriangle size={13} /> Gagal memuat topologi project.
+        </div>
+      )}
+
       {/* canvas */}
-      <div ref={hostRef} className="relative min-h-0 flex-1" />
+      <div ref={hostRef} className="relative min-h-0 flex-1">
+        {topoQ.isSuccess && racks.length === 0 && (
+          <WorkspaceEmptyState
+            icon={Server}
+            title="Belum ada rak"
+            hint="Buat rak dulu di panel Elevasi (2D) — perangkat yang ditempatkan di sana muncul di sini."
+          />
+        )}
+      </div>
 
       {/* status bar + legend */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-fg/10 px-3 py-1.5 text-[11px] text-recess">

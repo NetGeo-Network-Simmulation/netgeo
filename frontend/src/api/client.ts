@@ -23,6 +23,7 @@ import type {
   Project,
   Rack,
   RackCreate,
+  RackUpdate,
   ReachabilityResult,
   Scenario,
   SimulateRequest,
@@ -249,6 +250,8 @@ export const physicalApi = {
     http.patch<Site>(`/sites/${id}`, patch).then((r) => r.data),
   removeSite: (id: string) => http.delete(`/sites/${id}`).then(() => undefined),
   createRack: (body: RackCreate) => http.post<Rack>('/racks', body).then((r) => r.data),
+  updateRack: (id: string, patch: RackUpdate) =>
+    http.patch<Rack>(`/racks/${id}`, patch).then((r) => r.data),
   createCable: (body: CableCreate) => http.post<Cable>('/cables', body).then((r) => r.data),
   getCable: (id: string) => http.get<Cable>(`/cables/${id}`).then((r) => r.data),
   updateCable: (id: string, patch: CableUpdate) =>
