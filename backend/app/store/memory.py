@@ -281,6 +281,42 @@ class MemoryRepository:
                             f"{filtered['rack_id']!r}'s site {rack.site_id!r}"
                         )
                     filtered["site_id"] = rack.site_id
+
+            # RU placement validation (NG-PH3D P2): a rack/RU change must land
+            # in-range and on rack-units no other node already occupies.
+            # Applies to first placement, re-placement, and cross-rack moves
+            # alike — they're all the same "where does this node live" write.
+            touches_placement = {"rack_id", "ru_start", "ru_span"} & filtered.keys()
+            eff_rack_id = filtered.get("rack_id", node.rack_id)
+            if touches_placement and eff_rack_id is not None:
+                eff_ru_start = filtered.get("ru_start", node.ru_start)
+                eff_ru_span = filtered.get("ru_span", node.ru_span) or 1
+                if eff_ru_start is not None:
+                    rack = self._racks.get(eff_rack_id)
+                    if rack is not None:
+                        lo, hi = eff_ru_start, eff_ru_start + eff_ru_span - 1
+                        if lo < 1 or hi > rack.ru_height:
+                            from app.exceptions.base import ValidationError
+                            raise ValidationError(
+                                f"RU {lo}-{hi} tidak muat di rak {rack.name!r} "
+                                f"({rack.ru_height}U)"
+                            )
+                        for other in self._nodes.values():
+                            if (
+                                other.id == nid
+                                or other.rack_id != eff_rack_id
+                                or other.ru_start is None
+                            ):
+                                continue
+                            o_lo = other.ru_start
+                            o_hi = o_lo + (other.ru_span or 1) - 1
+                            if lo <= o_hi and o_lo <= hi:
+                                from app.exceptions.base import Conflict
+                                raise Conflict(
+                                    f"RU {lo}-{hi} bentrok dengan {other.name!r} "
+                                    f"(U{o_lo}-{o_hi}) di rak {rack.name!r}"
+                                )
+
             updated = node.model_copy(update=filtered)
             self._nodes[nid] = updated
             self._save()

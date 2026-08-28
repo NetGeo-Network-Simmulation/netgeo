@@ -352,3 +352,173 @@ async def test_patch_rack_invalid_enclosure_profile_is_rejected(client):
 async def test_patch_unknown_rack_is_404(client):
     resp = await client.patch("/api/racks/ghost", json={"enclosure_profile": "apc"})
     assert resp.status_code == 404
+
+
+# --- move between racks + RU validation (NG-PH3D P2) -------------------------
+async def test_move_node_between_racks_in_same_site_persists(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site = (await client.post("/api/sites", json={"project_id": pid, "name": "HQ"})).json()
+    rack_a = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site["id"], "name": "RA"}
+        )
+    ).json()
+    rack_b = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site["id"], "name": "RB"}
+        )
+    ).json()
+    node = (
+        await client.post("/api/nodes", json={"project_id": pid, "name": "sw1", "kind": "switch"})
+    ).json()
+    placed = await client.patch(
+        f"/api/nodes/{node['id']}", json={"rack_id": rack_a["id"], "ru_start": 5, "ru_span": 1}
+    )
+    assert placed.status_code == 200, placed.text
+
+    moved = await client.patch(
+        f"/api/nodes/{node['id']}", json={"rack_id": rack_b["id"], "ru_start": 3, "ru_span": 1}
+    )
+    assert moved.status_code == 200, moved.text
+    body = moved.json()
+    assert body["rack_id"] == rack_b["id"]
+    assert body["ru_start"] == 3
+    assert body["site_id"] == site["id"]
+
+
+async def test_move_node_to_rack_in_different_site_is_rejected(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site_a = (await client.post("/api/sites", json={"project_id": pid, "name": "A"})).json()
+    site_b = (await client.post("/api/sites", json={"project_id": pid, "name": "B"})).json()
+    rack_a = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site_a["id"], "name": "RA"}
+        )
+    ).json()
+    rack_b = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site_b["id"], "name": "RB"}
+        )
+    ).json()
+    node = (
+        await client.post("/api/nodes", json={"project_id": pid, "name": "sw1", "kind": "switch"})
+    ).json()
+    placed = await client.patch(
+        f"/api/nodes/{node['id']}", json={"rack_id": rack_a["id"], "ru_start": 5, "ru_span": 1}
+    )
+    assert placed.status_code == 200, placed.text
+
+    # A device already living in site A's rack must not be movable straight
+    # into a site B rack — cross-site moves are forbidden outright (Surya).
+    rejected = await client.patch(
+        f"/api/nodes/{node['id']}", json={"rack_id": rack_b["id"], "ru_start": 3, "ru_span": 1}
+    )
+    assert rejected.status_code == 409, rejected.text
+
+    unchanged = (await client.get(f"/api/nodes/{node['id']}")).json()
+    assert unchanged["rack_id"] == rack_a["id"]
+    assert unchanged["ru_start"] == 5
+
+
+async def test_ru_collision_on_placement_is_rejected(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    rack = (await client.post("/api/racks", json={"project_id": pid, "name": "R1"})).json()
+    a = (
+        await client.post("/api/nodes", json={"project_id": pid, "name": "sw1", "kind": "switch"})
+    ).json()
+    b = (
+        await client.post("/api/nodes", json={"project_id": pid, "name": "sw2", "kind": "switch"})
+    ).json()
+    placed = await client.patch(
+        f"/api/nodes/{a['id']}", json={"rack_id": rack["id"], "ru_start": 10, "ru_span": 2}
+    )
+    assert placed.status_code == 200, placed.text
+
+    # Overlaps U10-U11 (occupied by `a`) at U11-U12.
+    rejected = await client.patch(
+        f"/api/nodes/{b['id']}", json={"rack_id": rack["id"], "ru_start": 11, "ru_span": 2}
+    )
+    assert rejected.status_code == 409, rejected.text
+    assert "bentrok" in rejected.json()["error"]["message"]
+
+    unchanged = (await client.get(f"/api/nodes/{b['id']}")).json()
+    assert unchanged["rack_id"] is None
+
+
+async def test_ru_out_of_range_is_rejected(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    rack = (
+        await client.post("/api/racks", json={"project_id": pid, "name": "R1", "ru_height": 10})
+    ).json()
+    node = (
+        await client.post("/api/nodes", json={"project_id": pid, "name": "sw1", "kind": "switch"})
+    ).json()
+
+    rejected = await client.patch(
+        f"/api/nodes/{node['id']}", json={"rack_id": rack["id"], "ru_start": 9, "ru_span": 4}
+    )
+    assert rejected.status_code == 422, rejected.text
+    assert "tidak muat" in rejected.json()["error"]["message"]
+
+
+async def test_link_survives_node_move_between_racks(client):
+    # A link/cable references interfaces, not rack placement — moving one
+    # endpoint's node to another rack in the same site must not disturb it.
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site = (await client.post("/api/sites", json={"project_id": pid, "name": "HQ"})).json()
+    rack_a = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site["id"], "name": "RA"}
+        )
+    ).json()
+    rack_b = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site["id"], "name": "RB"}
+        )
+    ).json()
+    n1 = (
+        await client.post(
+            "/api/nodes",
+            json={
+                "project_id": pid, "name": "sw1", "kind": "switch",
+                "interfaces": [{"id": "if1", "node_id": "", "name": "eth0"}],
+            },
+        )
+    ).json()
+    n2 = (
+        await client.post(
+            "/api/nodes",
+            json={
+                "project_id": pid, "name": "sw2", "kind": "switch",
+                "interfaces": [{"id": "if2", "node_id": "", "name": "eth0"}],
+            },
+        )
+    ).json()
+    await client.patch(f"/api/nodes/{n1['id']}", json={"rack_id": rack_a["id"], "ru_start": 1})
+    await client.patch(f"/api/nodes/{n2['id']}", json={"rack_id": rack_a["id"], "ru_start": 5})
+    link = await client.post(
+        "/api/links", json={"project_id": pid, "a_iface": "if1", "b_iface": "if2"}
+    )
+    assert link.status_code == 201, link.text
+    link_id = link.json()["id"]
+    cable = await client.post(
+        "/api/cables",
+        json={"project_id": pid, "link_id": link_id, "media": "cat6a", "length_m": 1.5},
+    )
+    assert cable.status_code == 201, cable.text
+
+    moved = await client.patch(
+        f"/api/nodes/{n1['id']}", json={"rack_id": rack_b["id"], "ru_start": 2}
+    )
+    assert moved.status_code == 200, moved.text
+
+    # The link and cable are untouched — they key off interface ids, which
+    # a rack move never changes. The cable's length_m is NOT recomputed: it
+    # still reflects the pre-move run, and may now understate the real
+    # distance (P2 does not re-derive physical length from a move).
+    got_link = await client.get(f"/api/links/{link_id}")
+    assert got_link.status_code == 200
+    assert got_link.json()["a_iface"] == "if1"
+    got_cable = await client.get(f"/api/cables/{cable.json()['id']}")
+    assert got_cable.status_code == 200
+    assert got_cable.json()["length_m"] == 1.5
