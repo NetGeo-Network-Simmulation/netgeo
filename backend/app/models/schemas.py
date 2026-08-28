@@ -288,6 +288,13 @@ class Site(_Base):
     lon: float | None = Field(None, ge=-180, le=180)
 
 
+# Enclosure look for the 2.5D physical-plant view (NG-PH3D P1). Keep this list
+# in sync with the `RACK_SPECS` keys in frontend/src/lib/three/rack3d.ts — that
+# file is the single source for what each profile looks like; this is only the
+# backend's validation of which keys are legal to persist.
+RackEnclosureProfile = Literal["apc", "dell", "hpe", "vertiv", "eaton", "rittal", "cpi"]
+
+
 class Rack(_Base):
     """An RU-gridded rack inside a site (NG-PH-01). Devices are placed into it
     via ``Node.rack_id`` / ``ru_start`` / ``ru_span``."""
@@ -297,6 +304,9 @@ class Rack(_Base):
     site_id: str | None = None
     name: str
     ru_height: int = 42
+    # Enclosure profile for the 2.5D view (NG-PH3D P1). None => renderer picks
+    # a generic default; existing racks predate this field and load as None.
+    enclosure_profile: RackEnclosureProfile | None = None
 
 
 class Cable(_Base):
@@ -334,6 +344,13 @@ class RackCreate(_Base):
     site_id: str | None = None
     name: str
     ru_height: int = 42
+    enclosure_profile: RackEnclosureProfile | None = None
+
+
+class RackUpdate(_Base):
+    """PATCH body — every field optional, only provided keys are applied."""
+
+    enclosure_profile: RackEnclosureProfile | None = None
 
 
 class CableCreate(_Base):

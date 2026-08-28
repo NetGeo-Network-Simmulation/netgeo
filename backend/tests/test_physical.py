@@ -306,3 +306,49 @@ async def test_cross_site_placement_is_rejected(client):
     unchanged = (await client.get(f"/api/nodes/{node['id']}")).json()
     assert unchanged["rack_id"] is None
     assert unchanged["site_id"] == site_b["id"]
+
+
+# --- Rack.enclosure_profile (NG-PH3D P1 K2) ----------------------------------
+async def test_create_rack_with_enclosure_profile(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    rack = await client.post(
+        "/api/racks",
+        json={"project_id": pid, "name": "R1", "enclosure_profile": "vertiv"},
+    )
+    assert rack.status_code == 201, rack.text
+    assert rack.json()["enclosure_profile"] == "vertiv"
+
+
+async def test_patch_rack_enclosure_profile_persists(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    rack = (
+        await client.post("/api/racks", json={"project_id": pid, "name": "R1"})
+    ).json()
+    assert rack["enclosure_profile"] is None
+
+    patched = await client.patch(
+        f"/api/racks/{rack['id']}", json={"enclosure_profile": "hpe"}
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["enclosure_profile"] == "hpe"
+
+    # persisted, not just echoed — a fresh read still shows it.
+    got = (await client.get(f"/api/projects/{pid}/topology")).json()
+    rk = next(r for r in got["racks"] if r["id"] == rack["id"])
+    assert rk["enclosure_profile"] == "hpe"
+
+
+async def test_patch_rack_invalid_enclosure_profile_is_rejected(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    rack = (
+        await client.post("/api/racks", json={"project_id": pid, "name": "R1"})
+    ).json()
+    resp = await client.patch(
+        f"/api/racks/{rack['id']}", json={"enclosure_profile": "acme-9000"}
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_unknown_rack_is_404(client):
+    resp = await client.patch("/api/racks/ghost", json={"enclosure_profile": "apc"})
+    assert resp.status_code == 404

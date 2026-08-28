@@ -399,6 +399,24 @@ class MemoryRepository:
             self._save()
             return rack
 
+    async def get_rack(self, rid: str) -> Rack:
+        try:
+            return self._racks[rid]
+        except KeyError as exc:
+            raise NotFound(rid) from exc
+
+    async def update_rack(self, rid: str, patch: dict) -> Rack:
+        async with self._lock:
+            rack = self._racks.get(rid)
+            if rack is None:
+                raise NotFound(rid)
+            updated = Rack.model_validate(
+                {**rack.model_dump(), **{k: v for k, v in patch.items() if v is not None}}
+            )
+            self._racks[rid] = updated
+            self._save()
+            return updated
+
     async def add_cable(self, cable: Cable) -> Cable:
         async with self._lock:
             if cable.link_id not in self._links:
