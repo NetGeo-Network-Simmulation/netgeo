@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=NetGeo
+Comment=Network simulation + GIS/digital-twin platform
+Exec=__NETGEO_EXEC__
+Icon=netgeo
+Terminal=false
+Categories=Network;Development;
+StartupWMClass=netgeo
