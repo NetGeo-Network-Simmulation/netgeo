@@ -14,6 +14,7 @@ Smoke:  curl http://127.0.0.1:<port>/api/health
 """
 from __future__ import annotations
 
+import os
 import socket
 import sys
 import threading
@@ -58,7 +59,11 @@ def main() -> None:
     _mount_frontend()
     port = _free_port()
     url = f"http://127.0.0.1:{port}"
-    threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+    # ponytail: NETGEO_NO_BROWSER skips the auto-open for headless/CI/test
+    # runs (a real browser.open() in a non-interactive session can hang).
+    # Default (unset) behavior is unchanged: browser opens automatically.
+    if os.environ.get("NETGEO_NO_BROWSER") != "1":
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
     print(f"[netgeo-launcher] serving on {url}")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
 

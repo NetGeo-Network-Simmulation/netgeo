@@ -1,10 +1,12 @@
 # =============================================================================
-# NetGeo CI — Desktop artifact (C1-a skeleton, UNSIGNED)
+# NetGeo CI — Desktop artifact (UNSIGNED)
 # =============================================================================
 # Builds the PyInstaller all-in-one bundle (D1 edition, docs/design/13) for
-# Windows and Linux and uploads it as a workflow artifact. No installer
-# (NSIS/AppImage/deb/rpm) yet — that is track C2/C3. No signing yet — see the
-# stub step below.
+# Windows and Linux, wraps it into an install-ready artifact per platform
+# (Windows: Inno Setup .exe installer; Linux: tarball + packaging/linux/
+# install.sh), and uploads both the raw onedir bundle and the wrapped
+# artifact. No AppImage/.deb/.rpm yet — that remains a later track. No
+# signing yet — see the stub step below.
 #
 # Trigger: manual + release tags only (not every push — desktop builds are
 # comparatively expensive wall-clock).
@@ -59,6 +61,36 @@ jobs:
         with:
           name: netgeo-desktop-${{ matrix.os }}-unsigned
           path: packaging/dist/netgeo/
+          if-no-files-found: error
+
+      - name: Build Windows installer (Inno Setup, unsigned)
+        if: matrix.os == 'windows-latest'
+        working-directory: packaging/windows
+        run: iscc netgeo.iss
+
+      - name: Upload Windows installer
+        if: matrix.os == 'windows-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgeo-installer-windows-unsigned
+          path: packaging/windows/dist-installer/*.exe
+          if-no-files-found: error
+
+      - name: Build Linux install-ready tarball
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          mkdir -p packaging/tarball/netgeo
+          cp -r packaging/dist/netgeo packaging/tarball/netgeo/netgeo
+          cp -r packaging/linux packaging/tarball/netgeo/linux
+          cp -r packaging/icons packaging/tarball/netgeo/icons
+          tar -C packaging/tarball -czf packaging/netgeo-linux-x86_64.tar.gz netgeo
+
+      - name: Upload Linux install-ready tarball
+        if: matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgeo-installer-linux-unsigned
+          path: packaging/netgeo-linux-x86_64.tar.gz
           if-no-files-found: error
 
       # -----------------------------------------------------------------

@@ -45,6 +45,9 @@ docs/
 # --- Desktop packaging (C1-a) ---
 packaging/build/
 packaging/dist/
+packaging/tarball/
+packaging/netgeo-linux-x86_64.tar.gz
+packaging/windows/dist-installer/
 
 # --- Local desktop-artifact test scratch (not part of any slice) ---
 /netgeo-linux.zip
