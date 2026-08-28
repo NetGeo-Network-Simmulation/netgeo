@@ -999,11 +999,6 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     return smoothCurve(pts);
   }
 
-  /** Patch cords ship in fixed lengths; report the next size up. */
-  const STOCK_M = [0.25, 0.5, 1, 1.5, 2, 3, 5, 7, 10, 15, 20, 30];
-  function stockLength(m: number) {
-    return STOCK_M.find((s) => s >= m * 1.12) || Math.ceil(m / 5) * 5;
-  }
 
   function addCable(curve: THREE.Curve<THREE.Vector3>, mediaKey: string, meta: CableMeta) {
     const spec = MEDIA[mediaKey]!;
@@ -1300,4 +1295,21 @@ export function disposeScene(built: BuiltScene) {
   for (const d of built.registry.disposables) d.dispose();
   built.registry.disposables.length = 0;
   built.root.removeFromParent();
+}
+
+/** Patch cords ship in fixed lengths; report the next size up. */
+const STOCK_M = [0.25, 0.5, 1, 1.5, 2, 3, 5, 7, 10, 15, 20, 30];
+export function stockLength(m: number) {
+  return STOCK_M.find((s) => s >= m * 1.12) || Math.ceil(m / 5) * 5;
+}
+
+/** World-space position of an already-built device's port. For callers
+ *  outside buildScene's own closure (NG-PH3D P2: estimating a new patch's
+ *  length before it's saved) — same transform buildScene uses internally
+ *  for cable routing, just addressed by the public Registry it returns. */
+export function devicePortWorld(registry: Registry, devId: string, index: number): THREE.Vector3 | null {
+  const d = registry.devices[devId];
+  if (!d) return null;
+  const local = d.portRefs[index] ?? d.portRefs[0] ?? new THREE.Vector3(0, 0, d.faceZ + 0.01);
+  return d.group.localToWorld(local.clone());
 }
