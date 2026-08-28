@@ -45,3 +45,7 @@ docs/
 # --- Desktop packaging (C1-a) ---
 packaging/build/
 packaging/dist/
+
+# --- Local desktop-artifact test scratch (not part of any slice) ---
+/netgeo-linux.zip
+/artifact-downloads/
