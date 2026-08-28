@@ -23,6 +23,7 @@ from app.models import (
     CableUpdate,
     Rack,
     RackCreate,
+    RackUpdate,
     Site,
     SiteCreate,
     SiteUpdate,
@@ -84,6 +85,19 @@ async def delete_site(
 @router.post("/racks", response_model=Rack, status_code=201)
 async def create_rack(body: RackCreate, r: Annotated[MemoryRepository, Depends(repo)]):
     return await r.add_rack(Rack(id=new_id(), **body.model_dump()))
+
+
+@router.patch("/racks/{rack_id}", response_model=Rack)
+async def update_rack(
+    rack_id: str, body: RackUpdate, r: Annotated[MemoryRepository, Depends(repo)]
+):
+    try:
+        patch = body.model_dump(exclude_unset=True)
+        if not patch:
+            return await r.get_rack(rack_id)
+        return await r.update_rack(rack_id, patch)
+    except StoreNotFound as exc:
+        raise translate_not_found(exc) from exc
 
 
 # --- cables (NG-PH-02) ------------------------------------------------------

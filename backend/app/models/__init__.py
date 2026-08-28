@@ -73,6 +73,8 @@ from app.models.schemas import (  # noqa: F401
     PtpResult,
     Rack,
     RackCreate,
+    RackEnclosureProfile,
+    RackUpdate,
     Radio,
     RadioCandidate,
     RfStudy,
