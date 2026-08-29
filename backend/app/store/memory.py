@@ -276,9 +276,14 @@ class MemoryRepository:
                     current = filtered.get("site_id", node.site_id)
                     if current is not None and current != rack.site_id:
                         from app.exceptions.base import Conflict
+                        node_site = self._sites.get(current)
+                        rack_site = self._sites.get(rack.site_id)
                         raise Conflict(
-                            f"node site_id {current!r} conflicts with rack "
-                            f"{filtered['rack_id']!r}'s site {rack.site_id!r}"
+                            f"'{node.name}' belongs to site "
+                            f"'{node_site.name if node_site else current}', which "
+                            f"differs from rack '{rack.name}''s site "
+                            f"'{rack_site.name if rack_site else rack.site_id}' — "
+                            "cross-site moves aren't allowed."
                         )
                     filtered["site_id"] = rack.site_id
 

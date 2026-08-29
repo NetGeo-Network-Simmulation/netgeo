@@ -307,6 +307,14 @@ async def test_cross_site_placement_is_rejected(client):
     assert unchanged["rack_id"] is None
     assert unchanged["site_id"] == site_b["id"]
 
+    # The rejection message names the rack/site by name, not raw UUIDs (QA
+    # 2026-08-29 defect #3) — a user can act on it without opening devtools.
+    detail = resp.json()["error"]["message"]
+    assert "RA" in detail and "A" in detail and "B" in detail
+    assert site_a["id"] not in detail
+    assert site_b["id"] not in detail
+    assert rack_a["id"] not in detail
+
 
 # --- Rack.enclosure_profile (NG-PH3D P1 K2) ----------------------------------
 async def test_create_rack_with_enclosure_profile(client):
