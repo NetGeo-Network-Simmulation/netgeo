@@ -28,6 +28,7 @@ import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { DeviceFaceplate, frontPortFractions, type Face } from '@/components/rack/DeviceFaceplate';
 import { linkStatusColors } from '@/theme/tokens';
 import { cn } from '@/lib/cn';
+import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
 
 const RU_PX = 24; // on-screen height of one rack-unit
 const DEFAULT_RU_HEIGHT = 42;
@@ -45,32 +46,6 @@ const RACK_KINDS: { kind: NodeKind; span: number }[] = [
   { kind: 'olt', span: 1 },
   { kind: 'server', span: 2 },
 ];
-
-/** Estimated steady-state draw per node kind, in watts (see ponytail note). */
-const KIND_WATTS: Record<string, number> = {
-  router: 250,
-  switch: 150,
-  firewall: 200,
-  olt: 300,
-  server: 400,
-  host: 100,
-  ap: 20,
-  cloud: 0,
-};
-
-/** Builtin device-type `icon` values don't always match `NodeKind` 1:1. */
-const KIND_TO_ICON: Partial<Record<NodeKind, string>> = { firewall: 'fw' };
-
-function nodeWatts(n: NodeModel, byIcon?: Map<string, DeviceType>): number {
-  const dt = byIcon?.get(KIND_TO_ICON[n.kind] ?? n.kind);
-  const watts = dt?.power_watts_max ?? dt?.power_watts_idle;
-  return watts ?? KIND_WATTS[n.kind] ?? 150;
-}
-
-/** watts → heat load in BTU/hr (1 W ≈ 3.412 BTU/hr). */
-function wattsToBtu(w: number): number {
-  return Math.round(w * 3.412);
-}
 
 interface Dragload {
   nodeId: string;
@@ -178,13 +153,7 @@ export function RackElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode 
     queryFn: () => deviceTypesApi.list(),
     staleTime: Infinity,
   });
-  const wattsByIcon = useMemo(() => {
-    const map = new Map<string, DeviceType>();
-    for (const dt of deviceTypesQ.data ?? []) {
-      if (dt.icon) map.set(dt.icon, dt);
-    }
-    return map;
-  }, [deviceTypesQ.data]);
+  const wattsByIcon = useMemo(() => wattsByIconMap(deviceTypesQ.data), [deviceTypesQ.data]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
@@ -371,15 +340,13 @@ export function RackElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode 
     }
   }
 
-  const unplaced = useMemo(() => nodes.filter((n) => !n.rack_id), [nodes]);
+  const unplaced = useMemo(() => unplacedNodes(nodes), [nodes]);
 
   // Over-length cables (NG-PH-03): join the plant report to cables for names.
-  const overLength = useMemo(() => {
-    const links = plantQ.data?.links ?? {};
-    return cables
-      .filter((c) => links[c.link_id]?.over_length)
-      .map((c) => ({ cable: c, media: links[c.link_id]?.over_media ?? c.media }));
-  }, [cables, plantQ.data]);
+  const overLength = useMemo(
+    () => overLengthCables(cables, plantQ.data?.links),
+    [cables, plantQ.data],
+  );
 
   // E1: Escape cancels the pending port while Cable Mode is mid-selection.
   useEffect(() => {

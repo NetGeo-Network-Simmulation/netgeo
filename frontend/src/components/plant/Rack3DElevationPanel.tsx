@@ -22,10 +22,18 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, DoorClosed, Move, Plus, RotateCcw, Server, Tag, Zap } from 'lucide-react';
 import * as THREE from 'three';
-import { linksApi, nodesApi, physicalApi, projectsApi, type ApiError } from '@/api/client';
+import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiError } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
-import { adaptTopology, cableMediaForVisual, DEFAULT_ENCLOSURE, ENCLOSURE_KEYS } from '@/lib/three/plantAdapter';
+import { cn } from '@/lib/cn';
+import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
+import {
+  adaptTopology,
+  cableLengthUpdatesForNode,
+  cableMediaForVisual,
+  DEFAULT_ENCLOSURE,
+  ENCLOSURE_KEYS,
+} from '@/lib/three/plantAdapter';
 import {
   applyDoors,
   applyLabels,
@@ -97,13 +105,21 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     queryFn: () => projectsApi.topology(projectId!),
     enabled: !!projectId,
   });
-  // Not consumed yet — kept warm for P3 (over-length cable warnings), which
-  // reads this same query the 2D panel already fetches.
-  useQuery({
+  // NG-PH3D P3: over-length cable warnings, same query the 2D panel already
+  // fetches (same key ⇒ same cache entry ⇒ both panels agree on the verdict).
+  const plantQ = useQuery({
     queryKey: ['plant', projectId],
     queryFn: () => physicalApi.plant(projectId!),
     enabled: !!projectId,
   });
+  // Static catalog, same key/staleTime as RackElevationPanel.tsx — one fetch,
+  // shared cache entry, used for the same per-device wattage lookup (NG-PH3D P3).
+  const deviceTypesQ = useQuery({
+    queryKey: ['device-types'],
+    queryFn: () => deviceTypesApi.list(),
+    staleTime: Infinity,
+  });
+  const wattsByIcon = useMemo(() => wattsByIconMap(deviceTypesQ.data), [deviceTypesQ.data]);
 
   const racks = topoQ.data?.racks ?? [];
 
@@ -134,6 +150,23 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   const links = adapted?.links ?? EMPTY_LINKS;
   const rackASpec = adapted?.rackA ?? DEFAULT_ENCLOSURE;
   const rackBSpec = adapted?.rackB ?? DEFAULT_ENCLOSURE;
+
+  // NG-PH3D P3: parity with RackElevationPanel.tsx, same shared helpers so
+  // the two views can't disagree on what these numbers mean.
+  const unplaced = useMemo(() => unplacedNodes(topoQ.data?.nodes ?? []), [topoQ.data]);
+  const overLength = useMemo(
+    () => overLengthCables(topoQ.data?.cables ?? [], plantQ.data?.links),
+    [topoQ.data, plantQ.data],
+  );
+  // Power/heat for exactly the devices in the two bays actually on screen —
+  // the 2D panel rolls this up per site; comparing the same two racks' watts
+  // in both views is the apples-to-apples check (see QA doc).
+  const shownWatts = useMemo(() => {
+    const nodes = (topoQ.data?.nodes ?? []).filter(
+      (n) => n.rack_id === rackAId || n.rack_id === rackBId,
+    );
+    return nodes.reduce((sum, n) => sum + nodeWatts(n, wattsByIcon), 0);
+  }, [topoQ.data, rackAId, rackBId, wattsByIcon]);
 
   const [pov, setPov] = useState<Pov>(povRef.current);
   const [face, setFace] = useState<Face>('front');
@@ -209,11 +242,18 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   // Pindah perangkat antar-rack (permintaan Surya, P2): backend is the one
   // source of truth for "same site only" — see update_node in memory.py.
   // This mutation just relays whatever it says; it never enforces the rule
-  // itself.
+  // itself. Also covers placing a previously-unplaced node from the tray
+  // (NG-PH3D P3) — same write, same validation, it just had no rack before.
+  const justMovedNodeId = useRef<string | null>(null);
   const moveDevice = useMutation({
     mutationFn: (v: { nodeId: string; rackId: string; ruStart: number; ruSpan: number }) =>
       nodesApi.update(v.nodeId, { rack_id: v.rackId, ru_start: v.ruStart, ru_span: v.ruSpan }),
-    onSuccess: () => { setError(null); invalidate(); setStatus('Perangkat dipindahkan.'); },
+    onSuccess: (_data, v) => {
+      setError(null);
+      justMovedNodeId.current = v.nodeId; // NG-PH3D P3 §5: recompute its cables' length_m next rebuild
+      invalidate();
+      setStatus('Perangkat dipindahkan.');
+    },
     onError: (e) => setError((e as unknown as ApiError).message || 'Gagal memindahkan perangkat.'),
   });
 
@@ -321,9 +361,25 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
       applyDoors(built.registry, view.current.doors);
       applyLabels(built.registry, view.current.labels, view.current.sel);
       applySelection(built.registry, view.current.sel);
+
+      // NG-PH3D P3 §5: a device just placed/moved from this panel — its
+      // cables' stored length_m predates the new geometry. Recompute only
+      // the ones this rebuild can actually see (both ends in the two shown
+      // bays); the rest is the documented two-bay-view gap, not a new bug.
+      const movedId = justMovedNodeId.current;
+      justMovedNodeId.current = null;
+      if (movedId) {
+        const updates = cableLengthUpdatesForNode(built.registry, adapted, topoQ.data?.cables ?? [], movedId);
+        if (updates.length > 0) {
+          void Promise.all(
+            updates.map((u) => physicalApi.updateCable(u.cableId, { length_m: u.lengthM })),
+          ).then(invalidate);
+        }
+      }
     }
     fitCamera();
     placeCamera();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adapted, rackASpec, rackBSpec, fitout, links, fitCamera, placeCamera]);
 
   /* ─── toggles: mirror React state into the scene ───────────────────────── */
@@ -333,11 +389,15 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   }, [doors]);
 
   useEffect(() => {
+    // A tray-selected node (NG-PH3D P3) may not exist in the scene yet — an
+    // unplaced node has no mesh to highlight. Dim nothing rather than
+    // dimming every cable in the scene for a "selection" nothing touches.
+    const sceneSel = sel && builtRef.current?.registry.devices[sel] ? sel : null;
     view.current.labels = labels;
-    view.current.sel = sel;
+    view.current.sel = sceneSel;
     if (builtRef.current) {
-      applyLabels(builtRef.current.registry, labels, sel);
-      applySelection(builtRef.current.registry, sel);
+      applyLabels(builtRef.current.registry, labels, sceneSel);
+      applySelection(builtRef.current.registry, sceneSel);
     }
   }, [labels, sel]);
 
@@ -398,6 +458,14 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     const cables = built!.registry.cables.filter((c) => c.meta.devs.includes(id));
     const media = [...new Set(cables.map((c) => MEDIA[c.mediaKey]!.label.split(' · ')[0]))];
     setStatus(`${d.def.brand} ${d.def.model} · U${d.def.u} · ${d.def.h}U · rack ${d.rackKey} · ${cables.length} kabel${media.length ? ' · ' + media.join(', ') : ''}`);
+  }, []);
+
+  /** Tray click (NG-PH3D P3): select an unplaced node — it has no mesh yet,
+   *  so just arm the "Pindahkan" bar below with it instead of routing
+   *  through `selectDevice`'s scene-registry lookup. */
+  const selectFromTray = useCallback((id: string, name: string) => {
+    setSel(id);
+    setStatus(`Pilih rak + RU untuk ${name}`);
   }, []);
 
   /** Cable Mode: first click arms a port, second click patches the pair and
@@ -624,9 +692,54 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
         </div>
       )}
 
+      {/* NG-PH3D P3: same threshold/source as RackElevationPanel.tsx's own
+          over-length banner (GET /plant, over_length flag) — both views
+          agree on which runs are bad because they read the same query. */}
+      {overLength.length > 0 && (
+        <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
+          <div className="flex items-center gap-1 font-medium">
+            <AlertTriangle size={13} /> Cable exceeds maximum length (link errored)
+          </div>
+          <ul className="mt-1 space-y-0.5 pl-5">
+            {overLength.map(({ cable, media }) => (
+              <li key={cable.id} className="list-disc text-amber-200/80">
+                {cable.label || cable.id.slice(0, 6)} — {media} @ {cable.length_m} m
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/* Unplaced tray (NG-PH3D P3): a node with no rack, or a rack but no RU
+          start, has nothing to click on in the scene — list it here instead
+          of losing it silently. Clicking one arms the "Pindahkan" bar below,
+          the exact same place-a-device path P2 already shipped. */}
+      {unplaced.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-fg/10 px-3 py-1.5 text-xs">
+          <span className="text-recess">Unplaced ({unplaced.length})</span>
+          {unplaced.map((n) => (
+            <button
+              key={n.id}
+              type="button"
+              onClick={() => selectFromTray(n.id, n.name)}
+              className={cn(
+                'rounded px-2 py-0.5 text-[11px]',
+                sel === n.id
+                  ? 'bg-accent/20 text-accent ring-1 ring-accent/40'
+                  : 'bg-fg/10 text-fg/70 hover:bg-fg/20',
+              )}
+            >
+              {n.name}
+            </button>
+          ))}
+        </div>
+      )}
+
       {/* Pindah perangkat antar-rack (permintaan Surya, P2) — muncul saat ada
           perangkat terpilih. Batas satu-site ditegakkan di backend; ini hanya
-          menyalurkan hasilnya. */}
+          menyalurkan hasilnya. Juga jalur "tempatkan" untuk node dari tray
+          Unplaced di atas (NG-PH3D P3) — write yang sama, cuma sebelumnya
+          belum punya rak sama sekali. */}
       {selNode && (
         <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-1.5 text-xs">
           <Move className="size-3.5 text-recess" />
@@ -678,6 +791,11 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
       {/* status bar + legend */}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-fg/10 px-3 py-1.5 text-[11px] text-recess">
         <span className="text-fg">{status}</span>
+        {/* NG-PH3D P3: watts/BTU for exactly the two racks shown — same
+            nodeWatts()/wattsToBtu() the 2D panel's per-site rollup uses. */}
+        <span className="flex items-center gap-1 text-amber-300/80">
+          <Zap size={12} /> {shownWatts} W · {wattsToBtu(shownWatts)} BTU/hr
+        </span>
         <span className="ml-auto">{deviceCount} perangkat · {links.length} kabel</span>
         <div className="flex flex-wrap items-center gap-2">
           {[...new Set(links.map((l) => l.m))].map((k) => (
