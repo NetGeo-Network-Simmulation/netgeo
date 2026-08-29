@@ -114,6 +114,7 @@ export function RackElevationPanel() {
   const [newRackName, setNewRackName] = useState('');
   const [newRackSite, setNewRackSite] = useState<string>('');
   const [newRackU, setNewRackU] = useState(42);
+  const newRackNameRef = useRef<HTMLInputElement>(null);
   const [face, setFace] = useState<Face>('front');
 
   // E1: Cable Mode — click port A then port B to create a physical link.
@@ -459,6 +460,7 @@ export function RackElevationPanel() {
         </button>
         <span className="text-fg/30">·</span>
         <input
+          ref={newRackNameRef}
           value={newRackName}
           onChange={(e) => setNewRackName(e.target.value)}
           placeholder="New rack name"
@@ -481,14 +483,23 @@ export function RackElevationPanel() {
           className="w-20"
         />
         {/* Racks aren't geographic — no map round-trip, but a name is required
-            server-side, so a blank name disables the button instead of the old
-            silent no-op (the actual bug this whole slice fixes). */}
+            server-side. A disabled button + hover-only title was the old fix
+            attempt: it *looks* dead (a screenshot can't show a tooltip), so
+            users kept reporting "+ Rack doesn't work". The button now always
+            responds to a click; an empty name focuses the input and raises
+            the same visible error banner mutation failures already use below,
+            instead of a silent/invisible no-op. */}
         <button
-          onClick={() =>
-            createRack.mutate({ name: newRackName.trim(), siteId: newRackSite || null, ruHeight: newRackU })
-          }
-          disabled={!newRackName.trim() || createRack.isPending}
-          title={!newRackName.trim() ? 'Enter a rack name first' : undefined}
+          onClick={() => {
+            const name = newRackName.trim();
+            if (!name) {
+              setError('Enter a rack name to create a rack.');
+              newRackNameRef.current?.focus();
+              return;
+            }
+            createRack.mutate({ name, siteId: newRackSite || null, ruHeight: newRackU });
+          }}
+          disabled={createRack.isPending}
           className="flex items-center gap-1 rounded bg-fg/10 px-2 py-1 hover:bg-fg/20 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-fg/10"
         >
           <Plus size={12} /> Rack
