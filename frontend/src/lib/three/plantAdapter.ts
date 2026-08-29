@@ -16,12 +16,15 @@ import type { Cable, CableMedia, LinkModel, NodeKind, NodeModel, Rack, Topology 
 import { frontPortFractions } from '@/components/rack/DeviceFaceplate';
 import { resolveDeviceType, type PortType as CatalogPortType } from '@/components/rack/deviceTypes';
 import {
+  devicePortWorld,
   RACK_SPECS,
+  stockLength,
   type BuildOptions,
   type DeviceDef,
   type DeviceKind,
   type LinkDef,
   type PortType,
+  type Registry,
 } from './rack3d';
 
 export const DEFAULT_ENCLOSURE = 'apc';
@@ -169,7 +172,7 @@ export function adaptTopology(
   topology: Topology,
   rackAId: string | null,
   rackBId: string | null,
-): (BuildOptions & { ifaceByDevPort: Map<string, string> }) | null {
+): (BuildOptions & { ifaceByDevPort: Map<string, string>; cableIds: string[] }) | null {
   const racks = topology.racks ?? [];
   const rackA = racks.find((r) => r.id === rackAId);
   const rackB = racks.find((r) => r.id === rackBId);
@@ -196,6 +199,11 @@ export function adaptTopology(
 
   const linkById = new Map<string, LinkModel>((topology.links ?? []).map((l) => [l.id, l]));
   const links: LinkDef[] = [];
+  // Parallel to `links` (same index) — the backend Cable id that realizes
+  // each entry, so a caller can PATCH the right row back (NG-PH3D P3 §5:
+  // recompute length_m after a placement change, reusing this join instead
+  // of re-deriving it a second time).
+  const cableIds: string[] = [];
   for (const cable of (topology.cables ?? []) as Cable[]) {
     const link = linkById.get(cable.link_id);
     if (!link) continue;
@@ -212,6 +220,7 @@ export function adaptTopology(
       m: MEDIA_MAP[cable.media] ?? 'cat6a',
       live: !DEAD_LINK_STATUS.has(link.status ?? 'up'),
     });
+    cableIds.push(cable.id);
   }
 
   return {
@@ -220,7 +229,42 @@ export function adaptTopology(
     fitout,
     links,
     ifaceByDevPort,
+    cableIds,
   };
 }
 
 export const ENCLOSURE_KEYS = Object.keys(RACK_SPECS);
+
+/**
+ * NG-PH3D P3 §5: `Cable.length_m` is only ever set once, at creation
+ * (`createPatch` in Rack3DElevationPanel, straight-line port distance
+ * rounded by `stockLength()`) — moving one of the two devices afterwards
+ * never touches it, so the stored length silently understates reality.
+ *
+ * Called right after a moved/placed node's rack rebuilds the scene: for
+ * every cable that touches `nodeId` and has both endpoints in the just-built
+ * registry, recompute the same way `createPatch` originally did and report
+ * which cables actually changed. Pure — no network call here, the caller
+ * PATCHes `/cables/{id}`. Reuses `devicePortWorld`/`stockLength`, no second
+ * length formula.
+ */
+export function cableLengthUpdatesForNode(
+  registry: Registry,
+  adapted: { links: LinkDef[]; cableIds: string[] },
+  cables: Cable[],
+  nodeId: string,
+): { cableId: string; lengthM: number }[] {
+  const cableById = new Map(cables.map((c) => [c.id, c]));
+  const updates: { cableId: string; lengthM: number }[] = [];
+  adapted.links.forEach((l, i) => {
+    if (l.a[0] !== nodeId && l.b[0] !== nodeId) return;
+    const cable = cableById.get(adapted.cableIds[i]!);
+    if (!cable) return;
+    const pa = devicePortWorld(registry, l.a[0], l.a[1]);
+    const pb = devicePortWorld(registry, l.b[0], l.b[1]);
+    if (!pa || !pb) return;
+    const lengthM = stockLength(pa.distanceTo(pb));
+    if (lengthM !== cable.length_m) updates.push({ cableId: cable.id, lengthM });
+  });
+  return updates;
+}
