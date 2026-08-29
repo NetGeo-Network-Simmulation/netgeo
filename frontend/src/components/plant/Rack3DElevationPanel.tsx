@@ -18,7 +18,7 @@
  * more than two racks can view any pair, not all of them at once — full
  * N-rack layout is bigger than a data-binding slice (see docs/design/22).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, DoorClosed, Move, Plus, RotateCcw, Server, Tag, Zap } from 'lucide-react';
 import * as THREE from 'three';
@@ -76,7 +76,7 @@ function loadPov(): Pov {
   return { baseAz: POV.az, elev: POV.elev, span: POV.span };
 }
 
-export function Rack3DElevationPanel() {
+export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode } = {}) {
   const projectId = useUiStore((s) => s.projectId);
   const queryClient = useQueryClient();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -526,13 +526,13 @@ export function Rack3DElevationPanel() {
     const setRackId = slot === 'A' ? setRackAId : setRackBId;
     const rack = slot === 'A' ? rackA : rackB;
     return (
-      <div key={slot} className="flex items-center gap-1">
-        <label className="flex items-center gap-1.5 text-xs text-recess">
+      <div key={slot} className="flex flex-wrap items-center gap-1">
+        <label className="flex min-w-0 items-center gap-1.5 text-xs text-recess">
           {slot}
           <select
             value={rackId ?? ''}
             onChange={(e) => setRackId(e.target.value || null)}
-            className="rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
+            className="w-24 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
           >
             <option value="">— kosong —</option>
             {racks.map((r) => (
@@ -544,7 +544,7 @@ export function Rack3DElevationPanel() {
           value={rack?.enclosure_profile ?? DEFAULT_ENCLOSURE}
           disabled={!rack}
           onChange={(e) => rack && updateEnclosure.mutate({ rackId: rack.id, profile: e.target.value })}
-          className="rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50 disabled:opacity-40"
+          className="w-28 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50 disabled:opacity-40"
           title="Profil enclosure"
         >
           {ENCLOSURE_KEYS.filter((k) => k !== 'cpi' || rack?.enclosure_profile === 'cpi').map((k) => (
@@ -609,6 +609,8 @@ export function Rack3DElevationPanel() {
             <RotateCcw className="size-3.5" />
           </button>
         </div>
+
+        {viewSwitcher}
       </div>
 
       {error && (
@@ -667,8 +669,8 @@ export function Rack3DElevationPanel() {
         {topoQ.isSuccess && racks.length === 0 && (
           <WorkspaceEmptyState
             icon={Server}
-            title="Belum ada rak"
-            hint="Buat rak dulu di panel Elevasi (2D) — perangkat yang ditempatkan di sana muncul di sini."
+            title="No racks yet"
+            hint="Create a rack first in the Elevation (2D) panel — devices placed there show up here."
           />
         )}
       </div>

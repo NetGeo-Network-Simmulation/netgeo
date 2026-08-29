@@ -16,27 +16,39 @@ import { Rack3DElevationPanel } from './Rack3DElevationPanel';
 export function PlantWorkspace() {
   const [view, setView] = useState<'2d' | '3d'>('2d');
 
+  // QA 2026-08-29 defect #1: this used to be `position: absolute`, floating
+  // on top of whichever panel was active — it overlapped the "Rack Elevation"
+  // heading at 375px and intercepted clicks on Cable Mode at 1400px. It's now
+  // handed to each panel as a normal node to render inside its own
+  // `flex flex-wrap` toolbar, so it wraps with the row instead of covering it.
+  const switcher = (
+    <div className="flex shrink-0 overflow-hidden rounded-md border border-fg/10 bg-surface/80 backdrop-blur">
+      {([
+        ['2d', 'Elevasi', Rows3],
+        ['3d', '2.5D', Box],
+      ] as const).map(([key, label, Icon]) => (
+        <button
+          key={key}
+          type="button"
+          onClick={() => setView(key)}
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs transition ${
+            view === key ? 'bg-accent/20 text-accent' : 'text-recess hover:bg-fg/5 hover:text-fg'
+          }`}
+        >
+          <Icon className="size-3.5" />
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+
   return (
     <div className="absolute inset-0">
-      <div className="absolute right-3 top-3 z-10 flex overflow-hidden rounded-md border border-fg/10 bg-surface/80 backdrop-blur">
-        {([
-          ['2d', 'Elevasi', Rows3],
-          ['3d', '2.5D', Box],
-        ] as const).map(([key, label, Icon]) => (
-          <button
-            key={key}
-            type="button"
-            onClick={() => setView(key)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 text-xs transition ${
-              view === key ? 'bg-accent/20 text-accent' : 'text-recess hover:bg-fg/5 hover:text-fg'
-            }`}
-          >
-            <Icon className="size-3.5" />
-            {label}
-          </button>
-        ))}
-      </div>
-      {view === '2d' ? <RackElevationPanel /> : <Rack3DElevationPanel />}
+      {view === '2d' ? (
+        <RackElevationPanel viewSwitcher={switcher} />
+      ) : (
+        <Rack3DElevationPanel viewSwitcher={switcher} />
+      )}
     </div>
   );
 }

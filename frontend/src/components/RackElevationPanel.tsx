@@ -16,7 +16,7 @@
  * `KIND_WATTS` below is the fallback for kinds with no catalog match (e.g.
  * `host`) or if the catalog fetch hasn't landed yet.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, Plus, Server, Zap } from 'lucide-react';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi } from '@/api/client';
@@ -107,7 +107,7 @@ function localPortAnchor(
   return { x: BLOCK_INSET + frac.x * blockW, y: blockTop + frac.y * blockH };
 }
 
-export function RackElevationPanel() {
+export function RackElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode } = {}) {
   const projectId = useUiStore((s) => s.projectId);
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
@@ -540,6 +540,8 @@ export function RackElevationPanel() {
             </button>
           ))}
         </div>
+
+        {viewSwitcher}
       </div>
 
       {cableMode && (
