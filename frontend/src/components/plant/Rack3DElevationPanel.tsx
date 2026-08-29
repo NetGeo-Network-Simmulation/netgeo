@@ -52,6 +52,19 @@ import {
   type LinkDef,
 } from '@/lib/three/rack3d';
 
+/** Feature-detect before ever touching THREE.WebGLRenderer — a browser with
+ *  WebGL disabled (flag, policy, headless-no-GPU) throws from the renderer
+ *  constructor itself, which would otherwise leave a blank canvas div and no
+ *  clue why (NG-PH3D P4). */
+function webglAvailable(): boolean {
+  try {
+    const canvas = document.createElement('canvas');
+    return !!(canvas.getContext('webgl2') || canvas.getContext('webgl'));
+  } catch {
+    return false;
+  }
+}
+
 const POV_KEY = 'netgeo.rack3d.pov.v2';
 const POV = { az: (10 * Math.PI) / 180, elev: (10 * Math.PI) / 180, span: 0.75, dist: 14 };
 const EMPTY_FITOUT: Record<string, DeviceDef[]> = { A: [], B: [] };
@@ -95,6 +108,10 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   // React state: a 60 fps camera must not re-render the component tree.
   const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: 'A' });
   const povRef = useRef<Pov>(loadPov());
+  // Computed once — WebGL support doesn't change mid-session. Also re-checked
+  // defensively at renderer construction (below) in case detection passes
+  // but the real context still fails to init.
+  const [webglError, setWebglError] = useState(!webglAvailable());
 
   // Same query keys as RackElevationPanel.tsx (the 2D panel), on purpose:
   // when the 2D panel mutates and invalidates ['topology', projectId] /
@@ -299,12 +316,30 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   /* ─── renderer lifecycle: one canvas for the panel's whole life ────────── */
   useEffect(() => {
     const host = hostRef.current;
-    if (!host) return;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    if (!host || webglError) return;
+    let renderer: THREE.WebGLRenderer;
+    try {
+      renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    } catch {
+      setWebglError(true);
+      return;
+    }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(host.clientWidth || 1, host.clientHeight || 1);
     host.appendChild(renderer.domElement);
     rendererRef.current = renderer;
+
+    // NG-PH3D P4: dev-only escape hatch to read renderer.info (draw calls,
+    // geometry/texture counts) from outside React for perf/leak verification.
+    // Dead in production — `import.meta.env.DEV` is statically false there,
+    // so esbuild/Vite strip this whole block from the shipped bundle.
+    if (import.meta.env.DEV) {
+      (window as unknown as { __ngRack3dDebug?: unknown }).__ngRack3dDebug = {
+        renderer: () => rendererRef.current,
+        built: () => builtRef.current,
+        camera: () => camRef.current,
+      };
+    }
 
     const scene = new THREE.Scene();
     const cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.01, 60);
@@ -344,8 +379,11 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
       renderer.domElement.remove();
       rendererRef.current = null;
       camRef.current = null;
+      if (import.meta.env.DEV) {
+        delete (window as unknown as { __ngRack3dDebug?: unknown }).__ngRack3dDebug;
+      }
     };
-  }, [fitCamera, placeCamera]);
+  }, [fitCamera, placeCamera, webglError]);
 
   /* ─── (re)build the scene whenever its inputs change ───────────────────── */
   useEffect(() => {
@@ -622,6 +660,24 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
       </div>
     );
   };
+
+  // NG-PH3D P4: no WebGL, no scene — a black/blank canvas here would look
+  // like a crash. Say so plainly and point back at the 2D panel, which the
+  // parent toggle (`viewSwitcher`) can still reach.
+  if (webglError) {
+    return (
+      <div className="absolute inset-0 flex flex-col">
+        <div className="flex items-center justify-end border-b border-fg/10 px-3 py-2">{viewSwitcher}</div>
+        <div className="relative min-h-0 flex-1">
+          <WorkspaceEmptyState
+            icon={AlertTriangle}
+            title="3D view unavailable"
+            hint="This browser doesn't support WebGL. Switch to the Elevation (2D) panel above to keep working with the same rack data."
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="absolute inset-0 flex flex-col">

@@ -11,6 +11,7 @@
  * buy nothing here; the host owns one renderer and one ortho camera.
  */
 import * as THREE from 'three';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /* ─── Real-world geometry (EIA-310): 1U = 44.45 mm, 19" panel = 482.6 mm ─── */
 export const U = 0.04445;
@@ -334,6 +335,54 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     return mesh;
   };
 
+  /** Bake a local transform into a geometry's vertices — the same transform
+   *  an Object3D with this position/Euler rotation would apply at render
+   *  time, computed the same way (compose from position+quaternion) so a
+   *  merged part lands exactly where the individual mesh it replaces would
+   *  have. Mutates and returns `g`; used only on geometries about to be
+   *  merged, never on one already in the scene. */
+  const place = (g: THREE.BufferGeometry, x: number, y: number, z: number, rx = 0, ry = 0, rz = 0) => {
+    if (rx || ry || rz) {
+      const q = new THREE.Quaternion().setFromEuler(new THREE.Euler(rx, ry, rz, 'XYZ'));
+      g.applyMatrix4(new THREE.Matrix4().compose(new THREE.Vector3(x, y, z), q, new THREE.Vector3(1, 1, 1)));
+    } else {
+      g.translate(x, y, z);
+    }
+    return g;
+  };
+
+  /** A positioned (never-added-to-scene) box geometry, for `mergeParts` below.
+   *  Not tracked — it's consumed and disposed by the merge, never rendered
+   *  on its own. */
+  const boxGeo = (w: number, h: number, d: number, x: number, y: number, z: number) =>
+    place(new THREE.BoxGeometry(w, h, d), x, y, z);
+
+  /** NG-PH3D P4: fold N identical-material, non-interactive part copies (rail
+   *  holes aside — those are already a texture) into one draw call instead of
+   *  N. Only for parts nothing ever picks individually (no `userData.dev`) —
+   *  callers are responsible for that invariant, since a merged mesh can't
+   *  carry per-part pick data. Inputs are disposed after merging; only the
+   *  merged result is tracked for scene cleanup.
+   *
+   *  Also stashes each input's own local bounding box in `userData.partBoxes`
+   *  *before* disposing it — one enclosing `Box3.setFromObject` over parts
+   *  scattered on opposite sides of a rack (e.g. left+right side panels)
+   *  would falsely claim the empty gap between them as solid. The
+   *  no-intersection test (rack3d.test.ts) reads this instead of the mesh's
+   *  own envelope for exactly that reason. */
+  const mergeParts = (name: string, material: THREE.Material, geoms: THREE.BufferGeometry[]) => {
+    const partBoxes = geoms.map((g) => {
+      g.computeBoundingBox();
+      return g.boundingBox!.clone();
+    });
+    const merged = track(mergeGeometries(geoms, false));
+    for (const g of geoms) g.dispose();
+    const mesh = new THREE.Mesh(merged, material);
+    mesh.name = name;
+    mesh.userData.partBoxes = partBoxes;
+    return mesh;
+  };
+
   /* ─── Enclosure ───────────────────────────────────────────────────────── */
   function buildRack(key: string, specKey: string, x: number) {
     const s = RACK_SPECS[specKey]!;
@@ -351,30 +400,28 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const railMat = track(mat('rail-' + specKey, 0xffffff, { roughness: 0.55, metalness: 0.35 }));
     railMat.map = track(railTexture(s.u));
     const railH = s.u * U;
+    // NG-PH3D P4: uprights/rails/accessory channels/frame rails/roof/base
+    // beams/casters/feet are fixed per rack (not device-count-scaled) but
+    // were still ~30 draw calls of static, never-picked geometry — accumulate
+    // by material below, merge once each instead of one draw per part.
+    const frameGeos: THREE.BufferGeometry[] = [];
+    const railGeos: THREE.BufferGeometry[] = [];
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const p = box(postW, h, postD, frameMat, 'upright');
-        p.position.set(sx * postX, h / 2, sz * (d / 2 - postD / 2));
-        g.add(p);
+        frameGeos.push(boxGeo(postW, h, postD, sx * postX, h / 2, sz * (d / 2 - postD / 2)));
       }
       for (const rz of [d / 2 - 0.09, -d / 2 + 0.16]) {
-        const rail = box(0.022, railH, 0.02, railMat, 'mounting-rail');
-        rail.position.set(sx * railX, 0.055 + railH / 2, rz);
-        g.add(rail);
+        railGeos.push(boxGeo(0.022, railH, 0.02, sx * railX, 0.055 + railH / 2, rz));
       }
     }
     // zero-U accessory channels in the rear corners (PDU / organiser bays)
     for (const sx of [-1, 1]) {
-      const chan = box(0.05, railH, 0.05, frameMat, 'accessory-channel');
-      chan.position.set(sx * (w / 2 - 0.028), 0.055 + railH / 2, -d / 2 + 0.095);
-      g.add(chan);
+      frameGeos.push(boxGeo(0.05, railH, 0.05, sx * (w / 2 - 0.028), 0.055 + railH / 2, -d / 2 + 0.095));
     }
     // top/bottom frame rails
     for (const sz of [-1, 1]) {
       for (const sy of [0.02, h - 0.02]) {
-        const r = box(w, 0.03, postD, frameMat, 'frame-rail');
-        r.position.set(0, sy, sz * (d / 2 - postD / 2));
-        g.add(r);
+        frameGeos.push(boxGeo(w, 0.03, postD, 0, sy, sz * (d / 2 - postD / 2)));
       }
     }
     // roof + plinth + side panels
@@ -389,35 +436,31 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       ];
       for (const [pw, pd, px, pz] of parts) {
         if (pw <= 0.001 || pd <= 0.001) continue;
-        const piece = box(pw, 0.02, pd, frameMat, 'roof');
-        piece.position.set(px, h + 0.01, pz);
-        g.add(piece);
+        frameGeos.push(boxGeo(pw, 0.02, pd, px, h + 0.01, pz));
       }
     } else {
-      const roof = box(w, 0.02, d, frameMat, 'roof');
-      roof.position.set(0, h + 0.01, 0);
-      g.add(roof);
+      frameGeos.push(boxGeo(w, 0.02, d, 0, h + 0.01, 0));
     }
     for (const sz of [-1, 1]) {
-      const beam = box(w, 0.035, 0.045, frameMat, 'base-frame');
-      beam.position.set(0, -0.018, sz * (d / 2 - 0.03));
-      g.add(beam);
+      frameGeos.push(boxGeo(w, 0.035, 0.045, 0, -0.018, sz * (d / 2 - 0.03)));
     }
+    g.add(mergeParts('rack-frame-merged', frameMat, frameGeos));
+    g.add(mergeParts('rack-rails-merged', railMat, railGeos));
+
+    const casterGeos: THREE.BufferGeometry[] = [];
+    const footGeos: THREE.BufferGeometry[] = [];
     for (const sx of [-1, 1]) {
       for (const sz of [-1, 1]) {
-        const caster = new THREE.Mesh(track(new THREE.CylinderGeometry(0.026, 0.026, 0.016, 12)), mats.velcro);
-        caster.name = 'caster';
-        caster.rotation.z = Math.PI / 2;
-        caster.position.set(sx * (w / 2 - 0.06), -0.044, sz * (d / 2 - 0.07));
-        g.add(caster);
-        const foot = new THREE.Mesh(track(new THREE.CylinderGeometry(0.016, 0.019, 0.03, 10)), mats.handle);
-        foot.name = 'levelling-foot';
-        foot.position.set(sx * (w / 2 - 0.022), -0.037, sz * (d / 2 - 0.028));
-        g.add(foot);
+        casterGeos.push(place(new THREE.CylinderGeometry(0.026, 0.026, 0.016, 12), sx * (w / 2 - 0.06), -0.044, sz * (d / 2 - 0.07), 0, 0, Math.PI / 2));
+        footGeos.push(place(new THREE.CylinderGeometry(0.016, 0.019, 0.03, 10), sx * (w / 2 - 0.022), -0.037, sz * (d / 2 - 0.028)));
       }
     }
+    g.add(mergeParts('casters-merged', mats.velcro, casterGeos));
+    g.add(mergeParts('feet-merged', mats.handle, footGeos));
     if (s.door) {
       const sideExit = s.exit === 'side';
+      const sideGeos: THREE.BufferGeometry[] = [];
+      const latchGeos: THREE.BufferGeometry[] = [];
       for (const sx of [-1, 1]) {
         if (sideExit && sx === 1) {
           // right-hand panel split around the cable cutout
@@ -430,22 +473,18 @@ export function buildScene(opts: BuildOptions): BuiltScene {
           ];
           for (const [ph, pd, py, pz] of segs) {
             if (ph <= 0.001 || pd <= 0.001) continue;
-            const seg = box(0.008, ph, pd, mats.panelDark, 'side-panel');
-            seg.position.set(w / 2 - 0.004, py, pz);
-            g.add(seg);
+            sideGeos.push(boxGeo(0.008, ph, pd, w / 2 - 0.004, py, pz));
           }
         } else {
           for (const half of [0, 1]) {
             const ph = (h - 0.1) / 2;
-            const side = box(0.008, ph - 0.004, d - 0.06, mats.panelDark, 'side-panel');
-            side.position.set(sx * (w / 2 - 0.004), 0.05 + ph / 2 + half * ph, 0);
-            g.add(side);
-            const latch = box(0.01, 0.03, 0.012, mats.handle, 'panel-latch');
-            latch.position.set(sx * (w / 2 - 0.008), 0.05 + ph * (half + 0.5), d / 2 - 0.09);
-            g.add(latch);
+            sideGeos.push(boxGeo(0.008, ph - 0.004, d - 0.06, sx * (w / 2 - 0.004), 0.05 + ph / 2 + half * ph, 0));
+            latchGeos.push(boxGeo(0.01, 0.03, 0.012, sx * (w / 2 - 0.008), 0.05 + ph * (half + 0.5), d / 2 - 0.09));
           }
         }
       }
+      if (sideGeos.length) g.add(mergeParts('side-panels-merged', mats.panelDark, sideGeos));
+      if (latchGeos.length) g.add(mergeParts('panel-latches-merged', mats.handle, latchGeos));
       // perforated front door on a hinge group
       const hinge = new THREE.Group();
       hinge.name = 'door-hinge-' + key;
@@ -488,31 +527,35 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const pdu = box(0.052, h * 0.78, 0.05, mats.pdu, 'pdu-vertical');
     pdu.position.set(w / 2 - 0.05, h * 0.5, -d / 2 + 0.1);
     g.add(pdu);
+    // NG-PH3D P4: 20 identical outlet boxes were 20 draw calls per rack for a
+    // part nothing ever picks — one merged mesh instead (§ perf budget).
+    const outletGeos: THREE.BufferGeometry[] = [];
     for (let i = 0; i < 20; i++) {
-      const outlet = box(0.03, 0.012, 0.006, mats.panelDark, 'pdu-outlet');
-      outlet.position.set(w / 2 - 0.05, h * 0.13 + i * ((h * 0.74) / 20), -d / 2 + 0.075);
-      g.add(outlet);
+      outletGeos.push(boxGeo(0.03, 0.012, 0.006, w / 2 - 0.05, h * 0.13 + i * ((h * 0.74) / 20), -d / 2 + 0.075));
     }
+    g.add(mergeParts('pdu-outlets-merged', mats.panelDark, outletGeos));
     // cable exit: brush plate on the roof, side cutout, or rear gland plate
     if (s.exit === 'top') {
-      // AR3100 roof: brush-filled slots
+      // AR3100 roof: brush-filled slots. Plates + bristles were up to ~60
+      // draw calls per rack on their own (the plan's own named worst offender)
+      // — merged per material into two meshes instead of one per part.
       const slots: [number, number, number, number][] = [
         [0.09, 0.06, w / 2 - 0.048, d / 2 - 0.2], [0.175, 0.06, -(w / 2 - 0.13), d / 2 - 0.2],
         [0.175, 0.06, 0, d / 2 - 0.2], [0.175, 0.06, w / 2 - 0.13, -0.02],
         [0.175, 0.06, -(w / 2 - 0.13), -0.02], [0.167, 0.079, 0, -0.02],
         [0.167, 0.079, w / 2 - 0.13, -d / 2 + 0.16], [0.245, 0.079, -0.06, -d / 2 + 0.16],
       ];
+      const plateGeos: THREE.BufferGeometry[] = [];
+      const bristleGeos: THREE.BufferGeometry[] = [];
       for (const [sw, sd, sx2, sz2] of slots) {
-        const plate = box(Math.min(sw, w - 0.06), 0.005, sd, mats.panelDark, 'exit-brush-plate');
-        plate.position.set(sx2, h + 0.012, sz2);
-        g.add(plate);
+        plateGeos.push(boxGeo(Math.min(sw, w - 0.06), 0.005, sd, sx2, h + 0.012, sz2));
         const n = Math.max(3, Math.round(sd / 0.012));
         for (let i = 0; i < n; i++) {
-          const bristle = box(Math.min(sw, w - 0.07), 0.012, 0.0035, mats.velcro, 'exit-brush');
-          bristle.position.set(sx2, h + 0.019, sz2 - sd / 2 + 0.004 + i * (sd / n));
-          g.add(bristle);
+          bristleGeos.push(boxGeo(Math.min(sw, w - 0.07), 0.012, 0.0035, sx2, h + 0.019, sz2 - sd / 2 + 0.004 + i * (sd / n)));
         }
       }
+      g.add(mergeParts('exit-brush-plates-merged', mats.panelDark, plateGeos));
+      g.add(mergeParts('exit-brush-bristles-merged', mats.velcro, bristleGeos));
     } else if (s.exit === 'side') {
       const cut = box(0.008, 0.34, 0.1, mats.panelDark, 'exit-side-cutout');
       cut.position.set(w / 2 - 0.004, h * 0.86, d / 2 - 0.22);
@@ -529,17 +572,19 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const trough = box(0.03, railTop - 0.1, 0.012, frameMat, 'manager-trough');
     trough.position.set(mgX + 0.017, 0.075 + (railTop - 0.1) / 2, mgZ - 0.012);
     g.add(trough);
+    // NG-PH3D P4: up to ~20 ring+post pairs on a 42U rack (40 draws) for
+    // parts nothing ever picks — merged per material (ring/post use
+    // different geometry AND material, so two merges, not one).
+    const ringGeos: THREE.BufferGeometry[] = [];
+    const postGeos: THREE.BufferGeometry[] = [];
     for (let uu = 2; uu < s.u - 1; uu += 2) {
       const y = 0.055 + uu * U;
-      const ring = new THREE.Mesh(track(new THREE.TorusGeometry(0.019, 0.0022, 5, 14, Math.PI * 1.35)), mats.handle);
-      ring.name = 'manager-d-ring';
-      ring.rotation.y = Math.PI / 2;
-      ring.rotation.z = -Math.PI * 0.32;
-      ring.position.set(mgX, y, mgZ);
-      g.add(ring);
-      const post = box(0.006, 0.006, 0.026, frameMat, 'd-ring-post');
-      post.position.set(mgX + 0.012, y, mgZ - 0.006);
-      g.add(post);
+      ringGeos.push(place(new THREE.TorusGeometry(0.019, 0.0022, 5, 14, Math.PI * 1.35), mgX, y, mgZ, 0, Math.PI / 2, -Math.PI * 0.32));
+      postGeos.push(boxGeo(0.006, 0.006, 0.026, mgX + 0.012, y, mgZ - 0.006));
+    }
+    if (ringGeos.length) {
+      g.add(mergeParts('manager-d-rings-merged', mats.handle, ringGeos));
+      g.add(mergeParts('d-ring-posts-merged', frameMat, postGeos));
     }
 
     // engraved nameplate strip
@@ -752,18 +797,17 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         psuHandle.position.set(PANEL_W / 2 - 0.062, psu.position.y - h * 0.28, rearZ - 0.012);
         g.add(psuHandle);
       }
-      // rear mgmt / console ports
+      // rear mgmt/console ports + exhaust grille: 11 identical-material
+      // (mats.port), never-picked boxes per device — one merged mesh
+      // instead of 11 draw calls (NG-PH3D P4 perf budget).
+      const rearVentGeos: THREE.BufferGeometry[] = [];
       for (let i = 0; i < 3; i++) {
-        const rp = box(0.012, h * 0.3, 0.005, mats.port, 'rear-mgmt-port');
-        rp.position.set(-PANEL_W / 2 + 0.045 + i * 0.02, -h * 0.2, rearZ - 0.004);
-        g.add(rp);
+        rearVentGeos.push(boxGeo(0.012, h * 0.3, 0.005, -PANEL_W / 2 + 0.045 + i * 0.02, -h * 0.2, rearZ - 0.004));
       }
-      // exhaust grille across the middle
       for (let i = 0; i < 8; i++) {
-        const slot = box(0.014, h * 0.5, 0.003, mats.port, 'exhaust-slot');
-        slot.position.set(-PANEL_W / 2 + 0.13 + i * 0.019, h * 0.06, rearZ - 0.003);
-        g.add(slot);
+        rearVentGeos.push(boxGeo(0.014, h * 0.5, 0.003, -PANEL_W / 2 + 0.13 + i * 0.019, h * 0.06, rearZ - 0.003));
       }
+      g.add(mergeParts('rear-vents-merged-' + def.id, mats.port, rearVentGeos));
     }
 
     // rear fans (they spin)
@@ -778,11 +822,14 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         hub.add(ring);
         const rotor = new THREE.Group();
         rotor.name = 'fan-rotor';
+        // 5 blades, one draw call instead of 5 (NG-PH3D P4) — merged as one
+        // static shape; `rotor` (the parent Group) still spins every frame
+        // in `tick()`, so the whole fanned shape rotates exactly as before.
+        const bladeGeos: THREE.BufferGeometry[] = [];
         for (let b = 0; b < 5; b++) {
-          const blade = box(h * 0.5, 0.004, 0.006, mats.fan, 'fan-blade');
-          blade.rotation.z = (b / 5) * Math.PI * 2;
-          rotor.add(blade);
+          bladeGeos.push(place(new THREE.BoxGeometry(h * 0.5, 0.004, 0.006), 0, 0, 0, 0, 0, (b / 5) * Math.PI * 2));
         }
+        rotor.add(mergeParts('fan-blades-merged', mats.fan, bladeGeos));
         hub.add(rotor);
         registry.fans.push(rotor);
         g.add(hub);
@@ -968,7 +1015,14 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       const ea = exitA.p, eb = exitB.p;
       const climbA = ea.y - 0.22;
       if (climbA > a.y + 0.03) pts.push(new THREE.Vector3(la, climbA, a.z + COMB_Z + tierA));
-      pts.push(new THREE.Vector3(la, ea.y - 0.06, (a.z + COMB_Z + tierA + ea.z) / 2));
+      const preExitZA = (a.z + COMB_Z + tierA + ea.z) / 2;
+      pts.push(new THREE.Vector3(la, ea.y - 0.06, preExitZA));
+      // NG-PH3D P4: sweep x from the lane to the exit point at a fixed z
+      // first — going straight from (la, preExitZA) to ea.x/ea.clone() (x and
+      // z changing together) could cut through the mounting rail sitting
+      // between them for a rear/top-exit rack (same class of bug as the
+      // PDU/tray-descent fixes above).
+      pts.push(new THREE.Vector3(ea.x, ea.y - 0.06, preExitZA));
       const sx = ((runIx % 5) - 2) * 0.016; // across the 210 mm aperture
       const sz = tzOf(runIx);
       if (exitA.kind === 'top') {
@@ -989,6 +1043,13 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         descend(pts, eb.x, eb.z + sz, trayY - 0.02, eb.y + 0.02);
         pts.push(eb.clone());
       }
+      // NG-PH3D P4: this used to jump straight from (eb.x, eb.z) to
+      // (lb, avgZ) in one step — a diagonal that, for a rear/top-exit rack,
+      // crosses exactly the x-z corner the mounting rail occupies (caught by
+      // the no-intersection test). Sweep x to `lb` first at the
+      // already-clear exit z, then move z to the average — same
+      // one-axis-at-a-time fix as the PDU power-cord path above.
+      pts.push(new THREE.Vector3(lb, eb.y - 0.06, eb.z + sz));
       pts.push(new THREE.Vector3(lb, eb.y - 0.06, (b.z + COMB_Z + tierB + eb.z) / 2));
       const climbB = eb.y - 0.22;
       if (climbB > b.y + 0.03) pts.push(new THREE.Vector3(lb, climbB, b.z + COMB_Z + tierB));
@@ -1191,10 +1252,20 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // the outlet strip faces +z at z = -d/2 + 0.075; stop just in front of it
       const outletZ = -rack.d / 2 + 0.075;
       const inletX = pduX - 0.042; // clear of the 52 mm PDU body
+      // NG-PH3D P4: the direct diagonal this used to take (rearZ straight to
+      // outletZ while x also swept toward the PDU) let the Catmull-Rom curve
+      // bulge into the accessory-channel/mounting-rail/PDU-body hazard band
+      // that all share this rear corner — caught by the no-intersection
+      // test. Route one axis at a time instead: drop to a z clear of every
+      // hazard while x is still far from them (segment 1), sweep x to the
+      // inlet while at that safe z (segment 2 — `inletX` is analytically
+      // clear of the rail/channel/PDU x-ranges for every RACK_SPECS width),
+      // then rise straight into the inlet at that already-safe x (segment 3).
+      const sweepZ = -rack.d / 2 + 0.04;
       const pts = [
         new THREE.Vector3(rack.x + 0.09, y, rearZ),
-        new THREE.Vector3(rack.x + 0.19, y - 0.022, rearZ + 0.02),
-        new THREE.Vector3(inletX - 0.05, y + 0.012, outletZ + 0.055),
+        new THREE.Vector3(rack.x + 0.09, y - 0.01, sweepZ),
+        new THREE.Vector3(inletX, y, sweepZ),
         new THREE.Vector3(inletX, y + 0.03, outletZ + 0.022),
         new THREE.Vector3(inletX, y + 0.038, outletZ + 0.008),
       ];
