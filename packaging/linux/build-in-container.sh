@@ -72,12 +72,12 @@ podman run --rm --network=host \
         apt-get -o Acquire::ForceIPv4=true update -qq
         apt-get -o Acquire::ForceIPv4=true install -y -qq python3.11 python3.11-venv libpython3.11 binutils \
             python3-gi gir1.2-webkit2-4.1 libwebkit2gtk-4.1-0 libgtk-3-0 >/dev/null
-        # ponytail: --system-site-packages so the venv can see apt's python3-gi
+        # ponytail: --system-site-packages so the venv can see apt-installed python3-gi
         # (PyGObject has no pip wheel with the WebKit2 typelib bound in).
         # UNVERIFIED: apt ships python3-gi for Ubuntu 22.04s default python3
         # (3.10), this venv is python3.11 — whether the compiled bindings are
         # importable across that minor-version gap is not confirmed in this
-        # slice. If not, the bundle still runs (launcher.py's browser
+        # slice. If not, the bundle still runs (launcher.py browser
         # fallback), just without a native window — real verification is
         # AppImage-slice work, out of scope here.
         python3.11 -m venv --system-site-packages /build-venv

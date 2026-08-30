@@ -26,7 +26,10 @@ This is a **kerangka** — the simplest thing that runs, not a finished product.
 - `linux/` — per-user desktop integration: `netgeo.desktop` (XDG entry),
   `install.sh` / `uninstall.sh`, `build-in-container.sh` (portable Linux
   build via rootless Podman — see "Installing" below, **use this, not a
-  direct `pyinstaller netgeo.spec` on this machine**).
+  direct `pyinstaller netgeo.spec` on this machine**), `build-appimage.sh`
+  (wraps that bundle into a single-file `NetGeo-x86_64.AppImage` via
+  `linuxdeploy` + `linuxdeploy-plugin-appimage`, downloaded on demand into
+  `packaging/linux/.appimage-tools/`, gitignored).
 - `windows/netgeo.iss` — Inno Setup script producing a per-user
   `netgeo-<version>-setup.exe` (Start Menu + optional Desktop shortcut,
   uninstaller, no admin rights required).
@@ -114,6 +117,86 @@ than Fedora/Ubuntu.
 Uninstall: `packaging/linux/uninstall.sh` (or the copy under
 `~/.local/share/netgeo/` is not kept — re-run the one from a checkout/tarball).
 
+### Linux — AppImage (first installer format)
+
+Decision + full comparison (AppImage vs Flatpak vs .deb/.rpm vs tarball):
+`docs/qa/2026-08-30-format-installer-linux.md` (local-only). Short version:
+single binary, no per-distro build, CI-friendly. WebKitGTK is **not**
+bundled — see "System prerequisites" above; the same fallback applies.
+
+```
+./packaging/linux/build-in-container.sh   # → packaging/dist-container/dist/netgeo
+./packaging/linux/build-appimage.sh       # → packaging/NetGeo-x86_64.AppImage
+```
+
+`build-appimage.sh` downloads `linuxdeploy` + `linuxdeploy-plugin-appimage`
+(GitHub continuous releases, ~36 MB total, cached in
+`packaging/linux/.appimage-tools/` — gitignored) the first time it runs,
+hand-builds an `AppDir` around the onedir bundle (an `AppRun` script exec's
+the existing `netgeo` binary in place — the onedir's own libs are already
+glibc-2.35-pinned and self-contained, so `linuxdeploy`'s dependency-chasing
+is skipped on purpose, it would just risk shadowing them with mismatched
+system `.so`s), then runs the plugin's `--appimage-extract-and-run` to
+squash it (this environment has no guaranteed FUSE mount for a nested
+AppImage, rootless + no sudo — extract-and-run sidesteps that).
+
+**Output size: 27 MB** (`NetGeo-x86_64.AppImage`, 28 023 288 bytes).
+
+**Three questions the design doc left UNVERIFIED — closed here with a real
+build + two real runs (Fedora 44 desktop, Ubuntu 24.04 headless VM):**
+
+1. *Does PyInstaller/AppImage bundle `gi` + the WebKit2 typelib, or does it
+   stay dependent on system `.so`s?* **Stays dependent — confirmed, not
+   guessed.** `find packaging/dist-container/dist/netgeo -iname '*.typelib'`
+   returns nothing; no `_gi*.so` extension is bundled either — PyInstaller's
+   static analysis pulls in only the pure-Python `gi/__init__.py` stub (that
+   .py file is portable, so it rides along), not the compiled introspection
+   binary or any `.typelib` data file. Running the built binary reproduces
+   this identically on both the Fedora host (which *has* `webkit2gtk4.1` +
+   `python3-gobject` installed) and the headless Ubuntu VM (which doesn't):
+   `ImportError: cannot import name '_gi' from partially initialized module
+   'gi'`.
+2. *Does Ubuntu 22.04's apt `python3-gi` (built for its default python3.10)
+   actually import from a different-minor-version venv via
+   `--system-site-packages`?* **No — confirmed false, root cause found: a
+   CPython C-extension ABI mismatch, not a packaging omission.** Isolated
+   in a throwaway container: `python3.10 -m venv --system-site-packages`
+   imports `gi` and resolves `WebKit2-4.1.typelib` from the system path
+   without issue (`OK 3.10 venv: <IntrospectionModule 'WebKit2' from
+   '/usr/lib/x86_64-linux-gnu/girepository-1.0/WebKit2-4.1.typelib'>`) — the
+   *same* apt packages, imported from a `python3.11 -m venv
+   --system-site-packages` instead, fail with the identical `_gi`
+   ImportError seen in the real bundle. `build-in-container.sh` builds with
+   python3.11 (the newest on `ubuntu:22.04`'s own repos — see its header
+   comment), one minor version off apt's `python3-gi`'s 3.10 build — that
+   gap alone is fatal to the native window, independent of typelib
+   bundling. Not changed here: switching the build to python3.10 to close
+   this gap is a real, scoped fix, but was kept out of this slice per
+   instructions not to force fragile bundling just to look done — the
+   existing browser fallback already covers it correctly.
+3. *Final AppImage size?* **27 MB**, see above.
+
+**Verified working, both directions, 2026-08-30 (same two-machine pattern as
+the tarball above):**
+- **Fedora 44 (Wayland desktop, `webkit2gtk4.1`/`gtk3`/`python3-gobject`
+  installed)**: the AppImage FUSE-mounted directly (no
+  `--appimage-extract-and-run` needed — a real FUSE mount was available
+  here), `netgeo-bundle/netgeo` started, `_try_webview` failed for the ABI
+  reason above and printed the Fedora install hint, `webbrowser.open()`
+  opened a **real Firefox tab** — `GET /` → 200, JS/CSS assets → 200,
+  `GET /api/auth/setup` → 200.
+- **Ubuntu 24.04 VM (headless, `superadmin@100.72.83.91`, no
+  `webkit2gtk`/`libgtk-3-0`/`gir1.2-webkit2-4.1` installed, `python3-gi`
+  present for its own python3.12)**: copied over scp, FUSE-mounted the same
+  way, printed the correct **Ubuntu/Debian** install hint (not the Fedora
+  one — the same `launcher.py` code path picks the right message, this
+  isn't AppImage-specific), backend served `/api/health` → 200 and `/` →
+  200 with no window (headless, expected).
+
+Not tested: a distro with `webkit2gtk`/`gtk3`/`python3-gobject` present *and*
+its default python3 at 3.11 (would need the ABI check above to actually
+pass) — none was available in this session.
+
 ### Windows — written, NOT tested (no Windows machine reachable from here)
 
 ```
@@ -151,7 +234,7 @@ non-interactive testing); unset/default behavior is unchanged.
 
 ## Not done (explicitly out of scope)
 
-- No AppImage/`.deb`/`.rpm` for Linux, no macOS build.
+- No `.deb`/`.rpm` for Linux (AppImage now exists, see "Linux — AppImage" above), no macOS build.
 - No code signing (Windows installer and binaries are unsigned; see the
   disabled step in `desktop.yml` and `docs/qa/code-signing-native-distribution`).
 - No tray icon, no auto-start, no auto-update wiring.
