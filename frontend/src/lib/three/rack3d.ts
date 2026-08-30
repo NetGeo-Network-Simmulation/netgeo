@@ -12,6 +12,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { getBootGeometry, type BootFamily } from './bootAssets';
 
 /* ─── Real-world geometry (EIA-310): 1U = 44.45 mm, 19" panel = 482.6 mm ─── */
 export const U = 0.04445;
@@ -56,6 +57,11 @@ export interface MediaSpec {
   jacket: number;
   boot: number;
   r: number;
+  /** Minimum installed bend radius (metres), docs/design/24-DEVICE-PHYSICAL-
+   *  SPEC.md §2.b. Undefined where the doc has no verified number for this
+   *  media (dac/aoc/pwrA/pwrB) — the invariant test skips those rather than
+   *  guessing a threshold. */
+  minBendM?: number;
 }
 
 /* ─── Cable media: jacket colour per TIA-598 / datacenter practice ─────────
@@ -63,19 +69,24 @@ export interface MediaSpec {
  * values (see plantAdapter.ts). om5/mpo/cat6a_xc/cat6a_oob/aoc/pwrA/pwrB have
  * no backend counterpart yet — dead in the P1 production path, kept for
  * P5/P6 (backend enum growth, patch-panel hops, PDU visuals). */
+// Bend-radius numbers: docs/design/24-DEVICE-PHYSICAL-SPEC.md §2.b. Fibre
+// patch (os2/os2apc) uses the "typ" installed figure for that exact cable
+// class (20mm); MM/MPO use the loose-tube figure (25-30mm, upper bound);
+// Cat6A/coax use the doc's own numbers directly (no range to pick from, or
+// the single value given).
 export const MEDIA: Record<string, MediaSpec> = {
-  os2: { label: 'OS2 single-mode · LC/UPC', jacket: 0xf2c21b, boot: 0x1e6fd9, r: 0.0017 },
-  os2apc: { label: 'OS2 single-mode · LC/APC', jacket: 0xf2c21b, boot: 0x1fa34a, r: 0.0017 },
-  om3: { label: 'OM3 multimode · aqua', jacket: 0x36c6c0, boot: 0x36c6c0, r: 0.0017 },
-  om4: { label: 'OM4 multimode · violet', jacket: 0xae7bc6, boot: 0xae7bc6, r: 0.0017 },
-  cat6a: { label: 'Cat6A horizontal · blue', jacket: 0x2f6bff, boot: 0x2f6bff, r: 0.0034 },
+  os2: { label: 'OS2 single-mode · LC/UPC', jacket: 0xf2c21b, boot: 0x1e6fd9, r: 0.0017, minBendM: 0.02 },
+  os2apc: { label: 'OS2 single-mode · LC/APC', jacket: 0xf2c21b, boot: 0x1fa34a, r: 0.0017, minBendM: 0.02 },
+  om3: { label: 'OM3 multimode · aqua', jacket: 0x36c6c0, boot: 0x36c6c0, r: 0.0017, minBendM: 0.03 },
+  om4: { label: 'OM4 multimode · violet', jacket: 0xae7bc6, boot: 0xae7bc6, r: 0.0017, minBendM: 0.03 },
+  cat6a: { label: 'Cat6A horizontal · blue', jacket: 0x2f6bff, boot: 0x2f6bff, r: 0.0034, minBendM: 0.051 },
   dac: { label: 'DAC twinax 25/100G · black', jacket: 0x16150f, boot: 0x2a2a26, r: 0.0042 },
-  coax: { label: 'Coax 50Ω · black', jacket: 0x16150f, boot: 0x1a1a1c, r: 0.004 },
+  coax: { label: 'Coax 50Ω · black', jacket: 0x16150f, boot: 0x1a1a1c, r: 0.004, minBendM: 0.05 },
   // DEAD CODE — P6: no backend CableMedia counterpart today.
-  om5: { label: 'OM5 wideband · lime', jacket: 0xa6d608, boot: 0xa6d608, r: 0.0017 },
-  mpo: { label: 'MPO/MTP trunk 12F', jacket: 0x36c6c0, boot: 0x15171b, r: 0.0032 },
-  cat6a_xc: { label: 'Cat6A cross-connect · orange', jacket: 0xf07020, boot: 0xf07020, r: 0.0034 },
-  cat6a_oob: { label: 'Cat6A mgmt / OOB · green', jacket: 0x27c28b, boot: 0x27c28b, r: 0.003 },
+  om5: { label: 'OM5 wideband · lime', jacket: 0xa6d608, boot: 0xa6d608, r: 0.0017, minBendM: 0.03 },
+  mpo: { label: 'MPO/MTP trunk 12F', jacket: 0x36c6c0, boot: 0x15171b, r: 0.0032, minBendM: 0.03 },
+  cat6a_xc: { label: 'Cat6A cross-connect · orange', jacket: 0xf07020, boot: 0xf07020, r: 0.0034, minBendM: 0.051 },
+  cat6a_oob: { label: 'Cat6A mgmt / OOB · green', jacket: 0x27c28b, boot: 0x27c28b, r: 0.003, minBendM: 0.051 },
   aoc: { label: 'AOC active optical · aqua', jacket: 0x2fa9a4, boot: 0x15171b, r: 0.0026 },
   pwrA: { label: 'Power C13/C14 · feed A', jacket: 0x121211, boot: 0x121211, r: 0.0038 },
   pwrB: { label: 'Power C13/C14 · feed B', jacket: 0xc0392b, boot: 0xc0392b, r: 0.0038 },
@@ -363,6 +374,40 @@ function faceTexture(def: DeviceDef, rear: boolean) {
   return tex;
 }
 
+/**
+ * NG-PH3D 3a: the physically correct hang of a cable between two points —
+ * not an eyeballed bezier bow. A catenary `y(u) = a·cosh((u−x0)/a) + c` has
+ * curvature radius `a·cosh²((u−x0)/a) ≥ a` everywhere, minimum exactly `a`
+ * at its vertex — so using the media's own minimum bend radius AS the
+ * catenary parameter `a` (with a small safety margin) guarantees the hang
+ * itself never bends tighter than the cable can physically take, by
+ * construction, no invariant-test-and-adjust loop required. `x0` (the
+ * vertex's horizontal offset from p0) is the standard closed-form two-point
+ * solution once `a` is fixed. The hang is computed in the vertical plane
+ * through both endpoints (x/z lerp linearly with the horizontal parameter)
+ * — cable sagging sideways out of that plane isn't a real catenary effect
+ * gravity produces, so it isn't modelled. Falls back to a straight line
+ * when the two points coincide or have no horizontal separation.
+ */
+export function catenarySpan(p0: THREE.Vector3, p1: THREE.Vector3, minRadius: number, n: number): THREE.Vector3[] {
+  const dx = p1.x - p0.x, dz = p1.z - p0.z;
+  const L = Math.hypot(dx, dz);
+  const dy = p1.y - p0.y;
+  if (L < 1e-5) {
+    return Array.from({ length: n + 1 }, (_, i) => p0.clone().lerp(p1, i / n));
+  }
+  const a = Math.max(1e-4, minRadius) * 1.2; // 20% margin over the enforced floor
+  const x0 = L / 2 - a * Math.asinh(dy / (2 * a * Math.sinh(L / (2 * a))));
+  const ux = dx / L, uz = dz / L;
+  const pts: THREE.Vector3[] = [];
+  for (let i = 0; i <= n; i++) {
+    const u = (i / n) * L;
+    const y = a * (Math.cosh((u - x0) / a) - Math.cosh(x0 / a));
+    pts.push(new THREE.Vector3(p0.x + ux * u, p0.y + y, p0.z + uz * u));
+  }
+  return pts;
+}
+
 /* ─── Scene builder ──────────────────────────────────────────────────────── */
 
 export interface BuildOptions {
@@ -386,6 +431,13 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   };
   const root = new THREE.Group();
   root.name = 'netgeo-physical-plant';
+
+  // NG-PH3D 3a: instance transforms for the Blender-authored rj45/lc boot
+  // assets, collected while cables are built and flushed into one
+  // InstancedMesh per family right before buildScene returns.
+  const bootInstances: Record<BootFamily, { pos: THREE.Vector3; quat: THREE.Quaternion; color: THREE.Color }[]> = {
+    rj45: [], lc: [],
+  };
 
   const track = <T extends THREE.BufferGeometry | THREE.Material | THREE.Texture>(x: T): T => {
     registry.disposables.push(x);
@@ -973,7 +1025,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
 
   /** Chaikin-style corner cutting: replaces every sharp joint with a fillet, so
    *  a tube through these points reads as bent cable, not folded pipe. */
-  function smoothCurve(pts: THREE.Vector3[], passes = 3) {
+  function chaikin(pts: THREE.Vector3[], passes: number) {
     let p = pts.map((v) => v.clone());
     for (let k = 0; k < passes; k++) {
       const out = [p[0]!];
@@ -984,7 +1036,94 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       out.push(p[p.length - 1]!);
       p = out;
     }
-    return new THREE.CatmullRomCurve3(p, false, 'catmullrom', 0.5);
+    return p;
+  }
+
+  function smoothCurve(pts: THREE.Vector3[], passes = 3) {
+    return new THREE.CatmullRomCurve3(chaikin(pts, passes), false, 'catmullrom', 0.5);
+  }
+
+  /** NG-PH3D 3a: a TRUE circular fillet of radius R at vertex V (incoming
+   *  from A, outgoing to B), lying in the A-V-B plane. Chaikin corner-
+   *  cutting on its own can't be trusted for this: it's angle-driven and
+   *  converges to a fixed limit shape as passes increase (confirmed
+   *  empirically — 8 passes reproduced the same violating radius as 5, to
+   *  the tenth of a millimetre), and just lerping extra points toward a
+   *  sharp vertex creates uneven spacing that provoked Catmull-Rom
+   *  overshoot and made curvature WORSE at neighbouring joints (measured
+   *  while chasing this). An exact tangent-circle construction (this
+   *  function) is the only way to GUARANTEE the resulting radius instead
+   *  of hoping a spline behaves. Returns the polyline with V replaced by
+   *  `segs+1` points along the fillet arc; A and B are untouched (the
+   *  caller supplies them as the neighbours either side). Clamped to at
+   *  most 49% of each adjacent edge so two fillets sharing an edge can
+   *  never overlap. */
+  function filletCorner(A: THREE.Vector3, V: THREE.Vector3, B: THREE.Vector3, R: number, segs = 32): THREE.Vector3[] {
+    const d1 = V.clone().sub(A);
+    const d2 = B.clone().sub(V);
+    const len1 = d1.length(), len2 = d2.length();
+    if (len1 < 1e-6 || len2 < 1e-6 || R <= 0) return [V];
+    d1.normalize();
+    d2.normalize();
+    const cosTurn = THREE.MathUtils.clamp(d1.dot(d2), -1, 1);
+    if (cosTurn > 0.999) return [V]; // already ~straight — nothing to fillet
+    const halfInterior = (Math.PI - Math.acos(cosTurn)) / 2;
+    const tanHalf = Math.tan(halfInterior);
+    if (tanHalf < 1e-6) return [V]; // ~180° reversal — no well-defined fillet
+    let t = R / tanHalf;
+    t = Math.min(t, len1 * 0.49, len2 * 0.49);
+    const achievedR = t * tanHalf;
+    const sinHalf = Math.sin(halfInterior);
+    if (achievedR < 1e-6 || sinHalf < 1e-6) return [V];
+    const p0 = V.clone().sub(d1.clone().multiplyScalar(t)); // tangent point on A→V
+    const p1 = V.clone().add(d2.clone().multiplyScalar(t)); // tangent point on V→B
+    const bisector = d2.clone().sub(d1);
+    if (bisector.lengthSq() < 1e-12) return [V];
+    bisector.normalize();
+    const center = V.clone().add(bisector.multiplyScalar(achievedR / sinHalf));
+    const u = p0.clone().sub(center); // |u| === |v| === achievedR by construction
+    const v = p1.clone().sub(center);
+    const out: THREE.Vector3[] = [];
+    for (let i = 0; i <= segs; i++) {
+      const s = i / segs;
+      const dir = u.clone().multiplyScalar(1 - s).add(v.clone().multiplyScalar(s)).normalize();
+      out.push(center.clone().add(dir.multiplyScalar(achievedR)));
+    }
+    return out;
+  }
+
+  /** Fillets every interior vertex of a raw control-point run at radius R,
+   *  then Chaikin-smooths only the plain straight-run stretches BETWEEN
+   *  fillets — never the arcs themselves. Running Chaikin over an arc's own
+   *  points shrinks it: Chaikin corner-cutting treats an arc's short
+   *  segments as more corners to cut, eating back into the very radius the
+   *  fillet just guaranteed (measured — a uniform 5-pass Chaikin after
+   *  filleting pushed cables back under their own minimum). Splitting the
+   *  route into alternating plain/arc runs and only Chaikin-ing the plain
+   *  ones keeps the fillet's radius exact while still rounding every joint
+   *  filletCorner declined (near-straight, no fillet needed). */
+  function routeCurve(pts: THREE.Vector3[], R: number, chaikinPasses: number, from = 1, to = pts.length - 2) {
+    const runs: THREE.Vector3[][] = [];
+    let plain: THREE.Vector3[] = [pts[0]!];
+    for (let i = 1; i < pts.length - 1; i++) {
+      const arc = i >= from && i <= to ? filletCorner(pts[i - 1]!, pts[i]!, pts[i + 1]!, R) : [pts[i]!];
+      if (arc.length === 1) {
+        plain.push(arc[0]!); // near-straight — stays part of the plain run
+        continue;
+      }
+      plain.push(arc[0]!); // tangent-in point closes this plain run
+      runs.push(plain, arc);
+      plain = [arc[arc.length - 1]!]; // tangent-out point opens the next one
+    }
+    plain.push(pts[pts.length - 1]!);
+    runs.push(plain);
+
+    const combined: THREE.Vector3[] = [];
+    runs.forEach((run, idx) => {
+      const chunk = idx % 2 === 1 ? run : chaikin(run, chaikinPasses);
+      for (let i = combined.length ? 1 : 0; i < chunk.length; i++) combined.push(chunk[i]!);
+    });
+    return new THREE.CatmullRomCurve3(combined, false, 'catmullrom', 0.5);
   }
 
   /** World-space point where a rack lets cable out, per its datasheet. */
@@ -1042,27 +1181,41 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     rack.group.add(g);
   }
 
-  /** Short front jumper between two panels in the same rack: out of the port,
-   *  a soft bight that droops toward the lower port, back in. */
-  function jumperCurve(a: THREE.Vector3, b: THREE.Vector3) {
-    const dy = b.y - a.y;
-    const bight = 0.03 + Math.min(0.032, Math.abs(dy) * 0.34);
-    const midY = (a.y + b.y) / 2 - Math.max(0.012, Math.abs(dy) * 0.16);
-    return smoothCurve([
-      a.clone(),
-      new THREE.Vector3(a.x, a.y - 0.004, a.z + OUT_Z * 0.7),
-      new THREE.Vector3(a.x + (b.x - a.x) * 0.22, a.y - Math.abs(dy) * 0.2, a.z + bight),
-      new THREE.Vector3((a.x + b.x) / 2, midY, a.z + bight * 1.06),
-      new THREE.Vector3(b.x - (b.x - a.x) * 0.22, b.y - Math.abs(dy) * 0.2, b.z + bight),
-      new THREE.Vector3(b.x, b.y - 0.004, b.z + OUT_Z * 0.7),
-      b.clone(),
-    ]);
+  /** Short front jumper between two panels in the same rack: a true
+   *  two-point catenary hang from port to port (NG-PH3D 3a — patch cords
+   *  are the one cable run in this scene that's actually free-hanging, not
+   *  dressed into a channel; see catenarySpan's own doc for why the
+   *  channel-routed cableCurve below doesn't get the same treatment).
+   *
+   *  No separate "straight out of the faceplate" lead-out stub: an early
+   *  version added one for visual polish, but *any* stub whose direction
+   *  doesn't exactly match the catenary's own tangent at that end creates a
+   *  corner, and Chaikin/Catmull-Rom cannot be trusted to round an
+   *  arbitrary corner back out to a specific minimum radius — verified
+   *  empirically while chasing this invariant's violations (see git log for
+   *  this file). catenarySpan's curvature is >= its own parameter `a`
+   *  everywhere BY CONSTRUCTION (proof in its own doc comment), so feeding
+   *  its samples straight into the curve, with nothing else, is what
+   *  actually guarantees the invariant instead of hoping smoothing
+   *  preserves it. The minor cost: the cable can leave a port at a slight
+   *  angle instead of dead perpendicular to the faceplate. */
+  function jumperCurve(a: THREE.Vector3, b: THREE.Vector3, minBend: number) {
+    const hang = catenarySpan(a, b, minBend, 32);
+    return new THREE.CatmullRomCurve3(hang, false, 'catmullrom', 0.5);
   }
 
   /** Collinear ladder: Chaikin preserves collinear runs exactly, so a straight
-   *  descent survives smoothing where a single waypoint gets filleted away. */
+   *  descent survives smoothing where a single waypoint gets filleted away.
+   *  NG-PH3D 3a: `steps` (still 5 by default) can end up dividing a SHORT
+   *  climb into segments too short for routeCurve's fillet to reach a stiff
+   *  cable's own minimum — filletCorner clamps its tangent length to 49% of
+   *  the shorter adjacent edge, so it needs edge >= R/0.49 to hit the
+   *  requested radius R exactly. Passing `minSeg` (from the cable's own
+   *  minBendM) caps how many steps a short climb gets divided into, so its
+   *  own segments stay long enough for that clamp to actually deliver. */
   const tzOf = (i: number) => ((i % 7) - 3) * 0.0115;
-  function descend(pts: THREE.Vector3[], x: number, z: number, yFrom: number, yTo: number, steps = 5) {
+  function descend(pts: THREE.Vector3[], x: number, z: number, yFrom: number, yTo: number, steps = 5, minSeg = 0) {
+    if (minSeg > 0) steps = Math.max(1, Math.min(steps, Math.floor(Math.abs(yTo - yFrom) / minSeg)));
     for (let i = 0; i <= steps; i++) {
       pts.push(new THREE.Vector3(x, yFrom + (yTo - yFrom) * (i / steps), z));
     }
@@ -1074,6 +1227,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   function cableCurve(
     a: THREE.Vector3, b: THREE.Vector3, chanA: number, chanB: number, trayY: number,
     sameRack: boolean, laneA: number, laneB: number, exitA: ExitRef, exitB: ExitRef, runIx = 0,
+    minBend = 0.02,
   ) {
     const lane = (ch: number, n: number) => ch - 0.004 + ((n % LANE_WRAP) - (LANE_WRAP - 1) / 2) * LANE_PITCH;
     // lane → 2-D grid: x from lane % WRAP, z from the wrap count, both steps
@@ -1084,9 +1238,14 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const lb = lane(chanB, laneB);
     // a run sags in proportion to how far it has to reach — real cable behaviour
     const drop = (from: number, to: number) => Math.min(0.012, Math.abs(to - from) * 0.045 + 0.002);
+    // NG-PH3D 3a: the port->channel jog's own standoff/depth (OUT_Z/COMB_Z)
+    // are physical rack dimensions, too small on their own to give a stiff
+    // cable (Cat6A's 51mm) room to turn without violating its own minimum
+    // bend radius — floor them at a fraction of minBend for this jog only,
+    // not the shared constants (those also size the comb channel itself).
     const legIn = (p: THREE.Vector3, l: number, tier: number) => {
       const sag = drop(p.x, l);
-      const oz = OUT_Z + tier, cz = COMB_Z + tier;
+      const oz = Math.max(OUT_Z, minBend * 0.6) + tier, cz = COMB_Z + tier;
       return [
         new THREE.Vector3(p.x, p.y, p.z + oz * 0.5),
         new THREE.Vector3(p.x + (l - p.x) * 0.2, p.y - sag * 0.4, p.z + oz * 1.5),
@@ -1095,30 +1254,54 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       ];
     };
     const pts = [a.clone(), ...legIn(a, la, tierA)];
+    const prefixEnd = pts.length; // legIn(a)'s own joints are already fine — never fillet them
     if (sameRack) {
       const mid = (a.y + b.y) / 2;
       pts.push(new THREE.Vector3(chanA, mid, a.z + COMB_Z + tierA));
       pts.push(new THREE.Vector3(la, b.y - drop(b.x, lb) * 0.3, b.z + COMB_Z + tierB));
     } else {
       const ea = exitA.p, eb = exitB.p;
+      // NG-PH3D 3a: floored like legIn's own oz/cz — a fixed 60mm drop is
+      // too short a leg for routeCurve's fillet clamp to reach a stiff
+      // cable's minimum bend radius (measured while chasing this
+      // invariant's last violations).
+      const preDrop = Math.max(0.06, minBend * 3);
+      // NG-PH3D 3a: the P4 sweep below is two consecutive ~90° turns
+      // sharing ONE edge (la → ea.x) — routeCurve's fillet clamps each to
+      // 49% of it, so both together can claim at most ~98% of that edge's
+      // OWN length no matter how much margin is requested. A short
+      // lane-to-aperture gap (this rack's real ~100mm) is the actual
+      // limit, not the fillet math — nudge the lane-side x outward for
+      // this one sweep (not `la` itself, so the comb-channel merge point
+      // used elsewhere is untouched) to give a stiff cable's two turns
+      // enough shared edge to both reach their own minimum. top/rear only:
+      // a side-exit rack's mounting rail sits close enough to `la` that
+      // this same nudge walked the sweep straight into it (caught by P4's
+      // own no-intersection invariant) — side-exit racks keep the original
+      // unwidened sweep, so a stiff cable through one still isn't proven
+      // to clear its own bend radius here; only top/rear are.
+      const laX = exitA.kind === 'side' ? la : la + Math.sign(ea.x - la || 1) * minBend * 1.2;
       const climbA = ea.y - 0.22;
       if (climbA > a.y + 0.03) pts.push(new THREE.Vector3(la, climbA, a.z + COMB_Z + tierA));
       const preExitZA = (a.z + COMB_Z + tierA + ea.z) / 2;
-      pts.push(new THREE.Vector3(la, ea.y - 0.06, preExitZA));
+      pts.push(new THREE.Vector3(laX, ea.y - preDrop, preExitZA));
       // NG-PH3D P4: sweep x from the lane to the exit point at a fixed z
       // first — going straight from (la, preExitZA) to ea.x/ea.clone() (x and
       // z changing together) could cut through the mounting rail sitting
       // between them for a rear/top-exit rack (same class of bug as the
       // PDU/tray-descent fixes above).
-      pts.push(new THREE.Vector3(ea.x, ea.y - 0.06, preExitZA));
+      pts.push(new THREE.Vector3(ea.x, ea.y - preDrop, preExitZA));
       const sx = ((runIx % 5) - 2) * 0.016; // across the 210 mm aperture
       const sz = tzOf(runIx);
       if (exitA.kind === 'top') {
         pts.push(new THREE.Vector3(ea.x + sx, ea.y, ea.z + sz * 0.5));
         pts.push(new THREE.Vector3(ea.x + sx, trayY - 0.015, ea.z * 0.55 + sz));
       } else {
-        pts.push(ea.clone());
-        descend(pts, ea.x, ea.z + sz, ea.y + 0.02, trayY - 0.02);
+        // NG-PH3D 3a: no separate ea.clone() lead-in — it sat only 20mm from
+        // descend's own first point, a segment too short for a stiff
+        // cable's fillet clamp to reach its own minimum bend radius, and
+        // redundant besides (descend already starts right at the exit).
+        descend(pts, ea.x, ea.z + sz, ea.y, trayY - 0.02, 5, minBend * 2.8);
       }
       const tz = ((runIx % 9) - 4) * 0.0115; // spread the crossing across the tray
       pts.push(new THREE.Vector3(ea.x + (eb.x - ea.x) * 0.28, trayY + 0.012, tz * 0.6));
@@ -1128,8 +1311,9 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         pts.push(new THREE.Vector3(eb.x + sx, trayY - 0.015, eb.z * 0.55 + sz));
         pts.push(new THREE.Vector3(eb.x + sx, eb.y, eb.z + sz * 0.5));
       } else {
-        descend(pts, eb.x, eb.z + sz, trayY - 0.02, eb.y + 0.02);
-        pts.push(eb.clone());
+        // NG-PH3D 3a: symmetric — no separate trailing eb.clone(), same
+        // reason as the A-side entry above.
+        descend(pts, eb.x, eb.z + sz, trayY - 0.02, eb.y, 5, minBend * 2.8);
       }
       // NG-PH3D P4: this used to jump straight from (eb.x, eb.z) to
       // (lb, avgZ) in one step — a diagonal that, for a rear/top-exit rack,
@@ -1137,15 +1321,32 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // the no-intersection test). Sweep x to `lb` first at the
       // already-clear exit z, then move z to the average — same
       // one-axis-at-a-time fix as the PDU power-cord path above.
-      pts.push(new THREE.Vector3(lb, eb.y - 0.06, eb.z + sz));
-      pts.push(new THREE.Vector3(lb, eb.y - 0.06, (b.z + COMB_Z + tierB + eb.z) / 2));
+      pts.push(new THREE.Vector3(lb, eb.y - preDrop, eb.z + sz));
+      pts.push(new THREE.Vector3(lb, eb.y - preDrop, (b.z + COMB_Z + tierB + eb.z) / 2));
       const climbB = eb.y - 0.22;
       if (climbB > b.y + 0.03) pts.push(new THREE.Vector3(lb, climbB, b.z + COMB_Z + tierB));
       pts.push(new THREE.Vector3(lb, b.y - drop(b.x, lb) * 0.3, b.z + COMB_Z + tierB));
     }
+    const suffixStart = pts.length - 1; // index of the last "middle" point, before legIn(b)'s own joints
     pts.push(...legIn(b, lb, tierB).reverse().slice(1));
     pts.push(b.clone());
-    return smoothCurve(pts);
+    // NG-PH3D 3a: 5 Chaikin passes for the whole route (unchanged from the
+    // original tuning — legIn's own S-curve and the sameRack "full-height"
+    // path are already comfortably within every verified minBendM this
+    // way). The cross-rack "middle" section (tray-crossing + exit-aperture
+    // jog) is a different story: it has NO term that scales with the
+    // media's own stiffness, so a wide-enough cable eventually exceeds
+    // whatever fixed radius that fixed-angle geometry happens to produce —
+    // more Chaikin passes don't help there either (confirmed empirically:
+    // 8 passes reproduced the same violating radius as 5, to the tenth of
+    // a millimetre — Chaikin's corner-cutting converges to an angle-fixed
+    // limit shape). routeCurve's true circular fillet (guaranteed radius
+    // by construction, see its own + filletCorner's doc) is scoped to only
+    // that middle span — legIn's own already-fine joints at both ends are
+    // explicitly excluded so this doesn't disturb geometry that was never
+    // the problem.
+    if (!sameRack) return routeCurve(pts, minBend * 1.45, 5, prefixEnd, suffixStart);
+    return smoothCurve(pts, 5);
   }
 
 
@@ -1176,6 +1377,22 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         root.add(m);
         return m;
       };
+      // NG-PH3D 3a: rj45/lc are the two connector families with a Blender-
+      // authored, dimension-verified asset (tools/blender/build_assets.py —
+      // §2.a RJ45/LC, docs/design/24-DEVICE-PHYSICAL-SPEC.md). When that
+      // geometry has been loaded (loadBootAssets(), a host-component
+      // concern — buildScene() itself stays synchronous/network-free) an
+      // instance transform is queued instead of building the old procedural
+      // body+boot meshes, so every cable end of that family becomes one
+      // InstancedMesh draw call instead of N per-cable meshes. Falls back to
+      // the original procedural shapes (unchanged below) whenever the asset
+      // isn't cached yet — first paint, or any test that never loads it.
+      const bootGeo = (fam === 'rj45' || fam === 'lc') ? getBootGeometry(fam) : undefined;
+      if (bootGeo) {
+        const tip = curve.getPointAt(t < 0.5 ? 0 : 1);
+        bootInstances[fam as BootFamily].push({ pos: tip, quat: q.clone(), color: pair.bt.color });
+        continue;
+      }
       if (fam === 'rj45') {
         add(box(0.0117, 0.024, 0.0085, cm, 'rj45-plug'), 0);
         const tab = box(0.0068, 0.012, 0.0042, mats.plugClip, 'rj45-latch-tab');
@@ -1303,12 +1520,13 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       && (['patch', 'odf'].includes(kindOf(l.a[0])) || ['patch', 'odf'].includes(kindOf(l.b[0])));
     let curve: THREE.Curve<THREE.Vector3>;
     if (panelHop) {
-      curve = jumperCurve(a, b);
+      curve = jumperCurve(a, b, MEDIA[l.m]?.minBendM ?? 0.02);
     } else {
       const lnA = laneOrder.get(ka + ':' + i) ?? nextLane(ka);
       const lnB = same ? lnA : (laneOrder.get(kb + ':' + i) ?? nextLane(kb));
       curve = cableCurve(a, b, cA, cB, trayY - 0.03, same, lnA, lnB,
-        exitPoint(registry.racks[ka]!), exitPoint(registry.racks[kb]!), same ? 0 : crossIx++);
+        exitPoint(registry.racks[ka]!), exitPoint(registry.racks[kb]!), same ? 0 : crossIx++,
+        MEDIA[l.m]?.minBendM ?? 0.02);
       bundleMedia[ka]?.push(l.m);
       bundleMedia[kb]?.push(l.m);
     }
@@ -1360,6 +1578,30 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       addCable(new THREE.CatmullRomCurve3(pts, false, 'catmullrom', 0.4), feed,
         { name: 'power-' + def.id, devs: [def.id], live: false, media: feed });
     });
+  }
+
+  // NG-PH3D 3a: flush the queued rj45/lc boot instances — one InstancedMesh
+  // draw call per family instead of the several per-cable-end meshes the
+  // procedural fallback above builds. White base + per-instance colour
+  // reproduces the doc's housing-colour convention (SFF-8432 Note 13 /
+  // TIA-598-C) without a material per media.
+  const ONE = new THREE.Vector3(1, 1, 1);
+  for (const fam of ['rj45', 'lc'] as BootFamily[]) {
+    const list = bootInstances[fam];
+    if (!list.length) continue;
+    const geo = getBootGeometry(fam)!;
+    const bootMat = track(mat('boot-instanced-' + fam, 0xffffff, { roughness: 0.45, metalness: 0.12 }));
+    const im = new THREE.InstancedMesh(geo, bootMat, list.length);
+    im.name = 'boot-instanced-' + fam;
+    const m4 = new THREE.Matrix4();
+    list.forEach((it, i) => {
+      m4.compose(it.pos, it.quat, ONE);
+      im.setMatrixAt(i, m4);
+      im.setColorAt(i, it.color);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    root.add(im);
   }
 
   const amb = new THREE.HemisphereLight(0xdce6ff, 0x1a1a18, 1.25);
