@@ -137,6 +137,12 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     staleTime: Infinity,
   });
   const wattsByIcon = useMemo(() => wattsByIconMap(deviceTypesQ.data), [deviceTypesQ.data]);
+  // N4: id -> catalog entry, for resolving each node's device_type_id to real
+  // pack port data (rack faceplate rendering, not a second /device-types fetch).
+  const deviceTypesById = useMemo(
+    () => new Map((deviceTypesQ.data ?? []).map((dt) => [dt.id, dt])),
+    [deviceTypesQ.data],
+  );
 
   const racks = topoQ.data?.racks ?? [];
 
@@ -157,8 +163,8 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   const rackA = racks.find((r) => r.id === rackAId) ?? null;
   const rackB = racks.find((r) => r.id === rackBId) ?? null;
   const adapted = useMemo(
-    () => (topoQ.data ? adaptTopology(topoQ.data, rackAId, rackBId) : null),
-    [topoQ.data, rackAId, rackBId],
+    () => (topoQ.data ? adaptTopology(topoQ.data, rackAId, rackBId, deviceTypesById) : null),
+    [topoQ.data, rackAId, rackBId, deviceTypesById],
   );
 
   // Cable Mode / Add-device / move all write straight to the backend (P2) —

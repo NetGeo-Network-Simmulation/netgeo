@@ -13,6 +13,7 @@
  * `node.interfaces`. That order is exactly what rack3d expects.
  */
 import type { Cable, CableMedia, LinkModel, NodeKind, NodeModel, Rack, Topology } from '@/api/types';
+import type { DeviceType as CatalogEntry } from '@/api/client';
 import { frontPortFractions, frontPortList } from '@/components/rack/DeviceFaceplate';
 import { resolveDeviceType, type PortType as CatalogPortType } from '@/components/rack/deviceTypes';
 import {
@@ -104,9 +105,12 @@ function hexNum(hex: string, fallback: number): number {
  *  type wins" collapse. Run-length-encoded from `frontPortList()`, the same
  *  canonical port-ordinal walk `frontPortFractions()` uses (see file
  *  header) — not a second port-mapping implementation. */
-function devicePortGroups(node: NodeModel): { type: PortType; count: number }[] {
+function devicePortGroups(
+  node: NodeModel,
+  deviceTypesById?: Map<string, CatalogEntry>,
+): { type: PortType; count: number }[] {
   const groups: { type: PortType; count: number }[] = [];
-  for (const port of frontPortList(node)) {
+  for (const port of frontPortList(node, deviceTypesById)) {
     if (!port.iface) continue; // unprovisioned slot — no interface to cable
     const mapped = PTYPE_MAP[port.type] ?? 'rj45';
     const last = groups[groups.length - 1];
@@ -122,6 +126,7 @@ function devicePortGroups(node: NodeModel): { type: PortType; count: number }[] 
 function adaptRackDevices(
   rack: Rack,
   nodes: NodeModel[],
+  deviceTypesById?: Map<string, CatalogEntry>,
 ): { devices: DeviceDef[]; ordinals: Map<string, number>; ifaceByDevPort: Map<string, string> } {
   const devices: DeviceDef[] = [];
   const ordinals = new Map<string, number>();
@@ -137,8 +142,9 @@ function adaptRackDevices(
     if (cells.some((c) => occupied.has(c))) continue; // colliding placement — skip, don't crash
     for (const c of cells) occupied.add(c);
 
-    const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
-    const orderedIfaceIds = [...frontPortFractions(node, span).keys()];
+    const pack = node.device_type_id ? deviceTypesById?.get(node.device_type_id) : undefined;
+    const dt = resolveDeviceType(node.nos, node.kind, node.interfaces, pack);
+    const orderedIfaceIds = [...frontPortFractions(node, span, deviceTypesById).keys()];
     orderedIfaceIds.forEach((ifaceId, ordinal) => {
       ordinals.set(ifaceId, ordinal);
       ifaceByDevPort.set(`${node.id}:${ordinal}`, ifaceId);
@@ -154,7 +160,7 @@ function adaptRackDevices(
       accent: hexNum(dt.brand.accent, 0x847e75),
       chassis: hexNum(dt.brand.chassis, 0x1c1c1a),
       ports: orderedIfaceIds.length,
-      portGroups: orderedIfaceIds.length ? devicePortGroups(node) : undefined,
+      portGroups: orderedIfaceIds.length ? devicePortGroups(node, deviceTypesById) : undefined,
       // dt.slug is 'generic-*' only when resolveDeviceType() couldn't match
       // a real curated model (deviceTypes.ts) — see genericFor() there.
       generic: dt.slug.startsWith('generic-'),
@@ -174,6 +180,9 @@ export function adaptTopology(
   topology: Topology,
   rackAId: string | null,
   rackBId: string | null,
+  /** N4: caller's already-fetched /device-types list, keyed by id — resolves
+   *  each node's `device_type_id` to real pack port data for its faceplate. */
+  deviceTypesById?: Map<string, CatalogEntry>,
 ): (BuildOptions & { ifaceByDevPort: Map<string, string>; cableIds: string[] }) | null {
   const racks = topology.racks ?? [];
   const rackA = racks.find((r) => r.id === rackAId);
@@ -192,7 +201,7 @@ export function adaptTopology(
   const ifaceByDevPort = new Map<string, string>();
   for (const [slot, rack] of [['A', rackA], ['B', rackB]] as const) {
     if (!rack) continue;
-    const { devices, ordinals, ifaceByDevPort: devPorts } = adaptRackDevices(rack, nodes);
+    const { devices, ordinals, ifaceByDevPort: devPorts } = adaptRackDevices(rack, nodes, deviceTypesById);
     fitout[slot] = devices;
     for (const d of devices) devIdToSlot.set(d.id, slot);
     for (const [ifaceId, ordinal] of ordinals) ordinalsByIface.set(ifaceId, ordinal);

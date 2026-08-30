@@ -55,4 +55,40 @@ describe('DeviceFaceplate approximate-shape marker', () => {
     expect(genericHtml).toContain('data-testid="approximate-shape-marker"');
     expect(curatedHtml).not.toContain('data-testid="approximate-shape-marker"');
   });
+
+  it('renders a real pack faceplate (no marker) for a node with device_type_id + pack ports (N4)', () => {
+    const packNode: NodeModel = { ...node('sw-pack', 'forgeos', 4), device_type_id: 'switches:cisco-c9300-48p-access' };
+    const deviceTypesById = new Map([
+      [
+        'switches:cisco-c9300-48p-access',
+        {
+          id: 'switches:cisco-c9300-48p-access',
+          name: 'Cisco Catalyst 9300 48p',
+          category: 'wired',
+          description: '',
+          builtin: true,
+          vendor: 'Cisco',
+          ports: [
+            { pattern: 'GigabitEthernet1/0/{n}', count: 48, type: 'eth', speed_mbps: 1000, poe: true },
+            { pattern: 'TenGigabitEthernet1/1/{n}', count: 4, type: 'sfp28', speed_mbps: 10000 },
+          ],
+          physical: { ru: 1, form_factor: '1U-fixed' },
+        },
+      ],
+    ]);
+
+    const packHtml = renderToStaticMarkup(
+      <DeviceFaceplate node={packNode} span={1} face="front" deviceTypesById={deviceTypesById} />,
+    );
+    // Real pack data resolved -> no "approximate shape" marker, real model name shown.
+    expect(packHtml).not.toContain('data-testid="approximate-shape-marker"');
+    expect(packHtml).toContain('Cisco Catalyst 9300 48p');
+
+    // Same node, but the caller has no /device-types lookup available (e.g.
+    // still loading) -> falls back to the nos/kind heuristic, a different shape.
+    const fallbackHtml = renderToStaticMarkup(
+      <DeviceFaceplate node={packNode} span={1} face="front" />,
+    );
+    expect(fallbackHtml).not.toBe(packHtml);
+  });
 });

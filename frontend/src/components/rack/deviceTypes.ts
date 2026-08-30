@@ -5,14 +5,16 @@
  * hardware port counts/types per model; chassis hex values from vendor marketing
  * materials + measured screenshots.
  *
- * ponytail: schematic-faithful, not pixel-exact — per-model photos/3D art deferred
- * to NG-DL-02 (real `model` field + device-library API). Upgrade path:
- *   1. Add `model: string` to NodeModel (backend)
- *   2. Replace `resolveDeviceType` logic with a library API lookup
- *   3. Replace SVG shapes with per-model art or a 3D view toggle
+ * N4 (NG-DL-02 step 1+2 done): a node created from the device library carries
+ * `device_type_id`, and `/api/device-types` now passes that entry's `ports`/
+ * `physical`/`vendor` through from the pack JSON. `resolveDeviceType()` uses
+ * that real data when present — DEVICE_TYPES below stays as the fallback
+ * heuristic + style layer (brand colors) for nodes that don't have it. Step 3
+ * (per-model 3D art) is still future work.
  */
 
 import type { Nos, NodeKind, Interface } from '@/api/types';
+import type { DeviceType as CatalogEntry } from '@/api/client';
 
 // ─── Port / Zone types ────────────────────────────────────────────────────────
 
@@ -676,18 +678,77 @@ function genericFor(nos: Nos, kind: NodeKind): DeviceType {
   };
 }
 
+/** Pack `ports[].type` (backend `IfaceType`) -> rack faceplate `PortType`.
+ *  `wifi` (radio sectors on cell-site/wireless-ap packs) has no physical
+ *  rack connector to draw, so it's simply omitted from the faceplate. */
+const PACK_PORT_TYPE_MAP: Partial<Record<string, PortType>> = {
+  eth: 'rj45',
+  sfp: 'sfp',
+  sfp28: 'sfp28',
+  qsfp: 'qsfp28',
+  gpon: 'pon',
+};
+
+/** Build a real DeviceType from a pack-sourced /api/device-types entry
+ *  (vendor/ports/physical, passed through by the backend as-is). One
+ *  PortZone per `ports[]` entry, in the pack's own order. Returns null when
+ *  every port entry is unmappable (e.g. a radio-only device) — the caller
+ *  falls back to the existing heuristic rather than drawing an empty shell. */
+function buildFromPack(pack: CatalogEntry, kind: NodeKind): DeviceType | null {
+  const portZones: PortZone[] = [];
+  for (const p of pack.ports ?? []) {
+    const type = PACK_PORT_TYPE_MAP[p.type];
+    if (!type) continue;
+    portZones.push({
+      ports: [{ type, count: p.count, label: p.role, poe: Boolean(p.poe) }],
+      rows: 1,
+      align: 'fill',
+    });
+  }
+  if (portZones.length === 0) return null;
+
+  const vendorStyle = pack.vendor
+    ? DEVICE_TYPES.find((dt) => dt.manufacturer.toLowerCase() === pack.vendor!.toLowerCase())?.brand
+    : undefined;
+
+  return {
+    slug: pack.id,
+    manufacturer: pack.vendor ?? 'Unknown',
+    model: pack.name,
+    uHeight: pack.physical?.ru ?? 1,
+    front: {
+      portZones,
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: { blocks: [{ type: 'psu-slot', count: 1 }] },
+    brand: vendorStyle ?? genericFor('forgeos', kind).brand,
+  };
+}
+
 /**
  * Resolve the best-matching DeviceType for a node.
  *
  * Priority:
- *  1. Seed with exact NOS match + best port-count score
- *  2. Seed with NOS match (no interfaces)
- *  3. Accurate generic per kind (NetGeo coral theme)
+ *  1. Real pack data (`packDeviceType.ports`) — the node's own `device_type_id`
+ *     resolved to a /api/device-types entry that carries port/physical data
+ *  2. Seed with exact NOS match + best port-count score
+ *  3. Seed with NOS match (no interfaces)
+ *  4. Accurate generic per kind (NetGeo coral theme)
  *
- * ponytail: no real `model` field yet → resolution is heuristic.
- * Upgrade: add NodeModel.model, do DEVICE_TYPES.find(dt => dt.slug === model).
+ * ponytail: DEVICE_TYPES below is the fallback for nodes with no
+ * `device_type_id`, or whose pack entry never got ports data.
  */
-export function resolveDeviceType(nos: Nos, kind: NodeKind, ifaces?: Interface[]): DeviceType {
+export function resolveDeviceType(
+  nos: Nos,
+  kind: NodeKind,
+  ifaces?: Interface[],
+  packDeviceType?: CatalogEntry | null,
+): DeviceType {
+  if (packDeviceType?.ports?.length) {
+    const built = buildFromPack(packDeviceType, kind);
+    if (built) return built;
+  }
+
   // Filter to candidates that match NOS (seeded) or kind heuristic
   const candidates = DEVICE_TYPES.filter(
     (dt) =>
