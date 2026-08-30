@@ -173,6 +173,12 @@ class Node(_Base):
     site_id: str | None = None
     # extension fields used by the ForgeOS compiler (see protocols/NEEDS.md)
     intent: dict | None = None
+    # Which /api/device-types entry this node was created from (e.g.
+    # "switches:cisco-c9300-48p-access"), so the rack faceplate can render
+    # real port data instead of guessing from nos/kind (N4). Display metadata
+    # only — never read by the sim engine (determinism contract untouched).
+    # None for hand-built/legacy nodes; old topologies load fine without it.
+    device_type_id: str | None = None
 
 
 class NodeCreate(_Base):
@@ -189,6 +195,7 @@ class NodeCreate(_Base):
     interfaces: list[Interface] = Field(default_factory=list)
     site_id: str | None = None
     intent: dict | None = None
+    device_type_id: str | None = None
 
 
 class NodeUpdate(_Base):
@@ -207,6 +214,7 @@ class NodeUpdate(_Base):
     ru_span: int | None = None
     site_id: str | None = None
     intent: dict | None = None
+    device_type_id: str | None = None
 
 
 class Link(_Base):

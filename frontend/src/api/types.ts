@@ -104,6 +104,10 @@ export interface NodeModel {
   site_id?: string | null;
   /** Extension bag (ForgeOS intent; cloud-node `uplink`). */
   intent?: Record<string, unknown> | null;
+  /** Which /api/device-types entry this node was created from (N4) — lets the
+   *  rack faceplate render real pack port data instead of guessing. null for
+   *  hand-built/legacy nodes. */
+  device_type_id?: string | null;
 }
 
 /** A detected host network adapter (GET /api/system/interfaces). */

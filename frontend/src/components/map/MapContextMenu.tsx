@@ -3,8 +3,9 @@
  * Step 1: pick a device category. Step 2: pick a real catalog product,
  * filtered by search. Picking a product auto-creates a Site at the click
  * point, then deploys that product's device into it with its catalog
- * identity stamped on (`intent.device_type_id`) so the placed node
- * genuinely references the chosen product, not a generic kind.
+ * identity stamped on (`device_type_id`, N4) so the placed node genuinely
+ * references the chosen product, not a generic kind — and the rack view
+ * can draw its real faceplate instead of guessing.
  *
  * See docs/design/stitch-html/clay/map-context-menu/NOTES.md for the
  * approved layout reference and the verified categorization (section 5) —
@@ -130,9 +131,7 @@ export function MapContextMenu({ px, lat, lon, onClose, siteId, initialCategoryK
         targetSiteId = site.id;
       }
       const kind = dt.icon as NodeKind;
-      await deployAt(projectId, kind, lat, lon, (msg) => flashNotice(msg), targetSiteId, {
-        device_type_id: dt.id,
-      });
+      await deployAt(projectId, kind, lat, lon, (msg) => flashNotice(msg), targetSiteId, dt.id);
       await queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
       // Notice text must match deployAt's own auto-open gate (autoOpenRf,
       // mapDeploy.ts) exactly, keyed off the real `kind` — not off which menu

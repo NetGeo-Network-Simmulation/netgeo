@@ -191,11 +191,11 @@ export async function deployAt(
   lon: number,
   onNotice?: (msg: string) => void,
   siteId?: string,
-  /** Extension bag stamped onto the created node (e.g. `{ device_type_id }`
-   *  from the map right-click catalog picker, MapContextMenu.tsx) — passed
-   *  straight through to NodeCreate.intent, which the backend already
-   *  round-trips generically (backend/app/api/nodes.py). */
-  intent?: Record<string, unknown>,
+  /** The /api/device-types id this node was deployed from (N4) — set by the
+   *  map right-click catalog picker, MapContextMenu.tsx. Undefined for the
+   *  plain "Deploy Device" menu (MapDeployMenu.tsx), which places by kind
+   *  only with no specific catalog entry. */
+  deviceTypeId?: string,
 ): Promise<NodeModel> {
   const { nodes, upsertNode, upsertLink } = useTopologyStore.getState();
   const nodeList = Array.from(nodes.values());
@@ -213,7 +213,7 @@ export async function deployAt(
     x,
     y,
     site_id: siteId ?? null,
-    intent,
+    device_type_id: deviceTypeId ?? null,
     radio: WIRELESS_KINDS.has(kind)
       ? { tx_power_dbm: 20, frequency_ghz: 5.8, antenna_gain_dbi: 14, bandwidth_mhz: 20, rx_sensitivity_dbm: -85, misc_loss_db: 2, max_range_m: null, height_agl_m: 6 }
       : undefined,

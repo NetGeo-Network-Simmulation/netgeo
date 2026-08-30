@@ -41,6 +41,7 @@ async def create_node(body: NodeCreate, r: Annotated[MemoryRepository, Depends(r
         interfaces=ifaces,
         site_id=body.site_id,
         intent=body.intent,
+        device_type_id=body.device_type_id,
     )
     created = await r.add_node(node)
     await notify.node_changed(r, created)

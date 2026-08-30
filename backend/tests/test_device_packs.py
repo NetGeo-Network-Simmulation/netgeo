@@ -83,6 +83,65 @@ async def test_get_device_types_includes_enabled_pack_devices(client):
     assert "builtin-olt" in ids
 
 
+async def test_pack_device_type_carries_vendor_ports_physical(client):
+    """N4: the rack faceplate needs real port/physical data, not just
+    power/SNMP — _device_json_to_type() must not drop it (backend/app/api/
+    device_types.py)."""
+    resp = await client.get("/api/device-types")
+    by_id = {d["id"]: d for d in resp.json()}
+    sw = by_id["switches:cisco-c9300-48p-access"]
+    assert sw["vendor"] == "Cisco"
+    assert sw["physical"] == {"ru": 1, "form_factor": "1U-stackable"}
+    assert sw["ports"], "pack device must carry its ports[] through to the API"
+    assert all("type" in p and "count" in p for p in sw["ports"])
+
+
+async def test_node_created_with_device_type_id_round_trips_via_api(client):
+    """N4: POST /nodes with device_type_id (the device-library create path,
+    frontend/src/lib/mapDeploy.ts deployAt()) stores and returns it, and it
+    survives a plain PATCH of an unrelated field."""
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    resp = await client.post(
+        "/api/nodes",
+        json={
+            "project_id": pid,
+            "name": "sw1",
+            "kind": "switch",
+            "device_type_id": "switches:cisco-c9300-48p-access",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    node = resp.json()
+    assert node["device_type_id"] == "switches:cisco-c9300-48p-access"
+
+    got = await client.get(f"/api/nodes/{node['id']}")
+    assert got.json()["device_type_id"] == "switches:cisco-c9300-48p-access"
+
+    # PATCHing an unrelated field must not clear it.
+    patched = await client.patch(f"/api/nodes/{node['id']}", json={"name": "sw1-renamed"})
+    assert patched.json()["device_type_id"] == "switches:cisco-c9300-48p-access"
+
+    # Explicit null clears it (device_type_id is nullable, like intent/site_id).
+    cleared = await client.patch(f"/api/nodes/{node['id']}", json={"device_type_id": None})
+    assert cleared.json()["device_type_id"] is None
+
+
+async def test_node_created_without_device_type_id_defaults_to_none(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    resp = await client.post(
+        "/api/nodes", json={"project_id": pid, "name": "r1", "kind": "router"}
+    )
+    assert resp.json()["device_type_id"] is None
+
+
+def test_builtin_device_type_has_no_vendor_ports_physical():
+    """_BUILTIN entries never had this data — must stay None, not crash."""
+    builtin = next(d for d in dt._BUILTIN if d.id == "builtin-switch")
+    assert builtin.vendor is None
+    assert builtin.ports is None
+    assert builtin.physical is None
+
+
 async def test_all_pack_device_ids_are_prefixed_and_collision_free(client):
     resp = await client.get("/api/device-types")
     ids = [d["id"] for d in resp.json()]
