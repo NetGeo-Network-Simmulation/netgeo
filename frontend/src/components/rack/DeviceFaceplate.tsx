@@ -593,6 +593,9 @@ export function DeviceFaceplate({
   const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
   const H = Math.max(RU_H, span * RU_H);
   const { accent, chassis, label } = dt.brand;
+  // No curated model matched (deviceTypes.ts genericFor()) — the shape shown
+  // is a plausible stand-in, not this device's real chassis/port layout.
+  const isGenericShape = dt.slug.startsWith('generic-');
 
   // Chassis gradient: top-lit; MikroTik white chassis gets a lighter gradient
   const isLight = chassis.toUpperCase() > '#AAAAAA'; // heuristic: light chassis
@@ -606,8 +609,9 @@ export function DeviceFaceplate({
       preserveAspectRatio="none"
       className="h-full w-full"
       role="img"
-      aria-label={`${label} ${dt.model} ${face} view`}
+      aria-label={`${label} ${dt.model} ${face} view${isGenericShape ? ' (approximate shape — no verified physical data for this model)' : ''}`}
     >
+      {isGenericShape && <title>Bentuk perkiraan — data fisik belum diverifikasi untuk model ini</title>}
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0" stopColor={gradTop} />
@@ -619,6 +623,18 @@ export function DeviceFaceplate({
       {/* Chassis body */}
       <rect x="0" y="0" width={W} height={H} rx="2.5"
         fill={`url(#${gradId})`} stroke={darken(chassis, 0.2)} strokeWidth="0.5" />
+
+      {/* Approximate-shape marker: dashed hachure outline. No curated real
+          SKU matched (deviceTypes.ts genericFor()) — theme-aware via the
+          fg token, never a hardcoded white/black. */}
+      {isGenericShape && (
+        <rect
+          data-testid="approximate-shape-marker"
+          x="0.6" y="0.6" width={W - 1.2} height={H - 1.2} rx="2"
+          fill="none" stroke="rgb(var(--ng-fg-rgb) / 0.45)" strokeWidth="1"
+          strokeDasharray="3 2"
+        />
+      )}
 
       {/* Rack ears with screw holes */}
       {[EAR_W / 2, W - EAR_W / 2].map((cx) => (

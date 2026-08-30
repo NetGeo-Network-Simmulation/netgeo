@@ -17,6 +17,15 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 export const U = 0.04445;
 const PANEL_W = 0.4826;
 const MOUNT_W = 0.4651; // 19" mounting-hole centre spacing (EIA-310)
+/* Chassis BODY width (not the faceplate/ears above) — 482.6mm faceplate and
+ * 465.1mm hole-spacing are NOT the body width; a device's actual sheet-metal
+ * box is narrower so it clears the rack rails. 437mm is the doc's derived
+ * mid-point of the 435–440mm industry-common body width (docs/design/
+ * 24-DEVICE-PHYSICAL-SPEC.md §1.2.1, status V(2nd)/derived — no primary EIA-
+ * 310 text was read). Same for every 19" rackmount device; not a per-SKU
+ * number, so it lives here once instead of being duplicated onto every
+ * DeviceDef. */
+const CHASSIS_BODY_W = 0.437;
 
 export type ExitKind = 'top' | 'rear' | 'side';
 
@@ -86,6 +95,17 @@ export interface DeviceDef {
   ports: number;
   ptype?: PortType;
   chassis?: number;
+  /** Real front-panel port families in left-to-right order (e.g. a switch's
+   *  48× RJ45 access bank followed by 4× SFP+ uplinks) — sourced from a real
+   *  device's own port catalog (deviceTypes.ts, via plantAdapter), not
+   *  guessed. When absent, `ports`/`ptype` above render as a single uniform
+   *  family — the generic/legacy fallback path (manual DeviceDef literals,
+   *  or a node that resolved to a `generic-*` device type). */
+  portGroups?: { type: PortType; count: number }[];
+  /** True when this device resolved to deviceTypes.ts's `generic-*` fallback
+   *  (no real model matched) rather than a curated real SKU — surfaced as an
+   *  "approximate shape" marker, never used to fake real geometry. */
+  generic?: boolean;
 }
 
 export interface LinkDef {
@@ -198,6 +218,28 @@ function railTexture(u: number) {
   return tex;
 }
 
+/** `DeviceDef.portGroups` if present, else the single legacy `ports`/`ptype`
+ *  pair wrapped as one group — the one place both `portLayout()` (3D cages)
+ *  and `faceTexture()` (the outline artwork behind them) read a device's
+ *  port families from, so the two never drift apart. */
+function portGroupsOf(def: DeviceDef): { type: PortType; count: number }[] {
+  if (def.portGroups?.length) return def.portGroups;
+  if (!def.ports) return [];
+  return [{ type: def.ptype ?? 'rj45', count: def.ports }];
+}
+
+/** Resolve a `--ng-*-rgb` theme token (theme/tokens.ts, applied to
+ *  `document.documentElement` by `applyTheme()`) into an rgba() string —
+ *  canvas 2D doesn't understand `var()`, so this is the one spot that reads
+ *  the live cascade instead of hardcoding a colour. Falls back to a neutral
+ *  grey outside a browser (tests). */
+function themeRgba(cssVar: string, alpha: number, fallback = '148,163,184'): string {
+  const triplet = typeof document !== 'undefined'
+    ? getComputedStyle(document.documentElement).getPropertyValue(cssVar).trim()
+    : '';
+  return `rgba(${(triplet || fallback).replace(/\s+/g, ',')},${alpha})`;
+}
+
 function faceTexture(def: DeviceDef, rear: boolean) {
   const uPx = 96;
   const cvs = document.createElement('canvas');
@@ -232,36 +274,47 @@ function faceTexture(def: DeviceDef, rear: boolean) {
     ctx.font = '600 20px monospace';
     ctx.fillText('PSU 1', 742, 40);
   } else {
-    // port field outlines: exactly where the 3D cages sit
-    const n = def.ports || 0;
+    // port field outlines: roughly where the 3D cages sit (decorative — the
+    // real geometry in buildDevice()/portLayout() is the source of truth).
+    // Walks the same left-to-right port groups so a multi-family device
+    // (e.g. 48× RJ45 + 8× SFP+) doesn't paint one giant fake RJ45 block.
+    const groups = portGroupsOf(def);
+    const n = groups.reduce((s, gr) => s + gr.count, 0);
     if (n) {
-      const twoRow = def.ptype === 'rj45' && n >= 20;
-      const rows = twoRow ? 2 : 1;
-      const perRow = Math.ceil(n / rows);
-      const bankOf = def.ptype === 'rj45' ? 6 : 4;
-      const banks = Math.ceil(perRow / bankOf);
-      const usable = cvs.width * 0.79;
-      const x0 = cvs.width * 0.115;
-      const gap = banks > 1 ? cvs.width * 0.0115 : 0;
-      const pitch = (usable - gap * (banks - 1)) / perRow;
-      for (let i = 0; i < n; i++) {
-        const r = Math.floor(i / perRow);
-        const c = i % perRow;
-        const bank = Math.floor(c / bankOf);
-        const px = x0 + c * pitch + bank * gap;
-        const py = rows === 1 ? midY - uPx * 0.2 : r === 0 ? midY - uPx * 0.36 : midY + uPx * 0.02;
-        const pw = pitch * 0.8;
-        const ph = uPx * 0.34;
-        ctx.fillStyle = 'rgba(0,0,0,0.82)';
-        ctx.fillRect(px, py, pw, ph);
-        ctx.strokeStyle = pale ? 'rgba(250,249,245,0.85)' : 'rgba(250,249,245,0.28)';
-        ctx.lineWidth = 2;
-        ctx.strokeRect(px - 1, py - 1, pw + 2, ph + 2);
-        if (i % 2 === 0) {
-          ctx.fillStyle = ink;
-          ctx.font = '600 13px monospace';
-          ctx.fillText(String(i + 1), px + 1, py + ph + 15);
+      const usableTotal = cvs.width * 0.79;
+      let x0 = cvs.width * 0.115;
+      let i = 0;
+      for (const grp of groups) {
+        const gn = grp.count;
+        const twoRow = grp.type === 'rj45' && gn >= 20;
+        const rows = twoRow ? 2 : 1;
+        const perRow = Math.ceil(gn / rows);
+        const bankOf = grp.type === 'rj45' ? 6 : 4;
+        const banks = Math.ceil(perRow / bankOf);
+        const groupW = usableTotal * (gn / n);
+        const gap = banks > 1 ? cvs.width * 0.0115 : 0;
+        const pitch = (groupW - gap * (banks - 1)) / perRow;
+        for (let k = 0; k < gn; k++) {
+          const r = Math.floor(k / perRow);
+          const c = k % perRow;
+          const bank = Math.floor(c / bankOf);
+          const px = x0 + c * pitch + bank * gap;
+          const py = rows === 1 ? midY - uPx * 0.2 : r === 0 ? midY - uPx * 0.36 : midY + uPx * 0.02;
+          const pw = pitch * 0.8;
+          const ph = uPx * 0.34;
+          ctx.fillStyle = 'rgba(0,0,0,0.82)';
+          ctx.fillRect(px, py, pw, ph);
+          ctx.strokeStyle = pale ? 'rgba(250,249,245,0.85)' : 'rgba(250,249,245,0.28)';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(px - 1, py - 1, pw + 2, ph + 2);
+          if (i % 2 === 0) {
+            ctx.fillStyle = ink;
+            ctx.font = '600 13px monospace';
+            ctx.fillText(String(i + 1), px + 1, py + ph + 15);
+          }
+          i++;
         }
+        x0 += groupW;
       }
     }
     // brand + model, left of the port field
@@ -283,6 +336,24 @@ function faceTexture(def: DeviceDef, rear: boolean) {
         ctx.strokeRect(bx + 3, 14, bw - 8, cvs.height - 28);
         ctx.fillStyle = 'rgba(0,0,0,0.35)';
         ctx.fillRect(bx + 7, 22, 7, cvs.height - 44);
+      }
+    }
+    if (def.generic) {
+      // Approximate-shape marker: dashed hachure border, drawn as discrete
+      // filled segments via fillRect (not strokeRect+setLineDash, which the
+      // test suite's canvas 2D stub — vitest.setup.ts — doesn't implement).
+      // This device didn't match a curated real SKU (deviceTypes.ts
+      // genericFor()) — the faceplate art is a plausible stand-in, not a
+      // verified chassis.
+      ctx.fillStyle = themeRgba('--ng-fg-rgb', 0.5);
+      const dash = 18, gap = 10, bw = 4;
+      for (let x = 6; x < cvs.width - 6; x += dash + gap) {
+        ctx.fillRect(x, 6, Math.min(dash, cvs.width - 6 - x), bw);
+        ctx.fillRect(x, cvs.height - 6 - bw, Math.min(dash, cvs.width - 6 - x), bw);
+      }
+      for (let y = 6; y < cvs.height - 6; y += dash + gap) {
+        ctx.fillRect(6, y, bw, Math.min(dash, cvs.height - 6 - y));
+        ctx.fillRect(cvs.width - 6 - bw, y, bw, Math.min(dash, cvs.height - 6 - y));
       }
     }
   }
@@ -597,32 +668,47 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   }
 
   /* ─── Devices ─────────────────────────────────────────────────────────── */
+  /** Real faceplates: RJ45 switches run two rows of 24 in banks of 6; patch
+   *  panels run one row of 24 in two banks of 12; SFP cages sit in one row.
+   *  Walks `portGroupsOf(def)` left-to-right, each group getting a width
+   *  slice proportional to its own port count, so a device with several
+   *  real port families (e.g. 48× RJ45 + 8× SFP+ uplinks) draws each family
+   *  with its own connector geometry instead of one uniform block. */
   function portLayout(def: DeviceDef) {
-    const n = def.ports;
-    if (!n) return [] as { i: number; row: number; bank: number; x: number; y: number; w: number }[];
-    // real faceplates: RJ45 switches run two rows of 24 in banks of 6; patch
-    // panels run one row of 24 in two banks of 12; SFP cages sit in one row.
-    const twoRow = (def.ptype === 'rj45' && n >= 20) || (def.ptype === 'bay' && def.h >= 2);
-    const bankOf = def.ptype === 'rj45' ? 6 : def.ptype === 'bay' ? 0 : 4;
-    const rows = twoRow ? 2 : 1;
-    const perRow = Math.ceil(n / rows);
-    const banks = bankOf ? Math.ceil(perRow / bankOf) : 1;
-    const usable = PANEL_W - (def.ptype === 'bay' ? 0.12 : 0.155); // room for LEDs + uplinks
-    const gap = banks > 1 ? 0.0055 : 0;
-    const pitch = (usable - gap * (banks - 1)) / perRow;
-    const out = [];
-    for (let i = 0; i < n; i++) {
-      const r = Math.floor(i / perRow), c = i % perRow;
-      const bank = bankOf ? Math.floor(c / bankOf) : 0;
-      const rowY = rows === 1
-        ? def.ptype === 'bay' ? 0 : def.h * U * 0.04
-        : r === 0 ? def.h * U * 0.21 : -def.h * U * 0.2;
-      out.push({
-        i, row: r, bank,
-        x: -PANEL_W / 2 + 0.085 + c * pitch + pitch / 2 + bank * gap,
-        y: rowY,
-        w: Math.min(pitch * 0.78, def.ptype === 'rj45' ? 0.0115 : 0.0135),
-      });
+    const groups = portGroupsOf(def);
+    const total = groups.reduce((s, gr) => s + gr.count, 0);
+    if (!total) return [] as { i: number; ptype: PortType; row: number; bank: number; x: number; y: number; w: number }[];
+    const marginFor = (t: PortType) => (t === 'bay' ? 0.12 : 0.155); // room for LEDs + uplinks
+    const usableTotal = PANEL_W - Math.max(...groups.map((gr) => marginFor(gr.type)));
+    const out: { i: number; ptype: PortType; row: number; bank: number; x: number; y: number; w: number }[] = [];
+    let i = 0;
+    let x0 = -PANEL_W / 2 + 0.085;
+    for (const grp of groups) {
+      const n = grp.count;
+      const ptype = grp.type;
+      const twoRow = (ptype === 'rj45' && n >= 20) || (ptype === 'bay' && def.h >= 2);
+      const bankOf = ptype === 'rj45' ? 6 : ptype === 'bay' ? 0 : 4;
+      const rows = twoRow ? 2 : 1;
+      const perRow = Math.ceil(n / rows);
+      const banks = bankOf ? Math.ceil(perRow / bankOf) : 1;
+      const groupW = usableTotal * (n / total);
+      const gap = banks > 1 ? 0.0055 : 0;
+      const pitch = (groupW - gap * (banks - 1)) / perRow;
+      for (let k = 0; k < n; k++) {
+        const r = Math.floor(k / perRow), c = k % perRow;
+        const bank = bankOf ? Math.floor(c / bankOf) : 0;
+        const rowY = rows === 1
+          ? ptype === 'bay' ? 0 : def.h * U * 0.04
+          : r === 0 ? def.h * U * 0.21 : -def.h * U * 0.2;
+        out.push({
+          i, ptype, row: r, bank,
+          x: x0 + c * pitch + pitch / 2 + bank * gap,
+          y: rowY,
+          w: Math.min(pitch * 0.78, ptype === 'rj45' ? 0.0115 : 0.0135),
+        });
+        i++;
+      }
+      x0 += groupW;
     }
     return out;
   }
@@ -645,7 +731,9 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const baseHex = def.chassis ?? (def.kind === 'patch' || def.kind === 'odf' || def.kind === 'duct' ? 0x3a3a3c : 0x1c1c1a);
     const chassisMat = track(new THREE.MeshStandardMaterial({ color: lift(baseHex), roughness: 0.5, metalness: 0.34 }));
     chassisMat.name = 'chassis-' + def.id;
-    const body = box(PANEL_W - 0.004, h, depth, chassisMat, 'chassis');
+    // body is the sheet-metal box between the rack ears — narrower than the
+    // 482.6mm faceplate/ears (CHASSIS_BODY_W, see its own comment above).
+    const body = box(CHASSIS_BODY_W, h, depth, chassisMat, 'chassis');
     body.position.set(0, 0, rack.d / 2 - 0.09 - depth / 2);
     body.userData.dev = def.id;
     g.add(body);
@@ -694,10 +782,10 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         pon: { w: Math.min(p.w, 0.0088), h: h * 0.16 },
         mpo: { w: Math.min(p.w, 0.0135), h: h * 0.15 },
       };
-      const geo = (def.ptype ? geoms[def.ptype] : undefined) ?? { w: p.w, h: h * 0.28 };
+      const geo = geoms[p.ptype] ?? { w: p.w, h: h * 0.28 };
       const pw = geo.w, ph = geo.h;
       let cage: THREE.Mesh;
-      if (def.ptype === 'pon' || def.ptype === 'lc') {
+      if (p.ptype === 'pon' || p.ptype === 'lc') {
         // LC duplex: two bores side by side inside one bezel
         for (const off of [-pw * 0.3, pw * 0.3]) {
           const bore = new THREE.Mesh(track(new THREE.CylinderGeometry(pw * 0.24, pw * 0.24, 0.007, 10)), mats.port);
@@ -709,14 +797,14 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         cage = box(pw, ph, 0.005, mats.bezel, 'lc-adapter');
         cage.position.set(p.x, p.y, faceZ - 0.0035);
       } else {
-        cage = box(pw, ph, 0.006, mats.port, 'port-' + def.ptype + '-' + p.i);
+        cage = box(pw, ph, 0.006, mats.port, 'port-' + p.ptype + '-' + p.i);
         cage.position.set(p.x, p.y, faceZ - 0.0025);
-        if (def.ptype === 'rj45') {
+        if (p.ptype === 'rj45') {
           // RJ45: the latch notch in the top edge is what makes it readable
           const notch = box(pw * 0.36, ph * 0.3, 0.005, mats.port, 'rj45-latch-slot');
           notch.position.set(p.x, p.y + ph * 0.5, faceZ - 0.002);
           g.add(notch);
-        } else if (def.ptype === 'sfp28' || def.ptype === 'qsfp28') {
+        } else if (p.ptype === 'sfp28' || p.ptype === 'qsfp28') {
           // SFP/QSFP: bright EMI cage lip around a wide, shallow slot
           const lip = box(pw * 1.12, ph * 1.3, 0.0022, mats.handle, 'sfp-cage-lip');
           lip.position.set(p.x, p.y, faceZ - 0.0012);
@@ -727,14 +815,14 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       cage.userData.dev = def.id;
       cage.userData.port = p.i;
       g.add(cage);
-      if (def.ptype === 'rj45') {
+      if (p.ptype === 'rj45') {
         const keystone = box(pw * 1.16, ph * 1.22, 0.004, mats.bezel, 'keystone-body');
         keystone.position.set(p.x, p.y, faceZ - 0.0002);
         keystone.userData.dev = def.id;
         keystone.userData.port = p.i;
         g.add(keystone);
       }
-      if (def.ptype === 'rj45' || def.ptype === 'sfp28' || def.ptype === 'qsfp28') {
+      if (p.ptype === 'rj45' || p.ptype === 'sfp28' || p.ptype === 'qsfp28') {
         const pip = box(pw * 0.28, 0.0016, 0.002, mats.ledOn, 'port-led');
         pip.position.set(p.x - pw * 0.26, p.y + ph * 0.32, faceZ + 0.004);
         g.add(pip);

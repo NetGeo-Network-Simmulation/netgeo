@@ -13,7 +13,7 @@
  * `node.interfaces`. That order is exactly what rack3d expects.
  */
 import type { Cable, CableMedia, LinkModel, NodeKind, NodeModel, Rack, Topology } from '@/api/types';
-import { frontPortFractions } from '@/components/rack/DeviceFaceplate';
+import { frontPortFractions, frontPortList } from '@/components/rack/DeviceFaceplate';
 import { resolveDeviceType, type PortType as CatalogPortType } from '@/components/rack/deviceTypes';
 import {
   devicePortWorld,
@@ -98,23 +98,22 @@ function hexNum(hex: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** The port type rack3d should render for this device: the most common
- *  catalog port type among its zones, weighted by port count. */
-function dominantPtype(node: NodeModel): PortType | undefined {
-  const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
-  const counts = new Map<PortType, number>();
-  for (const zone of dt.front.portZones) {
-    for (const spec of zone.ports) {
-      const mapped = PTYPE_MAP[spec.type] ?? 'rj45';
-      counts.set(mapped, (counts.get(mapped) ?? 0) + spec.count);
-    }
+/** Real front-panel port families in left-to-right order — e.g. a switch's
+ *  48× RJ45 access bank followed by 4× SFP+ uplinks render as two distinct
+ *  connector families in rack3d, instead of the old single "most common
+ *  type wins" collapse. Run-length-encoded from `frontPortList()`, the same
+ *  canonical port-ordinal walk `frontPortFractions()` uses (see file
+ *  header) — not a second port-mapping implementation. */
+function devicePortGroups(node: NodeModel): { type: PortType; count: number }[] {
+  const groups: { type: PortType; count: number }[] = [];
+  for (const port of frontPortList(node)) {
+    if (!port.iface) continue; // unprovisioned slot — no interface to cable
+    const mapped = PTYPE_MAP[port.type] ?? 'rj45';
+    const last = groups[groups.length - 1];
+    if (last && last.type === mapped) last.count++;
+    else groups.push({ type: mapped, count: 1 });
   }
-  let best: PortType | undefined;
-  let bestN = 0;
-  for (const [ptype, n] of counts) {
-    if (n > bestN) { best = ptype; bestN = n; }
-  }
-  return best;
+  return groups;
 }
 
 /** One rack's placed devices, plus the port ordinal each of its interfaces
@@ -155,7 +154,10 @@ function adaptRackDevices(
       accent: hexNum(dt.brand.accent, 0x847e75),
       chassis: hexNum(dt.brand.chassis, 0x1c1c1a),
       ports: orderedIfaceIds.length,
-      ptype: orderedIfaceIds.length ? dominantPtype(node) : undefined,
+      portGroups: orderedIfaceIds.length ? devicePortGroups(node) : undefined,
+      // dt.slug is 'generic-*' only when resolveDeviceType() couldn't match
+      // a real curated model (deviceTypes.ts) — see genericFor() there.
+      generic: dt.slug.startsWith('generic-'),
     });
   }
   return { devices, ordinals, ifaceByDevPort };

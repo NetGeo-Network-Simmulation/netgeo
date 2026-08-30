@@ -203,3 +203,81 @@ describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
     }
   });
 });
+
+/**
+ * NG-PH3D P5 (docs/design/24-DEVICE-PHYSICAL-SPEC.md) — a device with real
+ * per-model port data (`portGroups`, sourced from deviceTypes.ts's curated
+ * catalog via plantAdapter's `devicePortGroups()`) must render each of its
+ * real connector families distinctly, not collapse to one uniform shape the
+ * way the legacy single `ports`/`ptype` fallback does.
+ */
+describe('per-SKU port geometry (NG-PH3D P5)', () => {
+  function meshNamesFor(built: ReturnType<typeof buildScene>, devId: string): string[] {
+    const entry = built.registry.devices[devId]!;
+    const names: string[] = [];
+    entry.group.traverse((obj) => {
+      if (obj instanceof THREE.Mesh) names.push(obj.name);
+    });
+    return names;
+  }
+
+  it('multi-family portGroups render every real connector family; the single-family fallback renders only one', () => {
+    const realSku: DeviceDef = {
+      id: 'sw-real', u: 1, h: 1, kind: 'switch', brand: 'Cisco', model: 'C9300-48P',
+      accent: 0x847e75, chassis: 0x1c1c1a, ports: 4,
+      portGroups: [{ type: 'rj45', count: 2 }, { type: 'sfp28', count: 2 }],
+    };
+    const genericFallback = dev('sw-generic', 3, 1, 'switch', 4, 'rj45');
+    const opts: BuildOptions = {
+      rackA: 'apc', rackB: 'apc',
+      fitout: { A: [realSku, genericFallback], B: [] },
+      links: [],
+    };
+    const built = buildScene(opts);
+    try {
+      const realNames = meshNamesFor(built, 'sw-real');
+      const genericNames = meshNamesFor(built, 'sw-generic');
+
+      expect(realNames.some((n) => n.startsWith('port-rj45-'))).toBe(true);
+      expect(realNames.some((n) => n.startsWith('port-sfp28-'))).toBe(true);
+
+      expect(genericNames.some((n) => n.startsWith('port-rj45-'))).toBe(true);
+      expect(genericNames.some((n) => n.startsWith('port-sfp28-'))).toBe(false);
+    } finally {
+      disposeScene(built);
+    }
+  });
+
+  it('chassis body is narrower than the 482.6mm faceplate (437mm derived body width, §1.2.1)', () => {
+    const d = dev('sw-1', 1, 1, 'switch', 24, 'rj45');
+    const opts: BuildOptions = { rackA: 'apc', rackB: 'apc', fitout: { A: [d], B: [] }, links: [] };
+    const built = buildScene(opts);
+    try {
+      const group = built.registry.devices['sw-1']!.group;
+      let chassisW = 0;
+      group.traverse((obj) => {
+        if (obj instanceof THREE.Mesh && obj.name === 'chassis') {
+          obj.geometry.computeBoundingBox();
+          const bb = obj.geometry.boundingBox!;
+          chassisW = bb.max.x - bb.min.x;
+        }
+      });
+      expect(chassisW).toBeCloseTo(0.437, 3);
+      expect(chassisW).toBeLessThan(0.4826); // strictly narrower than the faceplate
+    } finally {
+      disposeScene(built);
+    }
+  });
+
+  it('a generic-flagged device does not crash the faceplate texture pass (dashed-marker draw uses only stubbed canvas calls)', () => {
+    const d: DeviceDef = {
+      id: 'sw-generic', u: 1, h: 1, kind: 'switch', brand: 'NetGeo', model: 'Generic Switch',
+      accent: 0x847e75, chassis: 0x1c1c1a, ports: 4, ptype: 'rj45', generic: true,
+    };
+    const opts: BuildOptions = { rackA: 'apc', rackB: 'apc', fitout: { A: [d], B: [] }, links: [] };
+    expect(() => {
+      const built = buildScene(opts);
+      disposeScene(built);
+    }).not.toThrow();
+  });
+});
