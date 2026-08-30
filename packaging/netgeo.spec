@@ -17,7 +17,7 @@ BACKEND = REPO_ROOT / "backend"
 FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 ICONS = REPO_ROOT / "packaging" / "icons"
 
-datas = [(str(BACKEND / "app"), "app")]
+datas = [(str(BACKEND / "app"), "app"), (str(ICONS), "icons")]
 if FRONTEND_DIST.is_dir():
     datas.append((str(FRONTEND_DIST), "frontend_dist"))
 

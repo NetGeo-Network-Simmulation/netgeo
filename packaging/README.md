@@ -8,18 +8,21 @@ This is a **kerangka** — the simplest thing that runs, not a finished product.
 
 - `launcher.py` — runs the existing FastAPI app (`backend/app/main.py`)
   on a free localhost port, mounts `frontend/dist` as static files on the
-  same port, opens the default browser. Single process, single port.
-  Verified working both as a plain script and as the PyInstaller binary
-  below (frontend served 200, `/api/health` 200, clean shutdown).
+  same port, opens it in a native pywebview window (WebKitGTK on Linux).
+  Single process, single port. Verified working both as a plain script and
+  as the PyInstaller binary below (frontend served 200, `/api/health` 200,
+  clean shutdown). See "System prerequisites" below for the native-window
+  fallback behavior.
 - `icons/` — `netgeo.ico` (16/32/48/64/128/256 multi-size, for Windows) and
   `netgeo-{128,256,512}.png` (Linux), rasterized from
   `frontend/public/netgeo.svg` with ImageMagick (`magick`).
 - `netgeo.spec` — PyInstaller onedir spec bundling the launcher + `backend/app`
   (including its non-Python data files, `app/data/*.json`) + `frontend/dist` +
-  the Windows icon. Builds and runs successfully on this machine
+  `icons/` + the Windows icon. Builds and runs successfully on this machine
   (`pyinstaller netgeo.spec`, output in `packaging/dist/netgeo/`, gitignored).
-- `requirements.txt` — pins `pyinstaller==6.22.2` (build-time only, not a
-  runtime dependency — don't add it to `backend/requirements.txt`).
+- `requirements.txt` — pins `pyinstaller==6.22.2` (build-time only) and
+  `pywebview==6.2.1` (runtime dependency of `launcher.py`; don't add either
+  to `backend/requirements.txt`).
 - `linux/` — per-user desktop integration: `netgeo.desktop` (XDG entry),
   `install.sh` / `uninstall.sh`, `build-in-container.sh` (portable Linux
   build via rootless Podman — see "Installing" below, **use this, not a
@@ -35,6 +38,31 @@ This is a **kerangka** — the simplest thing that runs, not a finished product.
   tags only (not every push). Windows *signing* (separate from the
   installer) is a disabled (`if: false`) stub step — no credentials of any
   kind are in this repo.
+
+## System prerequisites (Linux native window)
+
+`launcher.py` opens NetGeo in a native window via `pywebview` (WebKitGTK).
+That needs system packages — **not** installed by pip — that may not be on
+a minimal machine:
+
+```bash
+# Fedora
+sudo dnf install webkit2gtk4.1 python3-gobject gtk3
+
+# Ubuntu / Debian
+sudo apt install libwebkit2gtk-4.1-0 python3-gi gir1.2-webkit2-4.1 libgtk-3-0
+```
+
+`gir1.2-webkit2-4.1` (the introspection typelib) is the one most often
+missed — without it PyGObject can import `gi` fine but can't reach WebKit2.
+
+**If any of these are missing, NetGeo does not crash.** `launcher.py`
+catches the failure, prints which packages to install, and opens the app in
+the system's default browser instead — same URL, same app, just not in its
+own window. This fallback path is exercised in
+`backend/tests/test_launcher.py` (with `webview` stubbed/absent so CI never
+needs WebKitGTK installed) and was verified live on this dev machine — see
+"Installing" below for what was actually run.
 
 ## Installing
 
