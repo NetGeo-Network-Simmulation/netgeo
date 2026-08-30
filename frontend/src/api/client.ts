@@ -967,6 +967,13 @@ export interface DeviceType {
    *  null when the pack's datasheet never published one (non-PoE device). */
   poe_budget_w?: number | null;
   snmp_oids?: Record<string, string> | null;
+  /** Rack faceplate identity (N4) — verbatim from the pack JSON, only present
+   *  for device-library-pack entries. None for _BUILTIN/custom entries. */
+  vendor?: string | null;
+  ports?:
+    | { pattern?: string; count: number; type: string; speed_mbps?: number; role?: string; poe?: boolean }[]
+    | null;
+  physical?: { ru?: number; form_factor?: string } | null;
 }
 
 export interface DeviceTypeCreate {

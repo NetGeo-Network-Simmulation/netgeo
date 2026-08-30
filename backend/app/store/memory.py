@@ -250,7 +250,7 @@ class MemoryRepository:
     # Node fields whose value may legitimately be None (i.e. "clear this field"),
     # as opposed to fields where None simply means "not provided in this PATCH".
     _NULLABLE_NODE_FIELDS: frozenset[str] = frozenset(
-        {"lat", "lon", "radio", "intent", "config_ref", "site_id"}
+        {"lat", "lon", "radio", "intent", "config_ref", "site_id", "device_type_id"}
     )
 
     async def update_node(self, nid: str, patch: dict) -> Node:

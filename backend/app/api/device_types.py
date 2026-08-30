@@ -78,6 +78,18 @@ class DeviceType(BaseModel):
     snmp_oids: dict[str, str] | None = Field(
         default=None, description="Named SNMP OIDs for monitoring this device type"
     )
+    # Rack faceplate identity (N4): pass-through of the pack JSON's `vendor` /
+    # `ports` / `physical` verbatim — no sub-schema, the port shape already
+    # varies per pack (poe, pon_standard, band, …) and nothing here validates
+    # it beyond "is it there". None for _BUILTIN/custom entries that never had
+    # this data; the frontend falls back to its own heuristic in that case.
+    vendor: str | None = Field(default=None, description="Manufacturer, from the pack JSON")
+    ports: list[dict] | None = Field(
+        default=None, description="Port families straight from the pack JSON's ports[]"
+    )
+    physical: dict | None = Field(
+        default=None, description="Rack-unit height / form factor straight from the pack JSON"
+    )
 
 
 class DeviceTypeCreate(BaseModel):
@@ -199,6 +211,9 @@ def _device_json_to_type(pack_id: str, dev: dict) -> DeviceType:
         power_watts_max=power.get("max_w"),
         poe_budget_w=power.get("poe_budget_w"),
         snmp_oids=dev.get("snmp_oids") or _IF_MIB_OIDS,
+        vendor=dev.get("vendor"),
+        ports=dev.get("ports"),
+        physical=dev.get("physical"),
     )
 
 

@@ -33,6 +33,48 @@ async def test_restart_reloads_identical_entities(tmp_path):
     assert got_node.id == node.id and got_node.site_id == site.id
 
 
+async def test_node_device_type_id_persists_across_restart(tmp_path):
+    """N4: a node created from the device library keeps its device_type_id
+    after a save/reload — the rack faceplate needs it to still be there."""
+    state_file = tmp_path / "state.json"
+    repo1 = MemoryRepository(state_path=state_file)
+
+    proj = await repo1.create_project("Lab", "desc")
+    node = await repo1.add_node(
+        Node(
+            id="n1",
+            project_id=proj.id,
+            name="sw1",
+            device_type_id="switches:cisco-c9300-48p-access",
+        )
+    )
+    assert node.device_type_id == "switches:cisco-c9300-48p-access"
+
+    repo2 = MemoryRepository(state_path=state_file)
+    got_node = await repo2.get_node(node.id)
+    assert got_node.device_type_id == "switches:cisco-c9300-48p-access"
+
+
+async def test_legacy_node_without_device_type_id_field_still_loads(tmp_path):
+    """A state.json written before N4 has no `device_type_id` key at all on
+    its node entries — must load fine, defaulting to None, not crash."""
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "_projects": [{"id": "p1", "name": "Lab", "description": ""}],
+                "_nodes": [{"id": "n1", "project_id": "p1", "name": "Edge1"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repo = MemoryRepository(state_path=state_file)
+
+    node = await repo.get_node("n1")
+    assert node.device_type_id is None
+
+
 async def test_state_file_is_atomic_and_0600(tmp_path):
     state_file = tmp_path / "state.json"
     repo = MemoryRepository(state_path=state_file)
