@@ -1,3 +1,6 @@
-# NetGeo desktop packaging — build-time only, not a runtime dependency.
+# NetGeo desktop packaging.
 # Install into backend/.venv before running: pyinstaller netgeo.spec
 pyinstaller==6.22.2
+# pywebview IS a launcher.py runtime dependency (native window, falls back
+# to the system browser if this or WebKitGTK is missing — see README.md).
+pywebview==6.2.1
