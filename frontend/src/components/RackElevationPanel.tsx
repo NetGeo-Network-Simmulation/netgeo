@@ -71,10 +71,11 @@ function localPortAnchor(
   ifaceId: string,
   ruHeight: number,
   face: Face,
+  deviceTypesById?: Map<string, DeviceType>,
 ): { x: number; y: number } {
   const bodyH = ruHeight * RU_PX;
   const yCenter = bodyH - (ruStart - 1 + ruSpan / 2) * RU_PX;
-  const frac = face === 'front' ? frontPortFractions(dev, ruSpan).get(ifaceId) : undefined;
+  const frac = face === 'front' ? frontPortFractions(dev, ruSpan, deviceTypesById).get(ifaceId) : undefined;
   if (!frac) return { x: RACK_BODY_W, y: yCenter };
   const blockW = RACK_BODY_W - BLOCK_INSET * 2;
   const blockH = ruSpan * RU_PX - 2;
@@ -154,6 +155,12 @@ export function RackElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode 
     staleTime: Infinity,
   });
   const wattsByIcon = useMemo(() => wattsByIconMap(deviceTypesQ.data), [deviceTypesQ.data]);
+  // N4: id -> catalog entry, for resolving each node's device_type_id to real
+  // pack port data (rack faceplate rendering, not a second /device-types fetch).
+  const deviceTypesById = useMemo(
+    () => new Map((deviceTypesQ.data ?? []).map((dt) => [dt.id, dt])),
+    [deviceTypesQ.data],
+  );
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
@@ -303,10 +310,10 @@ export function RackElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode 
       const bRack = racksById.get(bNode.rack_id);
       if (!aOffset || !bOffset || !aRack || !bRack) continue; // not measured yet (first paint)
       const aLocal = localPortAnchor(
-        aNode, aNode.ru_start, aNode.ru_span ?? 1, lnk.a_iface, aRack.ru_height || DEFAULT_RU_HEIGHT, face,
+        aNode, aNode.ru_start, aNode.ru_span ?? 1, lnk.a_iface, aRack.ru_height || DEFAULT_RU_HEIGHT, face, deviceTypesById,
       );
       const bLocal = localPortAnchor(
-        bNode, bNode.ru_start, bNode.ru_span ?? 1, lnk.b_iface, bRack.ru_height || DEFAULT_RU_HEIGHT, face,
+        bNode, bNode.ru_start, bNode.ru_span ?? 1, lnk.b_iface, bRack.ru_height || DEFAULT_RU_HEIGHT, face, deviceTypesById,
       );
       lines.push({
         x1: aOffset.x + aLocal.x,
@@ -317,7 +324,7 @@ export function RackElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode 
       });
     }
     return { cableLines: lines, unplacedEndpointCount };
-  }, [links, nodeByEndpoint, nodesById, racksById, rackOffsets, face]);
+  }, [links, nodeByEndpoint, nodesById, racksById, rackOffsets, face, deviceTypesById]);
 
   // E1: rubber-band from the locked port to the live cursor — measured live
   // (not memoized) since mousePos changes on every pointer move.
@@ -328,7 +335,7 @@ export function RackElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode 
     const offset = dev?.rack_id ? rackOffsets.get(dev.rack_id) : undefined;
     if (dev && dev.ru_start != null && rack && offset) {
       const local = localPortAnchor(
-        dev, dev.ru_start, dev.ru_span ?? 1, pendingPort.ifaceId, rack.ru_height || DEFAULT_RU_HEIGHT, face,
+        dev, dev.ru_start, dev.ru_span ?? 1, pendingPort.ifaceId, rack.ru_height || DEFAULT_RU_HEIGHT, face, deviceTypesById,
       );
       const wrapperRect = wrapperRef.current.getBoundingClientRect();
       pendingLine = {
@@ -634,6 +641,7 @@ export function RackElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode 
                           pendingPort={pendingPort}
                           onPortClick={handlePortClick}
                           registerBodyRef={registerRackBody}
+                          deviceTypesById={deviceTypesById}
                         />
                       ))}
                       {bucket.racks.length === 0 && (
@@ -709,6 +717,8 @@ interface RackColumnProps {
   /** Reports this rack's body DOM node up to the panel, which measures its
    * offset within the shared cross-rack cable overlay (see RackElevationPanel). */
   registerBodyRef: (rackId: string, el: HTMLDivElement | null) => void;
+  /** N4: id -> catalog entry, passed straight through to DeviceFaceplate. */
+  deviceTypesById: Map<string, DeviceType>;
 }
 
 function RackColumn({
@@ -725,6 +735,7 @@ function RackColumn({
   pendingPort,
   onPortClick,
   registerBodyRef,
+  deviceTypesById,
 }: RackColumnProps) {
   const ruHeight = rack.ru_height || DEFAULT_RU_HEIGHT;
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -860,6 +871,7 @@ function RackColumn({
                     cableMode={cableMode}
                     pendingIface={pendingPort?.ifaceId ?? null}
                     onPortClick={(ifaceId) => onPortClick(d.id, ifaceId)}
+                    deviceTypesById={deviceTypesById}
                   />
                   {/* name label: small overlay so it doesn't hide the faceplate */}
                   <span className="absolute left-0.5 top-0.5 truncate rounded bg-recess/20 px-1 text-[9px] leading-tight text-fg/80 pointer-events-none">

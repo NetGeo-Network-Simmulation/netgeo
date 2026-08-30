@@ -23,10 +23,21 @@
  * DEVICE_TYPES by slug → eventually swap SVG shapes for per-model art / 3D.
  */
 import type { Interface, LinkStatus, NodeModel } from '@/api/types';
+import type { DeviceType as CatalogEntry } from '@/api/client';
 import { linkStatusColors } from '@/theme/tokens';
 import { cn } from '@/lib/cn';
 import { resolveDeviceType } from './deviceTypes';
 import type { DeviceType, PortType, PortSpec, PortZone } from './deviceTypes';
+
+/** `node.device_type_id` resolved against the caller's already-fetched
+ *  /api/device-types list, if both are present — the real port/physical data
+ *  that lets resolveDeviceType() skip its nos/kind heuristic (N4). */
+function packFor(
+  node: NodeModel,
+  deviceTypesById?: Map<string, CatalogEntry>,
+): CatalogEntry | undefined {
+  return node.device_type_id ? deviceTypesById?.get(node.device_type_id) : undefined;
+}
 
 // Rack#1: no data for a port (no matching interface, or an interface with no
 // link) → neutral/off, never a random guess.
@@ -495,8 +506,12 @@ function renderBack(dt: DeviceType, H: number, accent: string): React.ReactNode[
  * server bezel, whose slots are drive bays, not network ports) is simply
  * absent from the map; callers fall back to the old center-of-block anchor.
  */
-export function frontPortFractions(node: NodeModel, span: number): Map<string, { x: number; y: number }> {
-  const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
+export function frontPortFractions(
+  node: NodeModel,
+  span: number,
+  deviceTypesById?: Map<string, CatalogEntry>,
+): Map<string, { x: number; y: number }> {
+  const dt = resolveDeviceType(node.nos, node.kind, node.interfaces, packFor(node, deviceTypesById));
   const out = new Map<string, { x: number; y: number }>();
   if (dt.front.isServerBezel) return out;
 
@@ -541,8 +556,11 @@ export interface ConsolePort {
 /** Same zone/ordinal walk as `frontPortFractions`, minus the pixel geometry —
  *  reused so the console lists ports in the exact order the rack faceplate
  *  maps them, keeping the two views consistent. */
-export function frontPortList(node: NodeModel): ConsolePort[] {
-  const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
+export function frontPortList(
+  node: NodeModel,
+  deviceTypesById?: Map<string, CatalogEntry>,
+): ConsolePort[] {
+  const dt = resolveDeviceType(node.nos, node.kind, node.interfaces, packFor(node, deviceTypesById));
   if (dt.front.isServerBezel) return [];
 
   const zonesOrder = layoutZones(dt.front.portZones, 0, 1, 0, 1);
@@ -579,6 +597,9 @@ interface Props {
   pendingIface?: string | null;
   /** E1: fired with the clicked port's iface id when cableMode is on. */
   onPortClick?: (ifaceId: string) => void;
+  /** N4: caller's already-fetched /device-types list, keyed by id — resolves
+   *  `node.device_type_id` to real pack port data. Omitted -> heuristic only. */
+  deviceTypesById?: Map<string, CatalogEntry>;
 }
 
 export function DeviceFaceplate({
@@ -589,8 +610,9 @@ export function DeviceFaceplate({
   cableMode = false,
   pendingIface = null,
   onPortClick,
+  deviceTypesById,
 }: Props) {
-  const dt = resolveDeviceType(node.nos, node.kind, node.interfaces);
+  const dt = resolveDeviceType(node.nos, node.kind, node.interfaces, packFor(node, deviceTypesById));
   const H = Math.max(RU_H, span * RU_H);
   const { accent, chassis, label } = dt.brand;
   // No curated model matched (deviceTypes.ts genericFor()) — the shape shown

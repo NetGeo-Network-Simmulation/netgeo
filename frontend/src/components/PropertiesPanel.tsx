@@ -101,9 +101,12 @@ export function PropertiesPanel() {
     patch({ interfaces: node.interfaces.map((i) => (i.id === ifaceId ? { ...i, ...p } : i)) });
   };
 
-  const deviceTypeId = typeof node.intent?.device_type_id === 'string' ? node.intent.device_type_id : '';
+  const deviceTypeId = node.device_type_id ?? '';
   const selectedDeviceType = deviceTypesQ.data?.find((dt) => dt.id === deviceTypeId);
-  const ports = frontPortList(node);
+  // N4: same id -> catalog entry lookup RackElevationPanel/Rack3DElevationPanel
+  // use, so the console's port strip matches the rack faceplate's real ports.
+  const deviceTypesById = new Map((deviceTypesQ.data ?? []).map((dt) => [dt.id, dt]));
+  const ports = frontPortList(node, deviceTypesById);
 
   // During a live sim run the engine is stepping every node; reflect that in the
   // status indicator rather than showing the stored topology state ("stopped").
@@ -154,9 +157,7 @@ export function PropertiesPanel() {
         <Select
           aria-label="Product model"
           value={deviceTypeId}
-          onChange={(v) =>
-            patch({ intent: { ...(node.intent ?? {}), device_type_id: v || undefined } })
-          }
+          onChange={(v) => patch({ device_type_id: v || null })}
           placeholder="Select product model…"
           options={(deviceTypesQ.data ?? []).map((dt) => ({ value: dt.id, label: dt.name }))}
           className="w-full"
