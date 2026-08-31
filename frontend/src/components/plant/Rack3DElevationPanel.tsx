@@ -20,7 +20,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Cable, DoorClosed, Move, Plus, RotateCcw, Server, Tag, Zap } from 'lucide-react';
+import { AlertTriangle, Cable, DoorClosed, Move, Plus, Server, Tag, Zap } from 'lucide-react';
 import * as THREE from 'three';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiError } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
@@ -67,37 +67,17 @@ function webglAvailable(): boolean {
   }
 }
 
-const POV_KEY = 'netgeo.rack3d.pov.v2';
-const POV = { az: (10 * Math.PI) / 180, elev: (10 * Math.PI) / 180, span: 0.75, dist: 14 };
+// Fixed POV (permintaan Surya): azimuth 7°, elevation 4°, scale 1.40 — no
+// free camera, no user-adjustable zoom/elevation. `dist` is the camera's
+// fixed physical distance from the rack; `span` (the frustum half-height
+// input to spanFor()) is what "scale" means here.
+const POV = { az: (7 * Math.PI) / 180, elev: (4 * Math.PI) / 180, span: 1.4, dist: 14 };
 const EMPTY_FITOUT: Record<string, DeviceDef[]> = { A: [], B: [] };
 const EMPTY_LINKS: LinkDef[] = [];
 
 type Mode = 'cable' | 'adddev' | null;
 type Face = 'front' | 'back';
 type Slot = 'A' | 'B';
-
-interface Pov {
-  baseAz: number;
-  elev: number;
-  span: number;
-}
-
-function loadPov(): Pov {
-  try {
-    const raw = localStorage.getItem(POV_KEY);
-    const saved = raw ? JSON.parse(raw) : null;
-    if (saved && Number.isFinite(saved.baseAz ?? saved.az)) {
-      return {
-        baseAz: saved.baseAz ?? saved.az,
-        elev: Number.isFinite(saved.elev) ? saved.elev : POV.elev,
-        span: Number.isFinite(saved.span) ? saved.span : POV.span,
-      };
-    }
-  } catch {
-    /* first run, or storage blocked */
-  }
-  return { baseAz: POV.az, elev: POV.elev, span: POV.span };
-}
 
 export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode } = {}) {
   const projectId = useUiStore((s) => s.projectId);
@@ -108,8 +88,14 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   // mutable view state the render loop reads every frame — deliberately not
   // React state: a 60 fps camera must not re-render the component tree.
-  const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: 'A' });
-  const povRef = useRef<Pov>(loadPov());
+  const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: 'A' as Slot });
+  // Real per-bay rack height in metres, from the backend's `ru_height` — NOT
+  // the enclosure mesh's height (RACK_SPECS is a fixed 42U shell regardless
+  // of the real rack). Camera framing (spanFor/placeCamera) reads this so
+  // devices near the bottom of a real short rack aren't centred as if the
+  // rack were always 42U tall. Kept in a ref (mirrors the render-loop-facing
+  // refs below) so spanFor/placeCamera stay referentially stable.
+  const rackHeightRef = useRef<{ A: number; B: number }>({ A: 42 * U, B: 42 * U });
   // Computed once — WebGL support doesn't change mid-session. Also re-checked
   // defensively at renderer construction (below) in case detection passes
   // but the real context still fails to init.
@@ -205,7 +191,6 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     return nodes.reduce((sum, n) => sum + nodeWatts(n, wattsByIcon), 0);
   }, [topoQ.data, rackAId, rackBId, wattsByIcon]);
 
-  const [pov, setPov] = useState<Pov>(povRef.current);
   const [face, setFace] = useState<Face>('front');
   const [mode, setMode] = useState<Mode>(null);
   const [doors, setDoors] = useState(false);
@@ -294,10 +279,10 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     onError: (e) => setError((e as unknown as ApiError).message || 'Gagal memindahkan perangkat.'),
   });
 
-  /** Half-height the shot needs: the tallest rack plus tray headroom. */
+  /** Half-height the shot needs: the taller of the two real racks (backend
+   *  ru_height, not the fixed-42U enclosure mesh) plus tray headroom. */
   const spanFor = useCallback((scale: number, zoomed: boolean) => {
-    const racksBuilt = builtRef.current ? Object.values(builtRef.current.registry.racks) : [];
-    const top = (racksBuilt.length ? Math.max(...racksBuilt.map((r) => r.h)) : 2.0) + 0.3;
+    const top = Math.max(rackHeightRef.current.A, rackHeightRef.current.B) + 0.3;
     return ((top + 0.08) / 2 / Math.max(0.2, scale)) * (zoomed ? 0.42 : 1);
   }, []);
 
@@ -305,7 +290,7 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     const host = hostRef.current, cam = camRef.current;
     if (!host || !cam) return;
     const w = host.clientWidth || 1, h = host.clientHeight || 1;
-    const span = spanFor(povRef.current.span, view.current.zoomed);
+    const span = spanFor(POV.span, view.current.zoomed);
     const aspect = w / h;
     cam.left = -span * aspect;
     cam.right = span * aspect;
@@ -327,8 +312,14 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     if (!a || !b) return;
     const focus = view.current.zoomed ? built.registry.racks[view.current.focusRack] : null;
     const cx = (focus ? focus.x : (a.x + b.x) / 2) + 0.12;
-    const cy = (focus ? focus.h : Math.max(a.h, b.h)) * 0.46;
-    const d = POV.dist, el = povRef.current.elev;
+    // Look-at height comes from the real backend ru_height per bay (P41,
+    // see rackHeightRef), not focus.h/a.h/b.h — those are the enclosure
+    // mesh's fixed 42U height regardless of the rack's actual size, which
+    // used to pin the look-at near the top of a 42U shell no matter how
+    // short the real rack was, burying low-RU devices off-frame.
+    const focusKey = view.current.zoomed ? view.current.focusRack : null;
+    const cy = (focusKey ? rackHeightRef.current[focusKey] : Math.max(rackHeightRef.current.A, rackHeightRef.current.B)) * 0.46;
+    const d = POV.dist, el = POV.elev;
     cam.position.set(
       cx + Math.sin(az) * Math.cos(el) * d,
       cy + Math.sin(el) * d,
@@ -468,27 +459,31 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     view.current.anim = anim;
   }, [anim]);
 
-  /* ─── POV: persist and re-place ────────────────────────────────────────── */
+  /* ─── real rack heights: keep the camera-framing ref in sync ───────────── */
   useEffect(() => {
-    povRef.current = pov;
-    view.current.az = face === 'back' ? pov.baseAz + Math.PI : pov.baseAz;
+    rackHeightRef.current = {
+      A: (rackA?.ru_height || 42) * U,
+      B: (rackB?.ru_height || 42) * U,
+    };
     fitCamera();
     placeCamera();
-    try {
-      localStorage.setItem(POV_KEY, JSON.stringify({ ...pov, az: view.current.az }));
-    } catch {
-      /* storage blocked */
-    }
-  }, [pov, face, fitCamera, placeCamera]);
+  }, [rackA?.ru_height, rackB?.ru_height, fitCamera, placeCamera]);
+
+  /* ─── face flip: az is the only thing about the fixed POV that turns ──── */
+  useEffect(() => {
+    view.current.az = face === 'back' ? POV.az + Math.PI : POV.az;
+    fitCamera();
+    placeCamera();
+  }, [face, fitCamera, placeCamera]);
 
   /* ─── work zoom: only for cabling / adding, only on the worked rack ────── */
   useEffect(() => {
     const on = mode !== null;
     if (view.current.zoomed === on) return;
-    const from = spanFor(povRef.current.span, view.current.zoomed);
+    const from = spanFor(POV.span, view.current.zoomed);
     view.current.zoomed = on;
-    view.current.focusRack = (sel && builtRef.current?.registry.devices[sel]?.rackKey) || 'A';
-    const to = spanFor(povRef.current.span, on);
+    view.current.focusRack = ((sel && builtRef.current?.registry.devices[sel]?.rackKey) || 'A') as Slot;
+    const to = spanFor(POV.span, on);
     const t0 = performance.now();
     const step = () => {
       const cam = camRef.current, host = hostRef.current;
@@ -744,36 +739,7 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
         <button type="button" className={btn(mode === 'adddev')} onClick={() => toggleMode('adddev')} title="Tambah perangkat ke rak">
           <Plus className="size-3.5" /> Tambah perangkat
         </button>
-        <div className="ml-auto flex items-center gap-3">
-          {([
-            ['Az', 'baseAz', -180, 180, 1, (v: number) => (v * 180) / Math.PI, (v: number) => (v * Math.PI) / 180],
-            ['El', 'elev', 0, 60, 1, (v: number) => (v * 180) / Math.PI, (v: number) => (v * Math.PI) / 180],
-            ['Zoom', 'span', 0.3, 2, 0.01, (v: number) => v, (v: number) => v],
-          ] as const).map(([label, key, min, max, step, out, into]) => (
-            <label key={key} className="flex items-center gap-1.5 text-[11px] text-recess">
-              {label}
-              <input
-                type="range"
-                min={min}
-                max={max}
-                step={step}
-                value={out(pov[key])}
-                onChange={(e) => setPov((p) => ({ ...p, [key]: into(parseFloat(e.target.value)) }))}
-                className="w-20 accent-accent"
-              />
-            </label>
-          ))}
-          <button
-            type="button"
-            className={btn(false)}
-            onClick={() => { setPov({ baseAz: POV.az, elev: POV.elev, span: POV.span }); setFace('front'); }}
-            title="Reset POV"
-          >
-            <RotateCcw className="size-3.5" />
-          </button>
-        </div>
-
-        {viewSwitcher}
+        {viewSwitcher && <div className="ml-auto">{viewSwitcher}</div>}
       </div>
 
       {error && (
