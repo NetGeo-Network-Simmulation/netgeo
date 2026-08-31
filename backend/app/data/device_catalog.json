@@ -721,13 +721,14 @@
       "max_range_km": 80,
       "max_throughput_mbps": 8,
       "standard": "Proprietary OFDM",
-      "notes": "Sub-GHz NLOS backhaul for rural and remote sites. Extreme range capability.",
+      "notes": "Sub-GHz NLOS backhaul for rural and remote sites. Extreme range capability. Discontinued per Cambium's official product page (cambiumnetworks.com/products/iiot/n500-900-mhz/), 2026-08-31.",
       "evidence": {
         "_all": {
           "status": "UNVERIFIED",
           "note": "Not yet checked against a vendor source — see device-catalog-claim-audit.md for the 8 SKUs already audited (this one was not in that batch)."
         }
-      }
+      },
+      "eol": true
     },
     {
       "id": "ubnt-airmax-ac-sector",

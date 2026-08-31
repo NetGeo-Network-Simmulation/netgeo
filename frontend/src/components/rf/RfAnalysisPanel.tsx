@@ -140,7 +140,7 @@ function CatalogPicker({
         if (r) onSelect(r);
       }}
       placeholder={`${label}…`}
-      options={radios.map((r) => ({ value: r.id, label: r.name }))}
+      options={radios.map((r) => ({ value: r.id, label: r.eol ? `${r.name} (EOL)` : r.name }))}
       className="w-full"
     />
   );

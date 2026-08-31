@@ -64,6 +64,19 @@ const LED_FILL: Record<'green' | 'amber' | 'blue' | 'red' | 'white', string> = {
   white: '#E8E6E0',
 };
 
+/** Small vertical column of status LEDs (dot + label) — shared by the front
+ *  system-LED strip and rear led-group blocks (e.g. Juniper chassis LEDs). */
+function renderLedColumn(leds: DeviceType['front']['leds'], x: number, yStart: number): React.ReactNode[] {
+  return leds.map((led, i) => (
+    <g key={`led-${led.label}`}>
+      <circle cx={x} cy={yStart + i * 6} r={1.4} fill={LED_FILL[led.color]} />
+      <text x={x + 3} y={yStart + i * 6 + 1} fontSize="3.5" fontFamily="monospace" fill="#6a6860">
+        {led.label}
+      </text>
+    </g>
+  ));
+}
+
 interface PortRect { x: number; y: number; w: number; h: number }
 
 /** Distribute `count` ports into `rows` even rows across [x0,x1] × [y0,y1]. */
@@ -270,18 +283,7 @@ function renderFront(
 
   // LED column on left (inside panel, after brand stripe)
   const ledX = PANEL_X0 + 7;
-  let ledY = panelY0 + 2;
-  for (const led of dt.front.leds) {
-    els.push(
-      <g key={`led-${led.label}`}>
-        <circle cx={ledX} cy={ledY} r={1.4} fill={LED_FILL[led.color]} />
-        <text x={ledX + 3} y={ledY + 1} fontSize="3.5" fontFamily="monospace" fill="#6a6860">
-          {led.label}
-        </text>
-      </g>
-    );
-    ledY += 6;
-  }
+  els.push(...renderLedColumn(dt.front.leds, ledX, panelY0 + 2));
 
   // LCD panel (Ubiquiti-style)
   const ledBlockW = dt.front.leds.length > 0 ? 24 : 0;
@@ -450,15 +452,20 @@ function renderBack(dt: DeviceType, H: number, accent: string): React.ReactNode[
       cursor += gw + 4;
     } else if (block.type === 'iec-inlet') {
       const iw = 14, ih = (y1 - y0) * 0.5;
-      els.push(
-        <g key="iec">
-          <rect x={cursor} y={mid - ih / 2} width={iw} height={ih}
-            rx="2" fill="#181816" stroke="#3d3d3a" strokeWidth="0.6" />
-          <path d={`M ${cursor + iw * 0.3} ${mid - ih * 0.25} l ${iw * 0.4} 0 l 0 ${ih * 0.5} l -${iw * 0.4} 0 Z`}
-            fill="#252523" />
-        </g>
-      );
-      cursor += iw + 4;
+      for (let i = 0; i < count; i++) {
+        els.push(
+          <g key={`iec-${i}`}>
+            <rect x={cursor} y={mid - ih / 2} width={iw} height={ih}
+              rx="2" fill="#181816" stroke="#3d3d3a" strokeWidth="0.6" />
+            <path d={`M ${cursor + iw * 0.3} ${mid - ih * 0.25} l ${iw * 0.4} 0 l 0 ${ih * 0.5} l -${iw * 0.4} 0 Z`}
+              fill="#252523" />
+          </g>
+        );
+        cursor += iw + 4;
+      }
+    } else if (block.type === 'led-group' && block.leds) {
+      els.push(...renderLedColumn(block.leds, cursor + 2, y0 + 4));
+      cursor += 26;
     } else if (block.type === 'ground-lug') {
       els.push(
         <g key="ground">
