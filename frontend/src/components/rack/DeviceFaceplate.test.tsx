@@ -92,3 +92,16 @@ describe('DeviceFaceplate approximate-shape marker', () => {
     expect(fallbackHtml).not.toBe(packHtml);
   });
 });
+
+describe('Juniper QFX5120-48Y chassis LEDs (docs/design/24-DEVICE-PHYSICAL-SPEC.md §10)', () => {
+  it('renders the 4 chassis LEDs (ALM/SYS/MST/ID) on the rear face, not the front', () => {
+    const n = node('sw-qfx5120', 'junos', 8);
+    const frontHtml = renderToStaticMarkup(<DeviceFaceplate node={n} span={1} face="front" />);
+    const rearHtml = renderToStaticMarkup(<DeviceFaceplate node={n} span={1} face="back" />);
+
+    for (const label of ['ALM', 'SYS', 'MST', 'ID']) {
+      expect(frontHtml).not.toContain(`>${label}<`);
+      expect(rearHtml).toContain(`>${label}<`);
+    }
+  });
+});

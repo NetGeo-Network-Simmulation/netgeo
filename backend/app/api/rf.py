@@ -68,6 +68,7 @@ class RadioCatalogEntry(BaseModel):
     max_throughput_mbps: float
     standard: str
     notes: str = ""
+    eol: bool = False  # True when the vendor's own product page marks this SKU discontinued
 
 
 @lru_cache(maxsize=1)

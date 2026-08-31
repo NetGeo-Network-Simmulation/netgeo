@@ -47,9 +47,10 @@ export interface PortZone {
 }
 
 export interface RearBlock {
-  type: 'psu-slot' | 'fan-tray' | 'ground-lug' | 'vent-grille' | 'iec-inlet' | 'port-zone';
-  count?: number;
+  type: 'psu-slot' | 'fan-tray' | 'ground-lug' | 'vent-grille' | 'iec-inlet' | 'port-zone' | 'led-group';
+  count?: number; // iec-inlet: number of inlets rendered (default 1)
   portZone?: PortZone; // only when type === 'port-zone'
+  leds?: Led[]; // only when type === 'led-group'
 }
 
 export interface Led {
@@ -119,10 +120,11 @@ export const DEVICE_TYPES: DeviceType[] = [
       ],
     },
     rear: {
+      // docs/design/24-DEVICE-PHYSICAL-SPEC.md §9 (V, mikrotik.com opened directly):
+      // passive cooling (no fan tray), no modular PSU — 2x IEC C14 redundant inlets
+      // are the power slots themselves.
       blocks: [
-        { type: 'fan-tray', count: 2 },
-        { type: 'psu-slot', count: 2 },
-        { type: 'iec-inlet' },
+        { type: 'iec-inlet', count: 2 },
       ],
     },
     brand: { accent: '#E4002B', chassis: '#EFEDE6', label: 'MikroTik', badge: 'stripe' },
@@ -155,9 +157,12 @@ export const DEVICE_TYPES: DeviceType[] = [
           widthFraction: 0.14,
         },
       ],
+      // docs/design/24-DEVICE-PHYSICAL-SPEC.md §10 (V, mikrotik.com manual opened
+      // directly): manual lists PWR + FAN FAULT as the system LEDs, not a
+      // generic ACT LED — per-port link/PoE LEDs are separate (port-level).
       leds: [
         { label: 'PWR', color: 'green', position: 'left' },
-        { label: 'ACT', color: 'green', position: 'left' },
+        { label: 'FAN FLT', color: 'amber', position: 'left' },
       ],
     },
     rear: {
@@ -282,16 +287,33 @@ export const DEVICE_TYPES: DeviceType[] = [
           widthFraction: 0.18,
         },
       ],
-      leds: [
-        { label: 'PWR', color: 'green', position: 'left' },
-        { label: 'ALM', color: 'amber', position: 'left' },
-        { label: 'MST', color: 'green', position: 'left' },
-      ],
+      // docs/design/24-DEVICE-PHYSICAL-SPEC.md §10 (V, juniper.net documentation
+      // opened directly): the 4 chassis LEDs (ALM/SYS/MST/ID) live on the REAR
+      // panel next to the mgmt ports, not the front — see rear.blocks below.
+      leds: [],
     },
     rear: {
+      // §9 rear order (V, juniper.net): mgmt port + LED cluster → fan module → PSU.
       blocks: [
-        { type: 'psu-slot', count: 2 },
+        {
+          type: 'port-zone',
+          portZone: {
+            ports: [{ type: 'mgmt-rj45', count: 2 }],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        {
+          type: 'led-group',
+          leds: [
+            { label: 'ALM', color: 'red', position: 'left' },
+            { label: 'SYS', color: 'green', position: 'left' },
+            { label: 'MST', color: 'green', position: 'left' },
+            { label: 'ID', color: 'blue', position: 'left' },
+          ],
+        },
         { type: 'fan-tray', count: 3 },
+        { type: 'psu-slot', count: 2 },
       ],
     },
     brand: { accent: '#84B135', chassis: '#1A1A18', label: 'Juniper', badge: 'stripe' },
@@ -415,9 +437,10 @@ export const DEVICE_TYPES: DeviceType[] = [
       ],
     },
     rear: {
+      // docs/design/24-DEVICE-PHYSICAL-SPEC.md §9 (V(2nd), community.fortinet.com):
+      // dual PSU internal fixed (non-hot-swap) = 2x IEC C14, not 1 PSU + 1 inlet.
       blocks: [
-        { type: 'psu-slot', count: 1 },
-        { type: 'iec-inlet' },
+        { type: 'iec-inlet', count: 2 },
       ],
     },
     brand: { accent: '#EE3124', chassis: '#2A2D33', label: 'Fortinet', badge: 'stripe' },

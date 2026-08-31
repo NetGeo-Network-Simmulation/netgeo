@@ -804,6 +804,8 @@ export interface RadioCatalogEntry {
   max_throughput_mbps: number;
   standard: string;
   notes: string;
+  /** True when the vendor's own product page marks this SKU discontinued. */
+  eol?: boolean;
 }
 export const rfApi = {
   coverage: (body: CoverageRasterRequest) =>
