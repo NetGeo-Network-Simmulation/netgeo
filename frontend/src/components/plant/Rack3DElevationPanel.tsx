@@ -1,11 +1,14 @@
 /**
- * Rack3DElevationPanel — the 2.5D physical-plant view (Desain Rackmount 2.5).
+ * Rack3DElevationPanel — the physical-plant view (Desain Rackmount 2.5). The
+ * only physical-plant renderer now (the old 2D elevation panel is deleted;
+ * this owns rack/site creation too, moved over from that panel).
  *
- * Owns one WebGL renderer and one orthographic camera on a fixed isometric
- * POV: no perspective convergence, so the rack reads like the elevation view
- * it replaces. The scene graph itself lives in lib/three/rack3d; the
- * translation from the project's real topology into that scene graph's input
- * lives in lib/three/plantAdapter (NG-PH3D P1).
+ * Owns one WebGL renderer and one orthographic camera on a fixed POV
+ * (permintaan Surya: az 7° / elev 4° / scale 1.40 — see POV below): no
+ * perspective convergence, no user-adjustable zoom/elevation. The scene
+ * graph itself lives in lib/three/rack3d; the translation from the
+ * project's real topology into that scene graph's input lives in
+ * lib/three/plantAdapter (NG-PH3D P1).
  *
  * ponytail: plain three.js, no react-three-fiber. The scene is imperative and
  * rebuilt wholesale on a rack/link change; wrapping it in a reconciler would
@@ -18,7 +21,7 @@
  * more than two racks can view any pair, not all of them at once — full
  * N-rack layout is bigger than a data-binding slice (see docs/design/22).
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, DoorClosed, Move, Plus, Server, Tag, Zap } from 'lucide-react';
 import * as THREE from 'three';
@@ -75,11 +78,15 @@ const POV = { az: (7 * Math.PI) / 180, elev: (4 * Math.PI) / 180, span: 1.4, dis
 const EMPTY_FITOUT: Record<string, DeviceDef[]> = { A: [], B: [] };
 const EMPTY_LINKS: LinkDef[] = [];
 
+/** Selectable rack heights (10U–48U) — moved here from the deleted 2D panel,
+ *  the only place rack creation lives now. */
+const RACK_SIZES = [10, 12, 18, 24, 36, 42, 48];
+
 type Mode = 'cable' | 'adddev' | null;
 type Face = 'front' | 'back';
 type Slot = 'A' | 'B';
 
-export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNode } = {}) {
+export function Rack3DElevationPanel() {
   const projectId = useUiStore((s) => s.projectId);
   const queryClient = useQueryClient();
   const hostRef = useRef<HTMLDivElement>(null);
@@ -113,8 +120,8 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     return () => { live = false; };
   }, []);
 
-  // Same query keys as RackElevationPanel.tsx (the 2D panel), on purpose:
-  // when the 2D panel mutates and invalidates ['topology', projectId] /
+  // Same query keys the old 2D panel used, kept on purpose: when this
+  // panel mutates and invalidates ['topology', projectId] /
   // ['plant', projectId], this panel's cache entries are the same entries,
   // so it refetches too without any cross-panel event wiring.
   const topoQ = useQuery({
@@ -129,8 +136,7 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     queryFn: () => physicalApi.plant(projectId!),
     enabled: !!projectId,
   });
-  // Static catalog, same key/staleTime as RackElevationPanel.tsx — one fetch,
-  // shared cache entry, used for the same per-device wattage lookup (NG-PH3D P3).
+  // Static catalog, one fetch, used for per-device wattage lookup (NG-PH3D P3).
   const deviceTypesQ = useQuery({
     queryKey: ['device-types'],
     queryFn: () => deviceTypesApi.list(),
@@ -145,6 +151,7 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   );
 
   const racks = topoQ.data?.racks ?? [];
+  const sites = topoQ.data?.sites ?? [];
 
   // Which two real racks fill the scene's two bays.
   const [rackAId, setRackAId] = useState<string | null>(null);
@@ -174,8 +181,8 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   const rackASpec = adapted?.rackA ?? DEFAULT_ENCLOSURE;
   const rackBSpec = adapted?.rackB ?? DEFAULT_ENCLOSURE;
 
-  // NG-PH3D P3: parity with RackElevationPanel.tsx, same shared helpers so
-  // the two views can't disagree on what these numbers mean.
+  // NG-PH3D P3: shared helpers with the old 2D panel's rollups (deleted;
+  // these numbers used to need to agree between the two views).
   const unplaced = useMemo(() => unplacedNodes(topoQ.data?.nodes ?? []), [topoQ.data]);
   const overLength = useMemo(
     () => overLengthCables(topoQ.data?.cables ?? [], plantQ.data?.links),
@@ -190,6 +197,13 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     );
     return nodes.reduce((sum, n) => sum + nodeWatts(n, wattsByIcon), 0);
   }, [topoQ.data, rackAId, rackBId, wattsByIcon]);
+
+  // Create-rack controls — moved here from the deleted 2D elevation panel,
+  // the only place a rack could be created before this (see slice notes).
+  const [newRackName, setNewRackName] = useState('');
+  const [newRackSite, setNewRackSite] = useState('');
+  const [newRackU, setNewRackU] = useState(42);
+  const newRackNameRef = useRef<HTMLInputElement>(null);
 
   const [face, setFace] = useState<Face>('front');
   const [mode, setMode] = useState<Mode>(null);
@@ -214,13 +228,23 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   const [status, setStatus] = useState('Klik perangkat di scene');
   const [error, setError] = useState<string | null>(null);
 
-  // Same invalidate-both idiom RackElevationPanel.tsx uses after its own
-  // mutations — the 2D and 3D panels read the same two query keys, so either
-  // one invalidating them refreshes both.
+  // Same invalidate-both idiom used throughout this panel's mutations —
+  // both query keys refresh together so nothing goes stale.
   const invalidate = useCallback(() => {
     queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
     queryClient.invalidateQueries({ queryKey: ['plant', projectId] });
   }, [queryClient, projectId]);
+
+  const createRack = useMutation({
+    mutationFn: (v: { name: string; siteId: string | null; ruHeight: number }) =>
+      physicalApi.createRack({ project_id: projectId!, name: v.name, site_id: v.siteId, ru_height: v.ruHeight }),
+    onSuccess: () => {
+      setNewRackName('');
+      setError(null);
+      invalidate();
+    },
+    onError: (e) => setError((e as unknown as ApiError).message || 'Failed to create rack.'),
+  });
 
   const updateEnclosure = useMutation({
     mutationFn: (v: { rackId: string; profile: string }) =>
@@ -231,8 +255,8 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
 
   // Cable Mode (NG-PH3D P2): a patched port pair becomes a real logical link
   // plus the physical cable that realizes it — same POST /links + POST
-  // /cables pair RackElevationPanel.tsx's own cable tooling would use, just
-  // driven from a 3D port pick instead of a 2D one.
+  // /cables pair a 2D panel's cable tooling would have used, just driven
+  // from a 3D port pick.
   const createPatch = useMutation({
     mutationFn: async (v: { aIface: string; bIface: string; media: string; lengthM: number }) => {
       const link = await linksApi.create({
@@ -248,7 +272,7 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   });
 
   // Tambah perangkat (NG-PH3D P2): create → place, mirroring
-  // RackElevationPanel.tsx's own addDevice mutation (create → PATCH RU).
+  // the create → PATCH RU pattern used throughout this panel.
   const addDevice = useMutation({
     mutationFn: async (v: { rackId: string; ruStart: number }) => {
       const n = (topoQ.data?.nodes ?? []).filter((x) => x.name.startsWith('NG-')).length;
@@ -696,17 +720,15 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   };
 
   // NG-PH3D P4: no WebGL, no scene — a black/blank canvas here would look
-  // like a crash. Say so plainly and point back at the 2D panel, which the
-  // parent toggle (`viewSwitcher`) can still reach.
+  // like a crash. Say so plainly (there is no 2D fallback panel anymore).
   if (webglError) {
     return (
       <div className="absolute inset-0 flex flex-col">
-        <div className="flex items-center justify-end border-b border-fg/10 px-3 py-2">{viewSwitcher}</div>
         <div className="relative min-h-0 flex-1">
           <WorkspaceEmptyState
             icon={AlertTriangle}
             title="3D view unavailable"
-            hint="This browser doesn't support WebGL. Switch to the Elevation (2D) panel above to keep working with the same rack data."
+            hint="This browser doesn't support WebGL, which the physical plant view requires. Try a different browser or enable hardware acceleration."
           />
         </div>
       </div>
@@ -717,6 +739,68 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     <div className="absolute inset-0 flex flex-col">
       {/* toolbar */}
       <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-2">
+        {/* Create site / rack — moved here from the deleted 2D elevation
+            panel, the only place these existed before. */}
+        <button
+          type="button"
+          onClick={() => {
+            useUiStore.getState().setViewMode('map');
+            // Dynamic: mapStore only otherwise loads inside the async map/rf
+            // chunks. A static import here would pull it (and its MapLibre
+            // neighbours) into the entry bundle just for this one call.
+            void import('@/store/mapStore').then(({ useMapStore }) => useMapStore.getState().setTool('site'));
+          }}
+          title="Opens the map — click a point to place and name the new site"
+          className={btn(false)}
+        >
+          <Plus className="size-3.5" /> Site
+        </button>
+        <input
+          ref={newRackNameRef}
+          value={newRackName}
+          onChange={(e) => setNewRackName(e.target.value)}
+          placeholder="New rack name"
+          aria-label="New rack name"
+          className="w-28 min-w-0 rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none placeholder:text-fg/30 focus:border-accent/50"
+        />
+        <select
+          aria-label="New rack site"
+          value={newRackSite}
+          onChange={(e) => setNewRackSite(e.target.value)}
+          className="w-24 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
+        >
+          <option value="">(no site)</option>
+          {sites.map((s) => (
+            <option key={s.id} value={s.id}>{s.name}</option>
+          ))}
+        </select>
+        <select
+          aria-label="Rack height"
+          value={String(newRackU)}
+          onChange={(e) => setNewRackU(Number(e.target.value))}
+          className="w-16 rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
+        >
+          {RACK_SIZES.map((u) => (
+            <option key={u} value={u}>{u}U</option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => {
+            const name = newRackName.trim();
+            if (!name) {
+              setError('Enter a rack name to create a rack.');
+              newRackNameRef.current?.focus();
+              return;
+            }
+            createRack.mutate({ name, siteId: newRackSite || null, ruHeight: newRackU });
+          }}
+          disabled={createRack.isPending}
+          className={cn(btn(false), 'disabled:cursor-not-allowed disabled:opacity-40')}
+        >
+          <Plus className="size-3.5" /> Rack
+        </button>
+        <div className="mx-1 h-5 w-px bg-fg/10" />
         {slotPicker('A')}
         {slotPicker('B')}
         <div className="mx-1 h-5 w-px bg-fg/10" />
@@ -739,7 +823,6 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
         <button type="button" className={btn(mode === 'adddev')} onClick={() => toggleMode('adddev')} title="Tambah perangkat ke rak">
           <Plus className="size-3.5" /> Tambah perangkat
         </button>
-        {viewSwitcher && <div className="ml-auto">{viewSwitcher}</div>}
       </div>
 
       {error && (
@@ -753,9 +836,7 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
         </div>
       )}
 
-      {/* NG-PH3D P3: same threshold/source as RackElevationPanel.tsx's own
-          over-length banner (GET /plant, over_length flag) — both views
-          agree on which runs are bad because they read the same query. */}
+      {/* NG-PH3D P3: over-length banner (GET /plant, over_length flag). */}
       {overLength.length > 0 && (
         <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
           <div className="flex items-center gap-1 font-medium">
@@ -844,7 +925,7 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
           <WorkspaceEmptyState
             icon={Server}
             title="No racks yet"
-            hint="Create a rack first in the Elevation (2D) panel — devices placed there show up here."
+            hint="Create a rack using the toolbar above — placed devices render as RU-accurate 3D blocks."
           />
         )}
       </div>
