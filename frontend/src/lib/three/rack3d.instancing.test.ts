@@ -28,17 +28,15 @@ function link(a: [string, number], b: [string, number], m = 'cat6a', live = true
 
 function sceneOpts(): BuildOptions {
   return {
-    rackA: 'apc',
-    rackB: 'apc',
-    fitout: {
-      A: [
+    racks: [
+      { key: 'A', enclosure: 'apc', devices: [
         dev('a-patch', 1, 1, 'patch', 24, 'rj45'),
         dev('a-sw1', 2, 1, 'switch', 24, 'rj45'),
         dev('a-odf', 5, 1, 'odf', 24, 'lc'),
         dev('a-sw2', 20, 1, 'switch', 12, 'sfp28'),
-      ],
-      B: [],
-    },
+      ] },
+      { key: 'B', enclosure: 'apc', devices: [] },
+    ],
     links: [
       link(['a-patch', 0], ['a-sw1', 0], 'cat6a'),
       link(['a-patch', 1], ['a-sw1', 1], 'cat6a'),

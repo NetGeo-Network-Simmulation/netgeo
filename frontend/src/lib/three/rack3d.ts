@@ -426,11 +426,22 @@ export function catenarySpan(p0: THREE.Vector3, p1: THREE.Vector3, minRadius: nu
 
 /* ─── Scene builder ──────────────────────────────────────────────────────── */
 
+/** One real, user-created rack bay. `key` is the caller's stable id for it
+ *  (the backend rack id in production) — used as the `registry.racks`/
+ *  `DeviceEntry.rackKey` join, so it must be unique per call. */
+export interface RackBay {
+  key: string;
+  /** RACK_SPECS enclosure key */
+  enclosure: string;
+  devices: DeviceDef[];
+}
+
 export interface BuildOptions {
-  /** rack A / rack B enclosure keys, from RACK_SPECS */
-  rackA: string;
-  rackB: string;
-  fitout: Record<string, DeviceDef[]>;
+  /** Left-to-right row of real racks, in display order. At least one —
+   *  callers that have zero real racks to show should not call buildScene
+   *  at all (NG-PH3D P41: an empty scene is "nothing built", not a scene
+   *  with zero bays). */
+  racks: RackBay[];
   links: LinkDef[];
 }
 
@@ -1535,33 +1546,52 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   }
 
   /* ─── Assembly ─────────────────────────────────────────────────────────── */
-  const specA = RACK_SPECS[opts.rackA]!, specB = RACK_SPECS[opts.rackB]!;
+  // NG-PH3D P41: N real bays laid left-to-right (was a fixed A/B pair) —
+  // each bay's centre-x is a running cursor over the row's real widths, then
+  // the whole row is re-centred on x=0 so a 2-bay call produces the exact
+  // same xA/xB the old fixed formula did (verified: for equal widths this
+  // reduces to -(w+gap)/2 / (w+gap)/2).
+  const bays = opts.racks;
+  const specs = bays.map((b) => RACK_SPECS[b.enclosure]!);
   const gap = 0.1;
-  const xA = -(specA.w / 1000 + gap) / 2;
-  const xB = (specB.w / 1000 + gap) / 2;
+  let cursor = 0;
+  const rawX = specs.map((s) => {
+    const x = cursor + s.w / 2000;
+    cursor += s.w / 1000 + gap;
+    return x;
+  });
+  const rowWidth = cursor - gap;
+  const rowOffset = rowWidth / 2;
+  const xOf = new Map<string, number>();
+  bays.forEach((b, i) => {
+    const x = rawX[i]! - rowOffset;
+    xOf.set(b.key, x);
+    root.add(buildRack(b.key, b.enclosure, x));
+  });
+  const lastSpec = specs[specs.length - 1]!;
+  const cpiX = xOf.get(bays[bays.length - 1]!.key)! + lastSpec.w / 2000 + 0.75;
+  root.add(buildRack('__cpi__', 'cpi', cpiX));
 
-  root.add(buildRack('A', opts.rackA, xA));
-  root.add(buildRack('B', opts.rackB, xB));
-  const cpiX = xB + specB.w / 2000 + 0.75;
-  root.add(buildRack('C', 'cpi', cpiX));
-
-  for (const def of opts.fitout.A!) registry.racks.A!.group.add(buildDevice(def, 'A'));
-  for (const def of opts.fitout.B!) registry.racks.B!.group.add(buildDevice(def, 'B'));
+  for (const b of bays) {
+    for (const def of b.devices) registry.racks[b.key]!.group.add(buildDevice(def, b.key));
+  }
 
   root.updateMatrixWorld(true); // port anchors are read in world space below
 
-  const trayY = Math.max(specA.h, specB.h) / 1000 + 0.11;
-  root.add(buildTray(xA - specA.w / 2000 - 0.1, cpiX + 0.4, trayY));
+  const trayY = Math.max(...specs.map((s) => s.h)) / 1000 + 0.11;
+  const firstX = xOf.get(bays[0]!.key)!;
+  root.add(buildTray(firstX - specs[0]!.w / 2000 - 0.1, cpiX + 0.4, trayY));
 
-  // vertical manager channel: between the 19" rail and the side panel
-  const chanA = xA + specA.w / 2000 - 0.037;
-  const chanB = xB + specB.w / 2000 - 0.037;
+  // vertical manager channel per bay: between the 19" rail and the side panel
+  const chanOf = new Map<string, number>();
+  bays.forEach((b, i) => chanOf.set(b.key, xOf.get(b.key)! + specs[i]!.w / 2000 - 0.037));
 
   // Sort every run by the height of its endpoints first: the comb then reads as
   // a parallel fan (reference photos) instead of a cat's cradle of crossings.
   const rackOf = (id: string) => registry.devices[id]?.rackKey;
   const laneOrder = new Map<string, number>();
-  for (const key of ['A', 'B']) {
+  for (const b of bays) {
+    const key = b.key;
     const ys = opts.links
       .map((l, i) => ({
         i,
@@ -1574,13 +1604,15 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       .sort((p, q) => q.y - p.y);
     ys.forEach((o, n) => laneOrder.set(key + ':' + o.i, n));
   }
-  const laneCount: Record<string, number> = { A: 0, B: 0 };
+  const laneCount: Record<string, number> = {};
+  for (const b of bays) laneCount[b.key] = 0;
   const nextLane = (key: string) => {
     const n = laneCount[key] ?? 0;
     laneCount[key] = n + 1;
     return n;
   };
-  const bundleMedia: Record<string, string[]> = { A: [], B: [] };
+  const bundleMedia: Record<string, string[]> = {};
+  for (const b of bays) bundleMedia[b.key] = [];
   let crossIx = 0;
   for (const [i, l] of opts.links.entries()) {
     if (!registry.devices[l.a[0]] || !registry.devices[l.b[0]]) continue;
@@ -1589,8 +1621,8 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     if (!a || !b) continue;
     const ka = rackOf(l.a[0])!, kb = rackOf(l.b[0])!;
     const same = ka === kb;
-    const cA = ka === 'A' ? chanA : chanB;
-    const cB = kb === 'A' ? chanA : chanB;
+    const cA = chanOf.get(ka)!;
+    const cB = chanOf.get(kb)!;
     const kindOf = (id: string) => registry.devices[id]!.def.kind;
     const nearBy = Math.abs(a.y - b.y) <= U * 3.2;
     const panelHop = same && nearBy
@@ -1619,12 +1651,13 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     sprite.userData.keyRun = !same; // cross-rack runs are the ones worth naming
   }
 
-  for (const k of ['A', 'B']) buildBundle(registry.racks[k]!, bundleMedia[k]!);
+  for (const b of bays) buildBundle(registry.racks[b.key]!, bundleMedia[b.key]!);
 
-  // power cords: PDU → each server rear, A feed black / B feed red
-  for (const rackKey of ['A', 'B']) {
+  // power cords: PDU → each server rear, alternating feed A (black) / feed B (red)
+  for (const b of bays) {
+    const rackKey = b.key;
     const rack = registry.racks[rackKey]!;
-    const powered = opts.fitout[rackKey]!.filter((d) => d.kind === 'server' || d.kind === 'switch');
+    const powered = b.devices.filter((d) => d.kind === 'server' || d.kind === 'switch');
     powered.forEach((def, i) => {
       const d = registry.devices[def.id];
       if (!d) return;
@@ -1722,7 +1755,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   root.add(rear);
   const rim = new THREE.PointLight(0xbfe9ff, 0.9, 4.2, 2);
   rim.name = 'aisle-rim';
-  rim.position.set(chanA - 0.9, trayY - 0.7, 1.5);
+  rim.position.set(chanOf.get(bays[0]!.key)! - 0.9, trayY - 0.7, 1.5);
   root.add(rim);
 
   return { root, registry, trayY };

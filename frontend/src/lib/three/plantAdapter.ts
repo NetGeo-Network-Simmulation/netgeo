@@ -25,6 +25,7 @@ import {
   type DeviceKind,
   type LinkDef,
   type PortType,
+  type RackBay,
   type Registry,
 } from './rack3d';
 
@@ -184,25 +185,33 @@ function adaptRackDevices(
   return { devices, ordinals, ifaceByDevPort };
 }
 
+/** Every real rack in `topology` that belongs to `siteId` ('' / null bucket
+ *  for a rack with no site), in the topology's own order — the incremental-
+ *  reveal contract (Surya's spec): whatever the backend returns for the
+ *  currently viewed site, no more, no fewer, no manual A/B picking. */
+export function racksForSite(racks: Rack[], siteId: string | null): string[] {
+  return racks.filter((r) => (r.site_id ?? null) === siteId).map((r) => r.id);
+}
+
 /**
- * Build the two-bay scene input from a real project. `rackAId`/`rackBId`
- * pick which of the project's racks fill the two 3D bays (rack3d.ts only
- * lays out two side by side today — see report). Either may be null; a
- * missing rack renders as an empty bay with its default enclosure.
- * Returns null only when there is nothing to show at all.
+ * Build the N-bay scene input from a real project. `rackIds` is the
+ * left-to-right row of real racks to show (NG-PH3D P41: was a fixed
+ * rackAId/rackBId pair — rack3d.ts now lays out however many bays it's
+ * given). Unknown ids are dropped. Returns null when that resolves to zero
+ * real racks — the caller must not build a scene at all in that case (an
+ * empty `racks: []` would still draw the shared CPI cabinet prop).
  */
 export function adaptTopology(
   topology: Topology,
-  rackAId: string | null,
-  rackBId: string | null,
+  rackIds: string[],
   /** N4: caller's already-fetched /device-types list, keyed by id — resolves
    *  each node's `device_type_id` to real pack port data for its faceplate. */
   deviceTypesById?: Map<string, CatalogEntry>,
 ): (BuildOptions & { ifaceByDevPort: Map<string, string>; cableIds: string[] }) | null {
-  const racks = topology.racks ?? [];
-  const rackA = racks.find((r) => r.id === rackAId);
-  const rackB = racks.find((r) => r.id === rackBId);
-  if (!rackA && !rackB) return null;
+  const allRacks = topology.racks ?? [];
+  const rackById = new Map(allRacks.map((r) => [r.id, r]));
+  const shown = rackIds.map((id) => rackById.get(id)).filter((r): r is Rack => !!r);
+  if (shown.length === 0) return null;
 
   const nodes = topology.nodes ?? [];
   const nodeByIface = new Map<string, NodeModel>();
@@ -210,15 +219,14 @@ export function adaptTopology(
     for (const iface of node.interfaces ?? []) nodeByIface.set(iface.id, node);
   }
 
-  const fitout: Record<string, DeviceDef[]> = { A: [], B: [] };
+  const bays: RackBay[] = [];
   const ordinalsByIface = new Map<string, number>();
-  const devIdToSlot = new Map<string, string>();
+  const devIdToKey = new Map<string, string>();
   const ifaceByDevPort = new Map<string, string>();
-  for (const [slot, rack] of [['A', rackA], ['B', rackB]] as const) {
-    if (!rack) continue;
+  for (const rack of shown) {
     const { devices, ordinals, ifaceByDevPort: devPorts } = adaptRackDevices(rack, nodes, deviceTypesById);
-    fitout[slot] = devices;
-    for (const d of devices) devIdToSlot.set(d.id, slot);
+    bays.push({ key: rack.id, enclosure: rack.enclosure_profile ?? DEFAULT_ENCLOSURE, devices });
+    for (const d of devices) devIdToKey.set(d.id, rack.id);
     for (const [ifaceId, ordinal] of ordinals) ordinalsByIface.set(ifaceId, ordinal);
     for (const [key, ifaceId] of devPorts) ifaceByDevPort.set(key, ifaceId);
   }
@@ -236,7 +244,7 @@ export function adaptTopology(
     const aNode = nodeByIface.get(link.a_iface);
     const bNode = nodeByIface.get(link.b_iface);
     if (!aNode || !bNode) continue;
-    if (!devIdToSlot.has(aNode.id) || !devIdToSlot.has(bNode.id)) continue; // endpoint outside the two shown bays
+    if (!devIdToKey.has(aNode.id) || !devIdToKey.has(bNode.id)) continue; // endpoint outside the shown bays
     const aOrd = ordinalsByIface.get(link.a_iface);
     const bOrd = ordinalsByIface.get(link.b_iface);
     if (aOrd === undefined || bOrd === undefined) continue; // interface has no cable-able front port
@@ -249,14 +257,7 @@ export function adaptTopology(
     cableIds.push(cable.id);
   }
 
-  return {
-    rackA: rackA?.enclosure_profile ?? DEFAULT_ENCLOSURE,
-    rackB: rackB?.enclosure_profile ?? DEFAULT_ENCLOSURE,
-    fitout,
-    links,
-    ifaceByDevPort,
-    cableIds,
-  };
+  return { racks: bays, links, ifaceByDevPort, cableIds };
 }
 
 export const ENCLOSURE_KEYS = Object.keys(RACK_SPECS);

@@ -84,17 +84,15 @@ function assertNoIntersections(built: ReturnType<typeof buildScene>, samplesPerC
 describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
   it('same-rack: mixed near (patch jumper) and far (full channel) runs, top-exit enclosure, doors closed', () => {
     const opts: BuildOptions = {
-      rackA: 'apc', // top exit
-      rackB: 'apc',
-      fitout: {
-        A: [
+      racks: [
+        { key: 'A', enclosure: 'apc', devices: [ // top exit
           dev('a-patch', 1, 1, 'patch', 24, 'rj45'),
           dev('a-sw1', 2, 1, 'switch', 24, 'rj45'),
           dev('a-sw2', 20, 1, 'switch', 12, 'sfp28'),
           dev('a-srv', 40, 2, 'server', 4, 'sfp28'),
-        ],
-        B: [],
-      },
+        ] },
+        { key: 'B', enclosure: 'apc', devices: [] },
+      ],
       links: [
         link(['a-patch', 0], ['a-sw1', 0]), // near — panel-hop jumper path
         link(['a-sw1', 5], ['a-sw2', 0]), // far — full vertical channel run
@@ -123,12 +121,10 @@ describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
   // rather than deleted so the repro isn't lost — see docs/qa/plant-3d-qa-2026-08-29.md.
   it.skip('cross-rack: mixed exit kinds (side + rear) force a tray climb on both ends', () => {
     const opts: BuildOptions = {
-      rackA: 'vertiv', // side exit
-      rackB: 'hpe', // rear exit
-      fitout: {
-        A: [dev('a-fw', 1, 1, 'fw', 8, 'rj45'), dev('a-sw', 30, 1, 'switch', 24, 'rj45')],
-        B: [dev('b-olt', 1, 2, 'olt', 8, 'pon'), dev('b-sw', 41, 1, 'switch', 24, 'rj45')],
-      },
+      racks: [
+        { key: 'A', enclosure: 'vertiv', devices: [dev('a-fw', 1, 1, 'fw', 8, 'rj45'), dev('a-sw', 30, 1, 'switch', 24, 'rj45')] }, // side exit
+        { key: 'B', enclosure: 'hpe', devices: [dev('b-olt', 1, 2, 'olt', 8, 'pon'), dev('b-sw', 41, 1, 'switch', 24, 'rj45')] }, // rear exit
+      ],
       links: [
         link(['a-sw', 2], ['b-sw', 4], 'om3'),
         link(['a-fw', 1], ['b-olt', 0], 'os2'),
@@ -147,17 +143,15 @@ describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
 
   it('dense adjacent placement (1U gaps) at rack extremes (U1 and top U), side-exit enclosure', () => {
     const opts: BuildOptions = {
-      rackA: 'eaton', // side exit
-      rackB: 'eaton',
-      fitout: {
-        A: [
+      racks: [
+        { key: 'A', enclosure: 'eaton', devices: [ // side exit
           dev('a-1', 1, 1, 'switch', 24, 'rj45'),
           dev('a-2', 2, 1, 'switch', 24, 'rj45'),
           dev('a-3', 3, 1, 'switch', 24, 'rj45'),
           dev('a-top', 41, 1, 'switch', 24, 'rj45'), // eaton is 42U
-        ],
-        B: [dev('b-1', 1, 1, 'switch', 24, 'rj45'), dev('b-top', 41, 1, 'switch', 24, 'rj45')],
-      },
+        ] },
+        { key: 'B', enclosure: 'eaton', devices: [dev('b-1', 1, 1, 'switch', 24, 'rj45'), dev('b-top', 41, 1, 'switch', 24, 'rj45')] },
+      ],
       links: [
         link(['a-1', 0], ['a-2', 0]), // adjacent same-rack, tight lane spacing
         link(['a-2', 1], ['a-3', 1]),
@@ -178,16 +172,14 @@ describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
 
   it('rear-exit enclosure (cpi has no door, hpe has a rear gland plate) with a duct + odf mix', () => {
     const opts: BuildOptions = {
-      rackA: 'hpe', // rear exit, has a door
-      rackB: 'cpi', // side exit, no door — buildScene always adds a 3rd cpi rack too
-      fitout: {
-        A: [
+      racks: [
+        { key: 'A', enclosure: 'hpe', devices: [ // rear exit, has a door
           dev('a-odf', 1, 1, 'odf', 24, 'lc'),
           dev('a-duct', 2, 1, 'duct', 0),
           dev('a-sw', 3, 1, 'switch', 24, 'rj45'),
-        ],
-        B: [dev('b-sw', 5, 1, 'switch', 12, 'qsfp28')],
-      },
+        ] },
+        { key: 'B', enclosure: 'cpi', devices: [dev('b-sw', 5, 1, 'switch', 12, 'qsfp28')] }, // side exit, no door — buildScene always adds a 3rd cpi rack too
+      ],
       links: [
         link(['a-odf', 0], ['a-sw', 0], 'os2'), // panel-hop: odf counts as a hop kind
         link(['a-sw', 8], ['b-sw', 2], 'om4'),
@@ -229,8 +221,7 @@ describe('per-SKU port geometry (NG-PH3D P5)', () => {
     };
     const genericFallback = dev('sw-generic', 3, 1, 'switch', 4, 'rj45');
     const opts: BuildOptions = {
-      rackA: 'apc', rackB: 'apc',
-      fitout: { A: [realSku, genericFallback], B: [] },
+      racks: [{ key: 'A', enclosure: 'apc', devices: [realSku, genericFallback] }, { key: 'B', enclosure: 'apc', devices: [] }],
       links: [],
     };
     const built = buildScene(opts);
@@ -250,7 +241,7 @@ describe('per-SKU port geometry (NG-PH3D P5)', () => {
 
   it('chassis body is narrower than the 482.6mm faceplate (437mm derived body width, §1.2.1)', () => {
     const d = dev('sw-1', 1, 1, 'switch', 24, 'rj45');
-    const opts: BuildOptions = { rackA: 'apc', rackB: 'apc', fitout: { A: [d], B: [] }, links: [] };
+    const opts: BuildOptions = { racks: [{ key: 'A', enclosure: 'apc', devices: [d] }, { key: 'B', enclosure: 'apc', devices: [] }], links: [] };
     const built = buildScene(opts);
     try {
       const group = built.registry.devices['sw-1']!.group;
@@ -274,7 +265,7 @@ describe('per-SKU port geometry (NG-PH3D P5)', () => {
       id: 'sw-generic', u: 1, h: 1, kind: 'switch', brand: 'NetGeo', model: 'Generic Switch',
       accent: 0x847e75, chassis: 0x1c1c1a, ports: 4, ptype: 'rj45', generic: true,
     };
-    const opts: BuildOptions = { rackA: 'apc', rackB: 'apc', fitout: { A: [d], B: [] }, links: [] };
+    const opts: BuildOptions = { racks: [{ key: 'A', enclosure: 'apc', devices: [d] }, { key: 'B', enclosure: 'apc', devices: [] }], links: [] };
     expect(() => {
       const built = buildScene(opts);
       disposeScene(built);
