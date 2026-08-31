@@ -15,16 +15,18 @@
  * add a dependency and buy nothing — React owns the chrome, three owns the
  * canvas.
  *
- * rack3d.ts only lays out two rack bays side by side (registry keys 'A'/'B').
- * This panel now fills those two bays with the project's *real* racks
- * (chosen from a dropdown) instead of a fixed sample fit-out; a project with
- * more than two racks can view any pair, not all of them at once — full
- * N-rack layout is bigger than a data-binding slice (see docs/design/22).
+ * rack3d.ts lays out however many real bays it's given, left to right
+ * (NG-PH3D P41 — was a fixed A/B pair, see report). Which bays those are is
+ * driven entirely by the site selector below: this panel shows *every* rack
+ * belonging to the selected site, nothing else — zero racks in that site
+ * draws zero enclosures (WorkspaceEmptyState instead), and switching site
+ * swaps the whole row for that site's racks. No manual per-rack picking.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, DoorClosed, Move, Plus, Server, Tag, Zap } from 'lucide-react';
 import * as THREE from 'three';
+import type { Rack } from '@/api/types';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiError } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
@@ -37,6 +39,7 @@ import {
   cableMediaForVisual,
   DEFAULT_ENCLOSURE,
   ENCLOSURE_KEYS,
+  racksForSite,
 } from '@/lib/three/plantAdapter';
 import {
   applyDoors,
@@ -49,12 +52,13 @@ import {
   mediaFor,
   stockLength,
   tick,
+  CPI_KEY,
   MEDIA,
   RACK_SPECS,
   U,
   type BuiltScene,
-  type DeviceDef,
   type LinkDef,
+  type RackBay,
 } from '@/lib/three/rack3d';
 
 /** Feature-detect before ever touching THREE.WebGLRenderer — a browser with
@@ -75,7 +79,7 @@ function webglAvailable(): boolean {
 // fixed physical distance from the rack; `span` (the frustum half-height
 // input to spanFor()) is what "scale" means here.
 const POV = { az: (7 * Math.PI) / 180, elev: (4 * Math.PI) / 180, span: 1.4, dist: 14 };
-const EMPTY_FITOUT: Record<string, DeviceDef[]> = { A: [], B: [] };
+const EMPTY_BAYS: RackBay[] = [];
 const EMPTY_LINKS: LinkDef[] = [];
 
 /** Selectable rack heights (10U–48U) — moved here from the deleted 2D panel,
@@ -84,7 +88,6 @@ const RACK_SIZES = [10, 12, 18, 24, 36, 42, 48];
 
 type Mode = 'cable' | 'adddev' | null;
 type Face = 'front' | 'back';
-type Slot = 'A' | 'B';
 
 export function Rack3DElevationPanel() {
   const projectId = useUiStore((s) => s.projectId);
@@ -95,14 +98,15 @@ export function Rack3DElevationPanel() {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   // mutable view state the render loop reads every frame — deliberately not
   // React state: a 60 fps camera must not re-render the component tree.
-  const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: 'A' as Slot });
-  // Real per-bay rack height in metres, from the backend's `ru_height` — NOT
-  // the enclosure mesh's height (RACK_SPECS is a fixed 42U shell regardless
-  // of the real rack). Camera framing (spanFor/placeCamera) reads this so
-  // devices near the bottom of a real short rack aren't centred as if the
-  // rack were always 42U tall. Kept in a ref (mirrors the render-loop-facing
-  // refs below) so spanFor/placeCamera stay referentially stable.
-  const rackHeightRef = useRef<{ A: number; B: number }>({ A: 42 * U, B: 42 * U });
+  const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: '' });
+  // Real per-bay rack height in metres, keyed by rack id, from the backend's
+  // `ru_height` — NOT the enclosure mesh's height (RACK_SPECS is a fixed
+  // 42U shell regardless of the real rack). Camera framing (spanFor/
+  // placeCamera) reads this so devices near the bottom of a real short rack
+  // aren't centred as if the rack were always 42U tall. Kept in a ref
+  // (mirrors the render-loop-facing refs below) so spanFor/placeCamera stay
+  // referentially stable across however many bays are shown (NG-PH3D P41).
+  const rackHeightRef = useRef<Record<string, number>>({});
   // Computed once — WebGL support doesn't change mid-session. Also re-checked
   // defensively at renderer construction (below) in case detection passes
   // but the real context still fails to init.
@@ -153,33 +157,44 @@ export function Rack3DElevationPanel() {
   const racks = topoQ.data?.racks ?? [];
   const sites = topoQ.data?.sites ?? [];
 
-  // Which two real racks fill the scene's two bays.
-  const [rackAId, setRackAId] = useState<string | null>(null);
-  const [rackBId, setRackBId] = useState<string | null>(null);
+  // Which site's racks fill the scene — every rack belonging to it, in
+  // topology order, no manual per-rack picking (permintaan Surya: the
+  // display is exactly "the racks that exist in this site", nothing more).
+  // '' is the "(no site)" bucket, matching the create-rack dropdown below.
+  const [viewSiteId, setViewSiteId] = useState('');
   useEffect(() => {
-    if (racks.length === 0) {
-      setRackAId(null);
-      setRackBId(null);
-      return;
-    }
-    setRackAId((cur) => (cur && racks.some((r) => r.id === cur) ? cur : (racks[0]?.id ?? null)));
-    setRackBId((cur) => (cur && racks.some((r) => r.id === cur) ? cur : (racks[1]?.id ?? null)));
+    setViewSiteId((cur) => (sites.some((s) => s.id === cur) ? cur : (sites[0]?.id ?? '')));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, racks.map((r) => r.id).join(',')]);
+  }, [projectId, sites.map((s) => s.id).join(',')]);
 
-  const rackA = racks.find((r) => r.id === rackAId) ?? null;
-  const rackB = racks.find((r) => r.id === rackBId) ?? null;
+  const viewRackIds = useMemo(
+    () => racksForSite(racks, viewSiteId || null),
+    [racks, viewSiteId],
+  );
+  const viewRacks = useMemo(
+    () => viewRackIds.map((id) => racks.find((r) => r.id === id)).filter((r): r is Rack => !!r),
+    [viewRackIds, racks],
+  );
+  // Rack-name disambiguation for the move-device dropdown below (QA 2026-08-31
+  // defect: two racks named e.g. "QA-Rack-1" were indistinguishable in that
+  // list). Only racks whose name collides with another rack's get the
+  // site-name suffix — an unambiguous name stays plain.
+  const siteNameById = useMemo(() => new Map(sites.map((s) => [s.id, s.name])), [sites]);
+  const rackLabel = useCallback((r: Rack) => {
+    const dupe = racks.filter((x) => x.name === r.name).length > 1;
+    if (!dupe) return r.name;
+    const siteName = r.site_id ? siteNameById.get(r.site_id) : undefined;
+    return `${r.name} · ${siteName ?? r.id.slice(0, 6)}`;
+  }, [racks, siteNameById]);
   const adapted = useMemo(
-    () => (topoQ.data ? adaptTopology(topoQ.data, rackAId, rackBId, deviceTypesById) : null),
-    [topoQ.data, rackAId, rackBId, deviceTypesById],
+    () => (topoQ.data ? adaptTopology(topoQ.data, viewRackIds, deviceTypesById) : null),
+    [topoQ.data, viewRackIds, deviceTypesById],
   );
 
   // Cable Mode / Add-device / move all write straight to the backend (P2) —
   // the scene shows exactly `adapted`, nothing session-only layered on top.
-  const fitout = adapted?.fitout ?? EMPTY_FITOUT;
+  const bays = adapted?.racks ?? EMPTY_BAYS;
   const links = adapted?.links ?? EMPTY_LINKS;
-  const rackASpec = adapted?.rackA ?? DEFAULT_ENCLOSURE;
-  const rackBSpec = adapted?.rackB ?? DEFAULT_ENCLOSURE;
 
   // NG-PH3D P3: shared helpers with the old 2D panel's rollups (deleted;
   // these numbers used to need to agree between the two views).
@@ -188,15 +203,14 @@ export function Rack3DElevationPanel() {
     () => overLengthCables(topoQ.data?.cables ?? [], plantQ.data?.links),
     [topoQ.data, plantQ.data],
   );
-  // Power/heat for exactly the devices in the two bays actually on screen —
-  // the 2D panel rolls this up per site; comparing the same two racks' watts
-  // in both views is the apples-to-apples check (see QA doc).
+  // Power/heat for exactly the devices in the bays actually on screen — the
+  // 2D panel rolls this up per site; comparing the same racks' watts in both
+  // views is the apples-to-apples check (see QA doc).
   const shownWatts = useMemo(() => {
-    const nodes = (topoQ.data?.nodes ?? []).filter(
-      (n) => n.rack_id === rackAId || n.rack_id === rackBId,
-    );
+    const shown = new Set(viewRackIds);
+    const nodes = (topoQ.data?.nodes ?? []).filter((n) => n.rack_id != null && shown.has(n.rack_id));
     return nodes.reduce((sum, n) => sum + nodeWatts(n, wattsByIcon), 0);
-  }, [topoQ.data, rackAId, rackBId, wattsByIcon]);
+  }, [topoQ.data, viewRackIds, wattsByIcon]);
 
   // Create-rack controls — moved here from the deleted 2D elevation panel,
   // the only place a rack could be created before this (see slice notes).
@@ -238,9 +252,14 @@ export function Rack3DElevationPanel() {
   const createRack = useMutation({
     mutationFn: (v: { name: string; siteId: string | null; ruHeight: number }) =>
       physicalApi.createRack({ project_id: projectId!, name: v.name, site_id: v.siteId, ru_height: v.ruHeight }),
-    onSuccess: () => {
+    onSuccess: (_data, v) => {
       setNewRackName('');
       setError(null);
+      // Show whichever site the new rack landed in — permintaan Surya: a
+      // rack created for a different site than the one on screen resets the
+      // view to that (now one-rack) site instead of leaving the new rack
+      // invisible off in another site's row.
+      setViewSiteId(v.siteId ?? '');
       invalidate();
     },
     onError: (e) => setError((e as unknown as ApiError).message || 'Failed to create rack.'),
@@ -303,11 +322,26 @@ export function Rack3DElevationPanel() {
     onError: (e) => setError((e as unknown as ApiError).message || 'Gagal memindahkan perangkat.'),
   });
 
-  /** Half-height the shot needs: the taller of the two real racks (backend
-   *  ru_height, not the fixed-42U enclosure mesh) plus tray headroom. */
+  /** Frustum half-height the shot needs: the tallest shown rack (backend
+   *  ru_height, not the fixed-42U enclosure mesh) plus tray headroom — or,
+   *  unzoomed with more than one bay, whatever's larger between that and
+   *  the half-width the full row needs (NG-PH3D P41: a 2-bay shot was
+   *  always narrow enough that only height mattered; an N-bay row can now
+   *  be the wider constraint). Zoomed work-mode frames one bay, so the
+   *  row's total width is irrelevant then. */
   const spanFor = useCallback((scale: number, zoomed: boolean) => {
-    const top = Math.max(rackHeightRef.current.A, rackHeightRef.current.B) + 0.3;
-    return ((top + 0.08) / 2 / Math.max(0.2, scale)) * (zoomed ? 0.42 : 1);
+    const heights = Object.values(rackHeightRef.current);
+    const top = (heights.length ? Math.max(...heights) : 42 * U) + 0.3;
+    const heightSpan = (top + 0.08) / 2;
+    const host = hostRef.current;
+    const aspect = host ? (host.clientWidth || 1) / (host.clientHeight || 1) : 16 / 9;
+    const rowWidthM = builtRef.current?.rowWidthM ?? 0;
+    // +1.2m: generous headroom for the cable tray overhang and the always-
+    // present CPI cabinet past the last real rack, neither counted in
+    // rowWidthM (see rack3d.ts's own comment on the field).
+    const widthSpan = !zoomed && rowWidthM > 0 ? (rowWidthM + 1.2) / 2 / aspect : 0;
+    const span = Math.max(heightSpan, widthSpan);
+    return (span / Math.max(0.2, scale)) * (zoomed ? 0.42 : 1);
   }, []);
 
   const fitCamera = useCallback(() => {
@@ -328,21 +362,31 @@ export function Rack3DElevationPanel() {
     if (builtRef.current) applyLod(builtRef.current.registry, span);
   }, [spanFor]);
 
-  /** Place the ortho camera on the fixed 2.5D POV. az is the only thing that turns. */
+  /** Place the ortho camera on the fixed 2.5D POV. az is the only thing that
+   *  turns. Works for any number of real bays (NG-PH3D P41) — the old fixed
+   *  A/B version required *both* named bays to exist and silently left the
+   *  camera stuck wherever it last was otherwise (Surya's QA: picking the
+   *  same rack into both slots, or leaving one empty, froze the camera with
+   *  no error). Framing a real row of any size instead of two named slots
+   *  makes that state unrepresentable. */
   const placeCamera = useCallback((az = view.current.az) => {
     const cam = camRef.current, built = builtRef.current;
     if (!cam || !built) return;
-    const a = built.registry.racks.A, b = built.registry.racks.B;
-    if (!a || !b) return;
-    const focus = view.current.zoomed ? built.registry.racks[view.current.focusRack] : null;
-    const cx = (focus ? focus.x : (a.x + b.x) / 2) + 0.12;
+    const keys = Object.keys(built.registry.racks).filter((k) => k !== CPI_KEY);
+    if (keys.length === 0) return; // nothing real built (shouldn't happen — buildScene only runs for >=1 bay)
+    const entries = keys.map((k) => built.registry.racks[k]!);
+    const focusKey = view.current.zoomed && built.registry.racks[view.current.focusRack] ? view.current.focusRack : null;
+    const focus = focusKey ? built.registry.racks[focusKey]! : null;
+    const minX = Math.min(...entries.map((r) => r.x));
+    const maxX = Math.max(...entries.map((r) => r.x));
+    const cx = (focus ? focus.x : (minX + maxX) / 2) + 0.12;
     // Look-at height comes from the real backend ru_height per bay (P41,
-    // see rackHeightRef), not focus.h/a.h/b.h — those are the enclosure
-    // mesh's fixed 42U height regardless of the rack's actual size, which
-    // used to pin the look-at near the top of a 42U shell no matter how
-    // short the real rack was, burying low-RU devices off-frame.
-    const focusKey = view.current.zoomed ? view.current.focusRack : null;
-    const cy = (focusKey ? rackHeightRef.current[focusKey] : Math.max(rackHeightRef.current.A, rackHeightRef.current.B)) * 0.46;
+    // see rackHeightRef), not focus.h — that's the enclosure mesh's fixed
+    // 42U height regardless of the rack's actual size, which used to pin
+    // the look-at near the top of a 42U shell no matter how short the real
+    // rack was, burying low-RU devices off-frame.
+    const heights = Object.values(rackHeightRef.current);
+    const cy = (focusKey ? (rackHeightRef.current[focusKey] ?? 42 * U) : (heights.length ? Math.max(...heights) : 42 * U)) * 0.46;
     const d = POV.dist, el = POV.elev;
     cam.position.set(
       cx + Math.sin(az) * Math.cos(el) * d,
@@ -432,8 +476,11 @@ export function Rack3DElevationPanel() {
     if (!scene) return;
     if (builtRef.current) disposeScene(builtRef.current);
     builtRef.current = null;
-    if (adapted) {
-      const built = buildScene({ rackA: rackASpec, rackB: rackBSpec, fitout, links });
+    // adapted === null means zero real racks resolved for the current site
+    // (NG-PH3D P41: 0 racks -> 0 enclosures, no scene at all — not the old
+    // fixed-2-bay build that always drew a DEFAULT_ENCLOSURE ghost).
+    if (adapted && adapted.racks.length > 0) {
+      const built = buildScene({ racks: adapted.racks, links });
       scene.add(built.root);
       builtRef.current = built;
       applyDoors(built.registry, view.current.doors);
@@ -442,8 +489,8 @@ export function Rack3DElevationPanel() {
 
       // NG-PH3D P3 §5: a device just placed/moved from this panel — its
       // cables' stored length_m predates the new geometry. Recompute only
-      // the ones this rebuild can actually see (both ends in the two shown
-      // bays); the rest is the documented two-bay-view gap, not a new bug.
+      // the ones this rebuild can actually see (both ends in the shown
+      // bays); the rest is the documented shown-bays-only gap, not a new bug.
       const movedId = justMovedNodeId.current;
       justMovedNodeId.current = null;
       if (movedId) {
@@ -458,7 +505,7 @@ export function Rack3DElevationPanel() {
     fitCamera();
     placeCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapted, rackASpec, rackBSpec, fitout, links, fitCamera, placeCamera, assetsLoaded]);
+  }, [adapted, links, fitCamera, placeCamera, assetsLoaded]);
 
   /* ─── toggles: mirror React state into the scene ───────────────────────── */
   useEffect(() => {
@@ -485,13 +532,13 @@ export function Rack3DElevationPanel() {
 
   /* ─── real rack heights: keep the camera-framing ref in sync ───────────── */
   useEffect(() => {
-    rackHeightRef.current = {
-      A: (rackA?.ru_height || 42) * U,
-      B: (rackB?.ru_height || 42) * U,
-    };
+    const map: Record<string, number> = {};
+    for (const r of viewRacks) map[r.id] = (r.ru_height || 42) * U;
+    rackHeightRef.current = map;
     fitCamera();
     placeCamera();
-  }, [rackA?.ru_height, rackB?.ru_height, fitCamera, placeCamera]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewRacks.map((r) => `${r.id}:${r.ru_height}`).join(','), fitCamera, placeCamera]);
 
   /* ─── face flip: az is the only thing about the fixed POV that turns ──── */
   useEffect(() => {
@@ -506,7 +553,7 @@ export function Rack3DElevationPanel() {
     if (view.current.zoomed === on) return;
     const from = spanFor(POV.span, view.current.zoomed);
     view.current.zoomed = on;
-    view.current.focusRack = ((sel && builtRef.current?.registry.devices[sel]?.rackKey) || 'A') as Slot;
+    view.current.focusRack = (sel && builtRef.current?.registry.devices[sel]?.rackKey) || bays[0]?.key || '';
     const to = spanFor(POV.span, on);
     const t0 = performance.now();
     const step = () => {
@@ -587,27 +634,26 @@ export function Rack3DElevationPanel() {
   }, [pick, adapted, createPatch]);
 
   /** Add device: click a free U on a rack, get a 1U switch there
-   *  (NG-PH3D P2: POST /nodes + PATCH placement). */
-  const handleAddDevice = useCallback((rackKey: Slot, y: number) => {
+   *  (NG-PH3D P2: POST /nodes + PATCH placement). `rackKey` is the real
+   *  backend rack id — every shown bay is a real rack now, so unlike the
+   *  old A/B slots there's no "empty bay" case left to guard against. */
+  const handleAddDevice = useCallback((rackKey: string, y: number) => {
     const built = builtRef.current;
     const rack = built?.registry.racks[rackKey];
-    const realRack = rackKey === 'A' ? rackA : rackB;
-    if (!rack || !realRack) {
-      setStatus('Pilih rak nyata untuk bay itu dulu');
-      return;
-    }
+    const bay = bays.find((b) => b.key === rackKey);
+    if (!rack || !bay) return;
     const u = Math.floor((y - 0.055) / U) + 1;
     if (u < 1 || u > rack.spec.u) {
       setStatus('Di luar rail — pilih U yang kosong');
       return;
     }
-    if (fitout[rackKey]!.some((d) => u >= d.u && u < d.u + d.h)) {
+    if (bay.devices.some((d) => u >= d.u && u < d.u + d.h)) {
       setStatus(`U${u} sudah terisi — pilih U yang kosong`);
       return;
     }
-    setStatus(`Menambahkan perangkat di U${u} rak ${rackKey}…`);
-    addDevice.mutate({ rackId: realRack.id, ruStart: u });
-  }, [fitout, rackA, rackB, addDevice]);
+    setStatus(`Menambahkan perangkat di U${u}…`);
+    addDevice.mutate({ rackId: rackKey, ruStart: u });
+  }, [bays, addDevice]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -651,10 +697,9 @@ export function Rack3DElevationPanel() {
       if (mode === 'adddev') {
         const any = hits[0];
         if (!any) return;
-        let best: Slot | null = null, bd = Infinity;
-        for (const k of ['A', 'B'] as const) {
-          const rk = built.registry.racks[k];
-          if (!rk) continue;
+        let best: string | null = null, bd = Infinity;
+        for (const [k, rk] of Object.entries(built.registry.racks)) {
+          if (k === CPI_KEY) continue; // decorative prop, not a real rack — never a valid add-device target
           const dx = Math.abs(any.point.x - rk.x);
           if (dx < bd) { bd = dx; best = k; }
         }
@@ -679,45 +724,31 @@ export function Rack3DElevationPanel() {
     });
   };
 
-  const deviceCount = Object.values(fitout).reduce((n, l) => n + l.length, 0);
+  const deviceCount = bays.reduce((n, b) => n + b.devices.length, 0);
   const btn = (on: boolean) =>
     `flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition ${
       on ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-recess hover:bg-fg/5 hover:text-fg'
     }`;
 
-  const slotPicker = (slot: Slot) => {
-    const rackId = slot === 'A' ? rackAId : rackBId;
-    const setRackId = slot === 'A' ? setRackAId : setRackBId;
-    const rack = slot === 'A' ? rackA : rackB;
-    return (
-      <div key={slot} className="flex flex-wrap items-center gap-1">
-        <label className="flex min-w-0 items-center gap-1.5 text-xs text-recess">
-          {slot}
-          <select
-            value={rackId ?? ''}
-            onChange={(e) => setRackId(e.target.value || null)}
-            className="w-24 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
-          >
-            <option value="">— kosong —</option>
-            {racks.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
-            ))}
-          </select>
-        </label>
-        <select
-          value={rack?.enclosure_profile ?? DEFAULT_ENCLOSURE}
-          disabled={!rack}
-          onChange={(e) => rack && updateEnclosure.mutate({ rackId: rack.id, profile: e.target.value })}
-          className="w-28 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50 disabled:opacity-40"
-          title="Profil enclosure"
-        >
-          {ENCLOSURE_KEYS.filter((k) => k !== 'cpi' || rack?.enclosure_profile === 'cpi').map((k) => (
-            <option key={k} value={k}>{RACK_SPECS[k]!.label.replace(/ \d+U.*/, '')}</option>
-          ))}
-        </select>
-      </div>
-    );
-  };
+  /** Per-rack enclosure-profile picker, one per bay actually shown — replaces
+   *  the old fixed two-slot A/B picker (NG-PH3D P41: which racks are shown
+   *  is automatic now, driven by the site selector, not manually chosen
+   *  here; this control only still lets you change *how a shown rack looks*). */
+  const rackChip = (rack: Rack) => (
+    <label key={rack.id} className="flex min-w-0 items-center gap-1.5 text-xs text-recess">
+      <span className="max-w-[7rem] truncate text-fg" title={rack.name}>{rack.name}</span>
+      <select
+        value={rack.enclosure_profile ?? DEFAULT_ENCLOSURE}
+        onChange={(e) => updateEnclosure.mutate({ rackId: rack.id, profile: e.target.value })}
+        className="w-28 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
+        title="Profil enclosure"
+      >
+        {ENCLOSURE_KEYS.filter((k) => k !== 'cpi' || rack.enclosure_profile === 'cpi').map((k) => (
+          <option key={k} value={k}>{RACK_SPECS[k]!.label.replace(/ \d+U.*/, '')}</option>
+        ))}
+      </select>
+    </label>
+  );
 
   // NG-PH3D P4: no WebGL, no scene — a black/blank canvas here would look
   // like a crash. Say so plainly (there is no 2D fallback panel anymore).
@@ -801,8 +832,23 @@ export function Rack3DElevationPanel() {
           <Plus className="size-3.5" /> Rack
         </button>
         <div className="mx-1 h-5 w-px bg-fg/10" />
-        {slotPicker('A')}
-        {slotPicker('B')}
+        {/* Site being viewed — every rack in it renders, no manual per-rack
+            picking (permintaan Surya). Switching this is what "resets to 0"
+            and then shows only the new site's racks. */}
+        <label className="flex min-w-0 items-center gap-1.5 text-xs text-recess">
+          Site
+          <select
+            aria-label="Site ditampilkan"
+            value={viewSiteId}
+            onChange={(e) => setViewSiteId(e.target.value)}
+            className="w-28 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
+          >
+            <option value="">(no site)</option>
+            {sites.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+        </label>
         <div className="mx-1 h-5 w-px bg-fg/10" />
         <button type="button" className={btn(face === 'front')} onClick={() => setFace('front')}>Depan</button>
         <button type="button" className={btn(face === 'back')} onClick={() => setFace('back')}>Belakang</button>
@@ -824,6 +870,14 @@ export function Rack3DElevationPanel() {
           <Plus className="size-3.5" /> Tambah perangkat
         </button>
       </div>
+
+      {/* Per-rack enclosure profile, one chip per rack actually shown —
+          replaces the old fixed two-slot A/B picker row. */}
+      {viewRacks.length > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-fg/10 px-3 py-1.5">
+          {viewRacks.map((r) => rackChip(r))}
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400">
@@ -893,7 +947,7 @@ export function Rack3DElevationPanel() {
           >
             <option value="">— pilih rak —</option>
             {racks.map((r) => (
-              <option key={r.id} value={r.id}>{r.name}</option>
+              <option key={r.id} value={r.id}>{rackLabel(r)}</option>
             ))}
           </select>
           <label className="flex items-center gap-1 text-recess">
@@ -921,11 +975,13 @@ export function Rack3DElevationPanel() {
 
       {/* canvas */}
       <div ref={hostRef} className="relative min-h-0 flex-1">
-        {topoQ.isSuccess && racks.length === 0 && (
+        {topoQ.isSuccess && viewRackIds.length === 0 && (
           <WorkspaceEmptyState
             icon={Server}
             title="No racks yet"
-            hint="Create a rack using the toolbar above — placed devices render as RU-accurate 3D blocks."
+            hint={racks.length > 0
+              ? 'This site has no racks yet — create one above, or switch Site to see another one’s racks.'
+              : 'Create a rack using the toolbar above — placed devices render as RU-accurate 3D blocks.'}
           />
         )}
       </div>
