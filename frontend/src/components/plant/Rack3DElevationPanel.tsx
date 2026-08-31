@@ -37,9 +37,12 @@ import {
   adaptTopology,
   cableLengthUpdatesForNode,
   cableMediaForVisual,
+  canPlaceDevice,
   DEFAULT_ENCLOSURE,
+  dropDecision,
   ENCLOSURE_KEYS,
   racksForSite,
+  resolveDropTarget,
 } from '@/lib/three/plantAdapter';
 import {
   applyDoors,
@@ -229,15 +232,6 @@ export function Rack3DElevationPanel() {
     () => (sel ? (topoQ.data?.nodes ?? []).find((n) => n.id === sel) ?? null : null),
     [sel, topoQ.data],
   );
-  const [moveRackId, setMoveRackId] = useState('');
-  const [moveRu, setMoveRu] = useState(1);
-  useEffect(() => {
-    setMoveRackId(selNode?.rack_id ?? '');
-    setMoveRu(selNode?.ru_start ?? 1);
-    // Only re-seed on an actual selection/placement change, not every
-    // background refetch of an unrelated node (would clobber a pending edit).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sel, selNode?.rack_id, selNode?.ru_start]);
   const [pick, setPick] = useState<{ devId: string; portIx: number } | null>(null);
   const [status, setStatus] = useState('Klik perangkat di scene');
   const [error, setError] = useState<string | null>(null);
@@ -321,6 +315,32 @@ export function Rack3DElevationPanel() {
     },
     onError: (e) => setError((e as unknown as ApiError).message || 'Gagal memindahkan perangkat.'),
   });
+
+  // "Latest" ref (permintaan Surya, slice C: drag straight in the 3D view,
+  // no more 2D elevation mode) — the pointer handlers below are attached
+  // once and read this every event instead of being re-subscribed whenever
+  // `bays`/`viewRacks` change, so a background refetch mid-drag can never
+  // tear down the listener between pointerdown and pointerup.
+  const dragCtxRef = useRef({ bays, viewRacks, moveDevice, rackLabel });
+  dragCtxRef.current = { bays, viewRacks, moveDevice, rackLabel };
+  const currentSelNode = useRef(selNode);
+  currentSelNode.current = selNode;
+
+  /** In-flight drag gesture (pointerdown on a placed device through
+   *  pointerup/Escape) — a ref, not state: it's read every pointermove and
+   *  must never trigger a re-render. `ghost` is the translucent preview box
+   *  showing the candidate slot; null until the pointer has actually moved
+   *  past the click threshold (so a plain click never grows one). */
+  const dragRef = useRef<{
+    devId: string;
+    span: number;
+    origin: { rackKey: string; ru: number };
+    startX: number;
+    startY: number;
+    moved: boolean;
+    ghost: THREE.Mesh | null;
+    target: { rackKey: string; ru: number } | null;
+  } | null>(null);
 
   /** Frustum half-height the shot needs: the tallest shown rack (backend
    *  ru_height, not the fixed-42U enclosure mesh) plus tray headroom — or,
@@ -657,9 +677,10 @@ export function Rack3DElevationPanel() {
 
   useEffect(() => {
     const renderer = rendererRef.current;
+    const scene = (renderer as unknown as { _sceneRef?: THREE.Scene } | null)?._sceneRef;
     const canvas = renderer?.domElement;
     const cam = camRef.current;
-    if (!canvas || !cam) return;
+    if (!canvas || !cam || !scene) return;
     const ray = new THREE.Raycaster();
     // NG-PH3D 3b: an instanced SFP/QSFP cage carries no per-port mesh (one
     // InstancedMesh for every cage in the scene) — its dev/port map rides
@@ -675,16 +696,124 @@ export function Rack3DElevationPanel() {
       }
       return null;
     };
-    const onUp = (e: PointerEvent) => {
-      const built = builtRef.current;
-      if (!built) return;
+    const hitDevice = (hits: THREE.Intersection[]) => {
+      const hit = hits.find((h) => h.object.userData?.dev !== undefined || hitPort(h) != null);
+      return hit ? ((hit.object.userData?.dev as string | undefined) ?? hitPort(hit)?.dev ?? null) : null;
+    };
+    const raycastFromEvent = (e: PointerEvent) => {
       const r = canvas.getBoundingClientRect();
       const ndc = new THREE.Vector2(
         ((e.clientX - r.left) / r.width) * 2 - 1,
         -((e.clientY - r.top) / r.height) * 2 + 1,
       );
       ray.setFromCamera(ndc, cam);
-      const hits = ray.intersectObjects([built.root], true);
+      return ray.intersectObjects([builtRef.current!.root], true);
+    };
+
+    /** Drop the ghost preview mesh, if the current gesture ever grew one
+     *  (a plain click never does — see the `moved` threshold below). */
+    const clearGhost = () => {
+      const g = dragRef.current?.ghost;
+      if (!g) return;
+      scene.remove(g);
+      g.geometry.dispose();
+      (g.material as THREE.Material).dispose();
+    };
+
+    /** RU-move drag (permintaan Surya, slice C): pointerdown on a placed
+     *  device arms a candidate; only real pointer movement past a small
+     *  threshold turns it into a drag (so a plain click still just
+     *  selects). Cable Mode / Tambah perangkat own the pointer instead when
+     *  `mode !== null`, so this never starts there. */
+    const onDown = (e: PointerEvent) => {
+      if (mode !== null || dragCtxRef.current.moveDevice.isPending) return;
+      const built = builtRef.current;
+      if (!built) return;
+      const devId = hitDevice(raycastFromEvent(e));
+      if (!devId) return;
+      const entry = built.registry.devices[devId];
+      if (!entry) return;
+      dragRef.current = {
+        devId, span: entry.def.h, origin: { rackKey: entry.rackKey, ru: entry.def.u },
+        startX: e.clientX, startY: e.clientY, moved: false, ghost: null, target: null,
+      };
+    };
+
+    const onMove = (e: PointerEvent) => {
+      const cand = dragRef.current;
+      const built = builtRef.current;
+      if (!cand || !built) return;
+      if (!cand.moved) {
+        if (Math.hypot(e.clientX - cand.startX, e.clientY - cand.startY) < 4) return;
+        cand.moved = true;
+        const ghost = new THREE.Mesh(
+          new THREE.BoxGeometry(0.46, cand.span * U - 0.0015, 0.02),
+          new THREE.MeshBasicMaterial({ color: 0x22c55e, transparent: true, opacity: 0.55, depthTest: false }),
+        );
+        ghost.visible = false;
+        ghost.renderOrder = 999;
+        scene.add(ghost);
+        cand.ghost = ghost;
+      }
+      const pt = raycastFromEvent(e)[0]?.point;
+      const rackXs = Object.entries(built.registry.racks)
+        .filter(([k]) => k !== CPI_KEY)
+        .map(([key, v]) => ({ key, x: v.x }));
+      const target = pt ? resolveDropTarget(rackXs, { x: pt.x, y: pt.y }) : null;
+      cand.target = target;
+      const ghost = cand.ghost!;
+      if (!target) {
+        ghost.visible = false;
+        setStatus('Lepas di dalam rak untuk memindahkan, Esc untuk batal');
+        return;
+      }
+      const { bays: curBays, viewRacks: curRacks, rackLabel: curLabel } = dragCtxRef.current;
+      const rackObj = curRacks.find((r) => r.id === target.rackKey);
+      const ruHeight = rackObj?.ru_height ?? 42;
+      const valid = canPlaceDevice(curBays, target.rackKey, target.ru, cand.span, ruHeight, cand.devId);
+      const rackEntry = built.registry.racks[target.rackKey]!;
+      ghost.position.set(
+        rackEntry.x,
+        0.055 + (target.ru - 1) * U + (cand.span * U) / 2,
+        rackEntry.d / 2 - 0.088 + 0.012,
+      );
+      (ghost.material as THREE.MeshBasicMaterial).color.setHex(valid ? 0x22c55e : 0xef4444);
+      ghost.visible = true;
+      const lo = target.ru, hi = target.ru + cand.span - 1;
+      setStatus(
+        `${valid ? 'Lepas' : 'Tidak muat/terisi'} — ${rackObj ? curLabel(rackObj) : target.rackKey} U${lo}${hi > lo ? `-${hi}` : ''}`,
+      );
+    };
+
+    /** Cancel an in-flight drag with zero requests sent — used for Escape
+     *  and a pointercancel (e.g. a touch gesture interrupted mid-drag). */
+    const cancelDrag = () => {
+      if (!dragRef.current?.moved) { dragRef.current = null; return; }
+      clearGhost();
+      dragRef.current = null;
+      setStatus('Dibatalkan — tidak ada perubahan dikirim');
+    };
+
+    const onUp = (e: PointerEvent) => {
+      const cand = dragRef.current;
+      if (cand?.moved) {
+        clearGhost();
+        dragRef.current = null;
+        const { bays: curBays, viewRacks: curRacks, moveDevice: curMove } = dragCtxRef.current;
+        const ruHeightByRack = Object.fromEntries(curRacks.map((r) => [r.id, r.ru_height || 42]));
+        const decision = dropDecision(cand.target, cand.span, ruHeightByRack, curBays, cand.origin, cand.devId);
+        if (decision.commit) {
+          curMove.mutate({ nodeId: cand.devId, rackId: decision.rackId, ruStart: decision.ruStart, ruSpan: cand.span });
+        } else {
+          setStatus('Dibatalkan — tidak ada perubahan dikirim');
+        }
+        return;
+      }
+      dragRef.current = null;
+
+      const built = builtRef.current;
+      if (!built) return;
+      const hits = raycastFromEvent(e);
       if (mode === 'cable') {
         const port = hits.map(hitPort).find((p) => p != null);
         if (port) {
@@ -706,11 +835,49 @@ export function Rack3DElevationPanel() {
         if (best && bd < 0.45) handleAddDevice(best, any.point.y);
         return;
       }
-      const hit = hits.find((h) => h.object.userData?.dev !== undefined || hitPort(h) != null);
-      selectDevice(hit ? ((hit.object.userData?.dev as string | undefined) ?? hitPort(hit)?.dev ?? null) : null);
+      const devId = hitDevice(hits);
+      if (devId) { selectDevice(devId); return; }
+
+      // No device under the click — an unplaced tray selection (no mesh of
+      // its own to drag) places on a plain click instead (NG-PH3D P3 flow,
+      // now click-to-place since the rack/RU dropdown it used is gone).
+      if (currentSelNode.current && currentSelNode.current.rack_id == null && hits[0]) {
+        const rackXs = Object.entries(built.registry.racks)
+          .filter(([k]) => k !== CPI_KEY)
+          .map(([key, v]) => ({ key, x: v.x }));
+        const target = resolveDropTarget(rackXs, { x: hits[0].point.x, y: hits[0].point.y });
+        const { bays: curBays, viewRacks: curRacks, moveDevice: curMove } = dragCtxRef.current;
+        const rackObj = target ? curRacks.find((r) => r.id === target.rackKey) : undefined;
+        const span = currentSelNode.current.ru_span ?? 1;
+        if (target && rackObj && canPlaceDevice(curBays, target.rackKey, target.ru, span, rackObj.ru_height ?? 42)) {
+          setStatus(`Menempatkan ${currentSelNode.current.name} di U${target.ru}…`);
+          curMove.mutate({ nodeId: currentSelNode.current.id, rackId: target.rackKey, ruStart: target.ru, ruSpan: span });
+          return;
+        }
+        setStatus(target ? 'U ini terisi/di luar rak — pilih U lain' : 'Klik di dalam rak untuk menempatkan');
+        return;
+      }
+      selectDevice(null);
     };
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cancelDrag();
+    };
+    const onCancel = () => cancelDrag();
+
+    canvas.addEventListener('pointerdown', onDown);
+    canvas.addEventListener('pointermove', onMove);
     canvas.addEventListener('pointerup', onUp);
-    return () => canvas.removeEventListener('pointerup', onUp);
+    canvas.addEventListener('pointercancel', onCancel);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      canvas.removeEventListener('pointerdown', onDown);
+      canvas.removeEventListener('pointermove', onMove);
+      canvas.removeEventListener('pointerup', onUp);
+      canvas.removeEventListener('pointercancel', onCancel);
+      window.removeEventListener('keydown', onKeyDown);
+      clearGhost();
+    };
   }, [mode, handlePortPick, handleAddDevice, selectDevice]);
 
   const toggleMode = (id: Exclude<Mode, null>) => {
@@ -931,45 +1098,21 @@ export function Rack3DElevationPanel() {
         </div>
       )}
 
-      {/* Pindah perangkat antar-rack (permintaan Surya, P2) — muncul saat ada
-          perangkat terpilih. Batas satu-site ditegakkan di backend; ini hanya
-          menyalurkan hasilnya. Juga jalur "tempatkan" untuk node dari tray
-          Unplaced di atas (NG-PH3D P3) — write yang sama, cuma sebelumnya
-          belum punya rak sama sekali. */}
+      {/* Perangkat terpilih (permintaan Surya, slice C): tidak ada lagi
+          dropdown rak + input U + tombol — pindah RU/rak sekarang langsung
+          drag di scene (pointerdown+drag pada perangkat, lepas di slot
+          tujuan; Esc atau lepas di luar rak = batal, nol request terkirim).
+          Node dari tray Unplaced (tanpa mesh, tak bisa di-drag) tetap pakai
+          klik-untuk-tempatkan, sama seperti sebelumnya. */}
       {selNode && (
         <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-1.5 text-xs">
           <Move className="size-3.5 text-recess" />
-          <span className="text-recess">Pindahkan {selNode.name} ke</span>
-          <select
-            value={moveRackId}
-            onChange={(e) => setMoveRackId(e.target.value)}
-            className="rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
-          >
-            <option value="">— pilih rak —</option>
-            {racks.map((r) => (
-              <option key={r.id} value={r.id}>{rackLabel(r)}</option>
-            ))}
-          </select>
-          <label className="flex items-center gap-1 text-recess">
-            U
-            <input
-              type="number"
-              min={1}
-              value={moveRu}
-              onChange={(e) => setMoveRu(parseInt(e.target.value, 10) || 1)}
-              className="w-14 rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
-            />
-          </label>
-          <button
-            type="button"
-            disabled={!moveRackId || moveDevice.isPending}
-            onClick={() => moveDevice.mutate({
-              nodeId: selNode.id, rackId: moveRackId, ruStart: moveRu, ruSpan: selNode.ru_span ?? 1,
-            })}
-            className="rounded-md bg-accent/20 px-2.5 py-1 text-accent ring-1 ring-accent/40 transition hover:bg-accent/30 disabled:opacity-40"
-          >
-            Pindahkan
-          </button>
+          <span className="text-fg">{selNode.name}</span>
+          <span className="text-recess">
+            {selNode.rack_id
+              ? 'Seret perangkat di scene untuk memindahkannya'
+              : 'Klik U kosong di sebuah rak untuk menempatkannya'}
+          </span>
         </div>
       )}
 
