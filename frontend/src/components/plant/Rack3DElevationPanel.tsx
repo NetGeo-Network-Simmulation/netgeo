@@ -27,6 +27,7 @@ import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { cn } from '@/lib/cn';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
+import { loadBootAssets } from '@/lib/three/bootAssets';
 import {
   adaptTopology,
   cableLengthUpdatesForNode,
@@ -37,6 +38,7 @@ import {
 import {
   applyDoors,
   applyLabels,
+  applyLod,
   applySelection,
   buildScene,
   devicePortWorld,
@@ -112,6 +114,18 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
   // defensively at renderer construction (below) in case detection passes
   // but the real context still fails to init.
   const [webglError, setWebglError] = useState(!webglAvailable());
+  // NG-PH3D 3a/3b: the Blender-authored boot/cage assets load once per app
+  // session (loadBootAssets() is idempotent/cached) and the scene rebuild
+  // effect below re-runs once they resolve, swapping the procedural
+  // rj45/lc/sfp/qsfp fallback shapes for the real geometry.
+  const [assetsLoaded, setAssetsLoaded] = useState(false);
+  useEffect(() => {
+    let live = true;
+    loadBootAssets()
+      .then(() => { if (live) setAssetsLoaded(true); })
+      .catch(() => {}); // offline/blocked fetch — stays on the procedural fallback
+    return () => { live = false; };
+  }, []);
 
   // Same query keys as RackElevationPanel.tsx (the 2D panel), on purpose:
   // when the 2D panel mutates and invalidates ['topology', projectId] /
@@ -298,6 +312,11 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     cam.top = span;
     cam.bottom = -span;
     cam.updateProjectionMatrix();
+    // NG-PH3D 3b LOD: this ortho camera sits at a fixed physical distance
+    // (POV.dist) — "zoom" only changes the frustum half-height (`span`), so
+    // that's the signal to drive fine-detail visibility from, not
+    // distance-to-camera (see applyLod()'s own comment).
+    if (builtRef.current) applyLod(builtRef.current.registry, span);
   }, [spanFor]);
 
   /** Place the ortho camera on the fixed 2.5D POV. az is the only thing that turns. */
@@ -424,7 +443,7 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     fitCamera();
     placeCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapted, rackASpec, rackBSpec, fitout, links, fitCamera, placeCamera]);
+  }, [adapted, rackASpec, rackBSpec, fitout, links, fitCamera, placeCamera, assetsLoaded]);
 
   /* ─── toggles: mirror React state into the scene ───────────────────────── */
   useEffect(() => {
@@ -577,6 +596,20 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
     const cam = camRef.current;
     if (!canvas || !cam) return;
     const ray = new THREE.Raycaster();
+    // NG-PH3D 3b: an instanced SFP/QSFP cage carries no per-port mesh (one
+    // InstancedMesh for every cage in the scene) — its dev/port map rides
+    // on the InstancedMesh itself, indexed by the raycast hit's
+    // `instanceId`, the same information a per-part mesh would have carried
+    // directly in `userData`.
+    const hitPort = (h: THREE.Intersection): { dev: string; port: number } | null => {
+      const o = h.object;
+      if (o.userData?.port !== undefined) return { dev: o.userData.dev as string, port: o.userData.port as number };
+      if (o instanceof THREE.InstancedMesh && h.instanceId != null) {
+        const map = o.userData.portMap as { dev: string; port: number }[] | undefined;
+        return map?.[h.instanceId] ?? null;
+      }
+      return null;
+    };
     const onUp = (e: PointerEvent) => {
       const built = builtRef.current;
       if (!built) return;
@@ -588,9 +621,9 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
       ray.setFromCamera(ndc, cam);
       const hits = ray.intersectObjects([built.root], true);
       if (mode === 'cable') {
-        const port = hits.find((h) => h.object.userData?.port !== undefined);
+        const port = hits.map(hitPort).find((p) => p != null);
         if (port) {
-          handlePortPick(port.object.userData.dev as string, port.object.userData.port as number);
+          handlePortPick(port.dev, port.port);
           return;
         }
         setStatus('Cable Mode: klik port, bukan chassis');
@@ -609,8 +642,8 @@ export function Rack3DElevationPanel({ viewSwitcher }: { viewSwitcher?: ReactNod
         if (best && bd < 0.45) handleAddDevice(best, any.point.y);
         return;
       }
-      const hit = hits.find((h) => h.object.userData?.dev);
-      selectDevice(hit ? (hit.object.userData.dev as string) : null);
+      const hit = hits.find((h) => h.object.userData?.dev !== undefined || hitPort(h) != null);
+      selectDevice(hit ? ((hit.object.userData?.dev as string | undefined) ?? hitPort(hit)?.dev ?? null) : null);
     };
     canvas.addEventListener('pointerup', onUp);
     return () => canvas.removeEventListener('pointerup', onUp);
