@@ -20,6 +20,7 @@ import {
   devicePortWorld,
   RACK_SPECS,
   stockLength,
+  U,
   type BuildOptions,
   type DeviceDef,
   type DeviceKind,
@@ -294,4 +295,83 @@ export function cableLengthUpdatesForNode(
     if (lengthM !== cable.length_m) updates.push({ cableId: cable.id, lengthM });
   });
   return updates;
+}
+
+/* ------------------------------ Drag-to-move ------------------------------ */
+/**
+ * Direct 3D device move (Surya: "pindah perangkat bisa langsung di rack 3D
+ * tanpa perlu ada lagi mode elevasi ... semua 3D"). These three pure
+ * functions are the whole decision surface for a drag in
+ * Rack3DElevationPanel — the panel's pointer handlers only turn a raycast
+ * hit into world coordinates and call these, so "does this drop send a
+ * request, and what does it send" is unit-testable without a WebGL context.
+ */
+
+/** Nearest rack (by x-distance) to a raycast hit point, and the RU slot at
+ *  that height — the same nearest-bay + U arithmetic the click-to-add-device
+ *  flow (`handleAddDevice`) already used inline; factored out so drag-move
+ *  shares it instead of a second copy. Returns null when the hit is too far
+ *  from every rack's centre line (`tolerance`, metres) to sensibly belong to
+ *  one — matches `handleAddDevice`'s own 0.45 m default. */
+export function resolveDropTarget(
+  rackXs: { key: string; x: number }[],
+  hit: { x: number; y: number },
+  tolerance = 0.45,
+): { rackKey: string; ru: number } | null {
+  if (rackXs.length === 0) return null;
+  let best = rackXs[0]!;
+  let bd = Math.abs(hit.x - best.x);
+  for (const r of rackXs.slice(1)) {
+    const d = Math.abs(hit.x - r.x);
+    if (d < bd) { bd = d; best = r; }
+  }
+  if (bd >= tolerance) return null;
+  return { rackKey: best.key, ru: Math.floor((hit.y - 0.055) / U) + 1 };
+}
+
+/** Would `span` RUs starting at `ru` in `rackKey` be a legal placement? Same
+ *  two checks the backend's `update_node` makes (in-range, no RU overlap —
+ *  memory.py) run client-side first, so an occupied or oversized drop is
+ *  refused before any request goes out (Surya: "slot yang sudah terisi atau
+ *  tidak muat ditolak dengan jelas sebelum request dikirim"). `excludeId` is
+ *  the device being moved itself, which must not collide with its own
+ *  current slot. */
+export function canPlaceDevice(
+  bays: RackBay[],
+  rackKey: string,
+  ru: number,
+  span: number,
+  ruHeight: number,
+  excludeId?: string,
+): boolean {
+  if (ru < 1 || ru + span - 1 > ruHeight) return false;
+  const bay = bays.find((b) => b.key === rackKey);
+  if (!bay) return false;
+  const lo = ru, hi = ru + span - 1;
+  return !bay.devices.some((d) => {
+    if (d.id === excludeId) return false;
+    const oLo = d.u, oHi = d.u + d.h - 1;
+    return lo <= oHi && oLo <= hi;
+  });
+}
+
+/** What a released drag should do: commit a PATCH, or send nothing at all.
+ *  Nothing goes out for a target that's unresolved (dropped off every
+ *  rack), invalid (`canPlaceDevice`), or identical to where the device
+ *  already was — that last case matters as much as the others: without it,
+ *  a plain reselect-and-release would fire an identical, pointless PATCH. */
+export function dropDecision(
+  target: { rackKey: string; ru: number } | null,
+  span: number,
+  ruHeightByRack: Record<string, number>,
+  bays: RackBay[],
+  origin: { rackKey: string; ru: number },
+  deviceId: string,
+): { commit: false } | { commit: true; rackId: string; ruStart: number } {
+  if (!target) return { commit: false };
+  if (target.rackKey === origin.rackKey && target.ru === origin.ru) return { commit: false };
+  const ruHeight = ruHeightByRack[target.rackKey];
+  if (ruHeight == null) return { commit: false };
+  if (!canPlaceDevice(bays, target.rackKey, target.ru, span, ruHeight, deviceId)) return { commit: false };
+  return { commit: true, rackId: target.rackKey, ruStart: target.ru };
 }
