@@ -34,8 +34,8 @@ const rack: Rack = { id: 'r1', project_id: 'p1', site_id: null, name: 'Rack1', r
 describe('plantAdapter — per-SKU chassis dimensions (§8.1)', () => {
   it('a model with verified chassisMm (MikroTik CRS317) gets real body dims and no approximate marker', () => {
     const topology: Topology = { nodes: [node('n1', 'routeros', 1)], links: [], racks: [rack] };
-    const adapted = adaptTopology(topology, 'r1', null)!;
-    const dev = adapted.fitout.A!.find((d) => d.id === 'n1')!;
+    const adapted = adaptTopology(topology, ['r1'])!;
+    const dev = adapted.racks[0]!.devices.find((d) => d.id === 'n1')!;
     expect(dev.bodyWidthM).toBeCloseTo(0.443, 5);
     expect(dev.bodyDepthM).toBeCloseTo(0.224, 5);
     expect(dev.generic).toBe(false);
@@ -43,8 +43,8 @@ describe('plantAdapter — per-SKU chassis dimensions (§8.1)', () => {
 
   it('a curated model with UNVERIFIED dims (Arista 7050CX3-32S) falls back to the generic default and is marked approximate', () => {
     const topology: Topology = { nodes: [node('n2', 'eos', 1)], links: [], racks: [rack] };
-    const adapted = adaptTopology(topology, 'r1', null)!;
-    const dev = adapted.fitout.A!.find((d) => d.id === 'n2')!;
+    const adapted = adaptTopology(topology, ['r1'])!;
+    const dev = adapted.racks[0]!.devices.find((d) => d.id === 'n2')!;
     expect(dev.bodyWidthM).toBeUndefined();
     expect(dev.bodyDepthM).toBeUndefined();
     expect(dev.generic).toBe(true);
@@ -56,9 +56,9 @@ describe('plantAdapter — per-SKU chassis dimensions (§8.1)', () => {
       links: [],
       racks: [rack],
     };
-    const adapted = adaptTopology(topology, 'r1', null)!;
-    const crs317 = adapted.fitout.A!.find((d) => d.id === 'n1')!;
-    const qfx = adapted.fitout.A!.find((d) => d.id === 'n4')!;
+    const adapted = adaptTopology(topology, ['r1'])!;
+    const crs317 = adapted.racks[0]!.devices.find((d) => d.id === 'n1')!;
+    const qfx = adapted.racks[0]!.devices.find((d) => d.id === 'n4')!;
     expect(crs317.bodyWidthM).not.toBeCloseTo(qfx.bodyWidthM!, 3);
     expect(crs317.bodyDepthM).not.toBeCloseTo(qfx.bodyDepthM!, 2);
   });

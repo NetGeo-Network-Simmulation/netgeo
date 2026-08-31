@@ -51,18 +51,16 @@ function assertBendRadius(built: ReturnType<typeof buildScene>, samplesPerCable 
 
 function bigScene(): BuildOptions {
   return {
-    rackA: 'apc',
-    rackB: 'hpe',
-    fitout: {
-      A: [
+    racks: [
+      { key: 'A', enclosure: 'apc', devices: [
         dev('a-patch', 1, 1, 'patch', 24, 'rj45'),
         dev('a-odf', 2, 1, 'odf', 24, 'lc'),
         dev('a-sw1', 3, 1, 'switch', 24, 'rj45'),
         dev('a-sw2', 20, 1, 'switch', 12, 'sfp28'),
         dev('a-top', 41, 1, 'switch', 24, 'rj45'),
-      ],
-      B: [dev('b-sw', 5, 1, 'switch', 24, 'rj45')],
-    },
+      ] },
+      { key: 'B', enclosure: 'hpe', devices: [dev('b-sw', 5, 1, 'switch', 24, 'rj45')] },
+    ],
     links: [
       link(['a-patch', 0], ['a-sw1', 0], 'cat6a'), // near jumper, catenary path
       link(['a-patch', 1], ['a-odf', 0], 'os2'), // near jumper, fibre

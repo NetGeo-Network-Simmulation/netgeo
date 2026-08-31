@@ -34,15 +34,13 @@ function link(a: [string, number], b: [string, number], m = 'cat6a'): LinkDef {
 // budget.
 function sceneOpts(): BuildOptions {
   return {
-    rackA: 'apc',
-    rackB: 'apc',
-    fitout: {
-      A: [
+    racks: [
+      { key: 'A', enclosure: 'apc', devices: [
         dev('a-sw1', 1, [{ type: 'rj45', count: 48 }, { type: 'sfp28', count: 4 }, { type: 'qsfp28', count: 4 }]),
         dev('a-sw2', 2, [{ type: 'sfp28', count: 2 }]),
-      ],
-      B: [],
-    },
+      ] },
+      { key: 'B', enclosure: 'apc', devices: [] },
+    ],
     links: [link(['a-sw1', 0], ['a-sw2', 0], 'dac')],
   };
 }
