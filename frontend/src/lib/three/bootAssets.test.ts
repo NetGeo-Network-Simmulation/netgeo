@@ -45,10 +45,11 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     expect(lBox.max.y).toBeCloseTo(0, 3);
   });
 
-  // 3a.2 also builds the SFP and QSFP cage shells (dimension-verified, SFF-8432/
-  // SFF-8663) — reserved for Sesi 3b's device faceplates, not wired into the
-  // live scene yet. This only proves the pipeline reproduces them correctly.
-  it('cage shells (unwired this session) parse and match their verified footprint', async () => {
+  // 3a.2 also builds the SFP and QSFP cage shells (dimension-verified,
+  // SFF-8432/SFF-8663) — wired into the live scene as of 3b (see
+  // rack3d.cageInstancing.test.ts for the instancing behaviour). This test
+  // only proves the raw pipeline output's own dimensions.
+  it('cage shells parse and match their verified footprint', async () => {
     const loader = new GLTFLoader();
     const sfpBuf = await nodeFetch('/3d/cage-sfp.glb');
     const sfpGltf = await loader.parseAsync(sfpBuf, '');
