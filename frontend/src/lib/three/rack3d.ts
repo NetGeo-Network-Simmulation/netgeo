@@ -449,7 +449,17 @@ export interface BuiltScene {
   root: THREE.Group;
   registry: Registry;
   trayY: number;
+  /** Total real-rack row width in metres (sum of enclosure widths + 0.1m
+   *  gaps, N-1 gaps for N bays) — NOT counting the decorative CPI cabinet.
+   *  Exposed so the host panel's camera framing can widen the frustum for a
+   *  wide row instead of duplicating this arithmetic (NG-PH3D P41). */
+  rowWidthM: number;
 }
+
+/** Registry key of the decorative CPI cable-management cabinet buildScene()
+ *  always appends after the real racks — not a user rack, callers that walk
+ *  `registry.racks` to frame/pick real bays must skip it. */
+export const CPI_KEY = '__cpi__';
 
 export function buildScene(opts: BuildOptions): BuiltScene {
   const mats = makeMaterials();
@@ -1570,7 +1580,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   });
   const lastSpec = specs[specs.length - 1]!;
   const cpiX = xOf.get(bays[bays.length - 1]!.key)! + lastSpec.w / 2000 + 0.75;
-  root.add(buildRack('__cpi__', 'cpi', cpiX));
+  root.add(buildRack(CPI_KEY, 'cpi', cpiX));
 
   for (const b of bays) {
     for (const def of b.devices) registry.racks[b.key]!.group.add(buildDevice(def, b.key));
@@ -1758,7 +1768,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   rim.position.set(chanOf.get(bays[0]!.key)! - 0.9, trayY - 0.7, 1.5);
   root.add(rim);
 
-  return { root, registry, trayY };
+  return { root, registry, trayY, rowWidthM: rowWidth };
 }
 
 /* ─── Host-facing helpers ────────────────────────────────────────────────── */
