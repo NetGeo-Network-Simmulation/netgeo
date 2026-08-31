@@ -66,6 +66,12 @@ export interface DeviceType {
   nos?: Nos;
   uHeight: number;
   isFullDepth?: boolean;
+  /** Real chassis body width/depth in mm, ONLY for models with V or V(2nd)
+   *  status in docs/design/24-DEVICE-PHYSICAL-SPEC.md §8.1. Omit when the
+   *  doc's status is UNVERIFIED/low-confidence (e.g. arista-7050cx3-32s'
+   *  width) — the 3D builder then falls back to the generic default body
+   *  size rather than drawing a guessed number as real. */
+  chassisMm?: { widthMm: number; depthMm: number };
   front: {
     portZones: PortZone[];
     leds: Led[];
@@ -94,6 +100,8 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: 'CRS317-1G-16S+RM',
     nos: 'routeros',
     uHeight: 1,
+    // §8.1 V (mikrotik.com product page, dibuka langsung): half-depth chassis.
+    chassisMm: { widthMm: 443, depthMm: 224 },
     front: {
       portZones: [
         {
@@ -137,6 +145,9 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: 'CRS328-24P-4S+RM',
     nos: 'routeros',
     uHeight: 1,
+    // §8.1 V (mikrotik.com product page, dibuka langsung): deeper than CRS317
+    // because of the internal 500W PSU.
+    chassisMm: { widthMm: 443, depthMm: 300 },
     front: {
       portZones: [
         {
@@ -182,6 +193,9 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: 'Catalyst 9300-48P',
     nos: 'ios',
     uHeight: 1,
+    // §8.1 V(2nd) (cisco.com tech-specs + router-switch.com, cross-checked):
+    // deep chassis — separate modular uplink bay adds length vs the 9500.
+    chassisMm: { widthMm: 445, depthMm: 526 },
     front: {
       portZones: [
         {
@@ -228,6 +242,9 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: 'Catalyst 9500-48Y',
     nos: 'ios',
     uHeight: 1,
+    // §8.1 V(2nd) (router-switch.com/serversupply.com, cross-checked):
+    // shallower than the 9300 — all ports fixed at front, no uplink bay.
+    chassisMm: { widthMm: 445, depthMm: 457 },
     front: {
       portZones: [
         {
@@ -273,6 +290,9 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: 'QFX5120-48Y',
     nos: 'junos',
     uHeight: 1,
+    // §8.1 V (apps.juniper.net/hct official spec tool, dibuka langsung) —
+    // highest-quality source in the table; body-without-FRU figure used.
+    chassisMm: { widthMm: 440.9, depthMm: 520.2 },
     front: {
       portZones: [
         {
@@ -326,6 +346,9 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: '7050CX3-32S',
     nos: 'eos',
     uHeight: 1,
+    // §8.1: width is UNVERIFIED (reseller "19 inch" doesn't say body vs
+    // faceplate; depth is only V(2nd)) — no chassisMm here on purpose, this
+    // model keeps the generic default chassis size instead of a guess.
     front: {
       portZones: [
         {
@@ -369,6 +392,8 @@ export const DEVICE_TYPES: DeviceType[] = [
     manufacturer: 'Ubiquiti',
     model: 'USW-Pro-48',
     uHeight: 1,
+    // §8.1 V(2nd) (techspecs.ui.com): half-depth, matches [[reference_verified_switch_specs]].
+    chassisMm: { widthMm: 442.4, depthMm: 285.4 },
     front: {
       portZones: [
         {
@@ -405,6 +430,9 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: 'FortiGate-100F',
     nos: undefined,
     uHeight: 1,
+    // §8.1 V(2nd) (reseller aggregate, cross-checked): compact appliance,
+    // shallowest chassis of the 9 curated models.
+    chassisMm: { widthMm: 432, depthMm: 254 },
     front: {
       portZones: [
         {
@@ -453,6 +481,9 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: 'PowerEdge R740',
     uHeight: 2,
     isFullDepth: true,
+    // §8.1 V (i.dell.com spec sheet + dell.com manual, dibuka langsung):
+    // 2U full-depth server — the deepest chassis of the 9 by a wide margin.
+    chassisMm: { widthMm: 434.0, depthMm: 737.5 },
     front: {
       portZones: [
         {

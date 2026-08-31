@@ -15,7 +15,7 @@
 import type { Cable, CableMedia, LinkModel, NodeKind, NodeModel, Rack, Topology } from '@/api/types';
 import type { DeviceType as CatalogEntry } from '@/api/client';
 import { frontPortFractions, frontPortList } from '@/components/rack/DeviceFaceplate';
-import { resolveDeviceType, type PortType as CatalogPortType } from '@/components/rack/deviceTypes';
+import { DEVICE_TYPES, resolveDeviceType, type PortType as CatalogPortType } from '@/components/rack/deviceTypes';
 import {
   devicePortWorld,
   RACK_SPECS,
@@ -144,6 +144,15 @@ function adaptRackDevices(
 
     const pack = node.device_type_id ? deviceTypesById?.get(node.device_type_id) : undefined;
     const dt = resolveDeviceType(node.nos, node.kind, node.interfaces, pack);
+    // True when `dt` is one of deviceTypes.ts's curated 9 real-model seeds
+    // (not a generic-* fallback, not a pack-sourced buildFromPack() entry)
+    // but its dimensions are UNVERIFIED (no `chassisMm`) — e.g.
+    // arista-7050cx3-32s. Scoped to seed membership so real device-pack
+    // nodes (which never carry chassisMm either) keep their existing
+    // "not generic" treatment; only the curated-but-unverified case here
+    // is new.
+    const isUnverifiedCuratedSeed = !dt.chassisMm
+      && DEVICE_TYPES.some((seed) => seed.slug === dt.slug && !seed.slug.startsWith('generic-'));
     const orderedIfaceIds = [...frontPortFractions(node, span, deviceTypesById).keys()];
     orderedIfaceIds.forEach((ifaceId, ordinal) => {
       ordinals.set(ifaceId, ordinal);
@@ -161,9 +170,15 @@ function adaptRackDevices(
       chassis: hexNum(dt.brand.chassis, 0x1c1c1a),
       ports: orderedIfaceIds.length,
       portGroups: orderedIfaceIds.length ? devicePortGroups(node, deviceTypesById) : undefined,
-      // dt.slug is 'generic-*' only when resolveDeviceType() couldn't match
-      // a real curated model (deviceTypes.ts) — see genericFor() there.
-      generic: dt.slug.startsWith('generic-'),
+      // dt.slug is 'generic-*' when resolveDeviceType() couldn't match a
+      // real curated model (see genericFor() there); isUnverifiedCuratedSeed
+      // covers the curated-but-dimensionally-unverified case (§8.1) — both
+      // get the same "approximate shape" marker (faceTexture()'s dashed
+      // hachure border).
+      generic: dt.slug.startsWith('generic-') || isUnverifiedCuratedSeed,
+      bodyWidthM: dt.chassisMm ? dt.chassisMm.widthMm / 1000 : undefined,
+      bodyDepthM: dt.chassisMm ? dt.chassisMm.depthMm / 1000 : undefined,
+      hasLcd: dt.front.hasLcd,
     });
   }
   return { devices, ordinals, ifaceByDevPort };

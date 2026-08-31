@@ -117,6 +117,15 @@ export interface DeviceDef {
    *  (no real model matched) rather than a curated real SKU — surfaced as an
    *  "approximate shape" marker, never used to fake real geometry. */
   generic?: boolean;
+  /** Real chassis body width/depth in metres, from deviceTypes.ts's
+   *  `chassisMm` (docs/design/24-DEVICE-PHYSICAL-SPEC.md §8.1, V/V(2nd)
+   *  only). Undefined falls back to CHASSIS_BODY_W / the kind-based depth
+   *  heuristic below — never a guessed per-model number. */
+  bodyWidthM?: number;
+  bodyDepthM?: number;
+  /** True only for deviceTypes.ts entries with `front.hasLcd` (§8.2 V(2nd) —
+   *  currently just ubiquiti-usw-pro-48) — draws a small LCD touchscreen. */
+  hasLcd?: boolean;
 }
 
 export interface LinkDef {
@@ -799,7 +808,12 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     // here too since NG-PH3D 3b's scene-level cage InstancedMesh needs each
     // port's world position while devices are still being built).
     const devY = 0.055 + (def.u - 1 + def.h) * U - (def.h * U) / 2;
-    const depth = def.kind === 'server' ? Math.min(0.72, rack.d - 0.18) : def.kind === 'switch' ? 0.42 : 0.16;
+    const heuristicDepth = def.kind === 'server' ? Math.min(0.72, rack.d - 0.18) : def.kind === 'switch' ? 0.42 : 0.16;
+    // Real per-SKU depth (§8.1), clamped so a deep-but-real chassis (e.g.
+    // Dell R740's 737.5mm) never pokes out of a shallow enclosure profile —
+    // same safety margin the server heuristic above already applies.
+    const depth = def.bodyDepthM != null ? Math.min(def.bodyDepthM, Math.max(0.05, rack.d - 0.18)) : heuristicDepth;
+    const bodyW = def.bodyWidthM ?? CHASSIS_BODY_W;
     // faceplate art is dim under an ortho key light; lift the chassis tone so
     // the panel reads at 2.5D scale instead of going to mud.
     const lift = (hex: number) => {
@@ -814,7 +828,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     chassisMat.name = 'chassis-' + def.id;
     // body is the sheet-metal box between the rack ears — narrower than the
     // 482.6mm faceplate/ears (CHASSIS_BODY_W, see its own comment above).
-    const body = box(CHASSIS_BODY_W, h, depth, chassisMat, 'chassis');
+    const body = box(bodyW, h, depth, chassisMat, 'chassis');
     body.position.set(0, 0, rack.d / 2 - 0.09 - depth / 2);
     body.userData.dev = def.id;
     g.add(body);
@@ -848,6 +862,17 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       led.rotation.x = Math.PI / 2;
       led.position.set(-PANEL_W / 2 + 0.032 + i * 0.009, h * 0.22, faceZ + 0.002);
       g.add(led);
+    }
+    // LCD touchscreen — a verified faceplate feature (§8.2 V(2nd)), only set
+    // for ubiquiti-usw-pro-48 among the 9 curated models; a no-op otherwise.
+    if (def.hasLcd) {
+      const lcdBezel = box(0.05, h * 0.55, 0.003, mats.panelDark, 'lcd-bezel');
+      lcdBezel.position.set(-PANEL_W / 2 + 0.075, 0, faceZ + 0.0015);
+      g.add(lcdBezel);
+      const lcdScreen = box(0.042, h * 0.4, 0.001, mats.ledOn, 'lcd-screen');
+      lcdScreen.position.set(-PANEL_W / 2 + 0.075, 0, faceZ + 0.003);
+      g.add(lcdScreen);
+      registry.fineDetail.push(lcdBezel, lcdScreen);
     }
     // ports / drive bays / duct fingers
     const ports = portLayout(def);
