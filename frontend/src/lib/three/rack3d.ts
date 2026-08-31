@@ -12,7 +12,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { getBootGeometry, type BootFamily } from './bootAssets';
+import { getBootGeometry, type BootFamily, type CageFamily } from './bootAssets';
 
 /* ─── Real-world geometry (EIA-310): 1U = 44.45 mm, 19" panel = 482.6 mm ─── */
 export const U = 0.04445;
@@ -168,6 +168,13 @@ export interface Registry {
   labels: THREE.Sprite[];
   doors: THREE.Group[];
   disposables: (THREE.BufferGeometry | THREE.Material | THREE.Texture)[];
+  /** NG-PH3D 3b LOD: per-port fine detail (cages, latch notches, LC bores,
+   *  LED pips) — hidden by `applyLod()` once the camera is zoomed out past
+   *  a full rack, shown up close. Not chassis/faceplate: those stay visible
+   *  at every zoom (faceTexture() already paints the port pattern at low
+   *  res, so hiding the 3D detail on top of it reads as one continuous
+   *  simplification, not a pop). */
+  fineDetail: THREE.Object3D[];
 }
 
 function mat(name: string, color: number, opts: THREE.MeshStandardMaterialParameters = {}) {
@@ -427,7 +434,7 @@ export interface BuiltScene {
 export function buildScene(opts: BuildOptions): BuiltScene {
   const mats = makeMaterials();
   const registry: Registry = {
-    racks: {}, devices: {}, cables: [], fans: [], packets: [], labels: [], doors: [], disposables: [],
+    racks: {}, devices: {}, cables: [], fans: [], packets: [], labels: [], doors: [], disposables: [], fineDetail: [],
   };
   const root = new THREE.Group();
   root.name = 'netgeo-physical-plant';
@@ -438,6 +445,24 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   const bootInstances: Record<BootFamily, { pos: THREE.Vector3; quat: THREE.Quaternion; color: THREE.Color }[]> = {
     rj45: [], lc: [],
   };
+
+  // NG-PH3D 3b: same idea for the Blender-authored SFP/QSFP cage shells —
+  // one InstancedMesh per family instead of a box (+ EMI lip) per port, so a
+  // 48-port switch with 8 SFP+ uplinks costs one draw call for its cages,
+  // not eight. `dev`/`port` ride along per-instance so click-to-patch
+  // picking (Rack3DElevationPanel's raycaster) can resolve an InstancedMesh
+  // hit's `instanceId` back to a real port — see the portMap stashed on the
+  // flushed mesh below.
+  const cageInstances: Record<CageFamily, { pos: THREE.Vector3; dev: string; port: number }[]> = {
+    'cage-sfp': [], 'cage-qsfp': [],
+  };
+  const CAGE_FAM: Record<'sfp28' | 'qsfp28', CageFamily> = { sfp28: 'cage-sfp', qsfp28: 'cage-qsfp' };
+  // Every cage is authored with its length along local Y, origin at the
+  // front mouth, body extending -Y into the chassis (build_assets.py header
+  // comment). Devices always face +Z (portRefs sit in front of faceZ, see
+  // devicePortWorld), so the same fixed rotation mounts every cage flush
+  // with the faceplate — no per-port orientation needed.
+  const CAGE_QUAT = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
 
   const track = <T extends THREE.BufferGeometry | THREE.Material | THREE.Texture>(x: T): T => {
     registry.disposables.push(x);
@@ -770,6 +795,10 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const g = new THREE.Group();
     g.name = 'device-' + def.id;
     const h = def.h * U - 0.0015;
+    // world Y this device's group lands at (set on `g` at the end, computed
+    // here too since NG-PH3D 3b's scene-level cage InstancedMesh needs each
+    // port's world position while devices are still being built).
+    const devY = 0.055 + (def.u - 1 + def.h) * U - (def.h * U) / 2;
     const depth = def.kind === 'server' ? Math.min(0.72, rack.d - 0.18) : def.kind === 'switch' ? 0.42 : 0.16;
     // faceplate art is dim under an ortho key light; lift the chassis tone so
     // the panel reads at 2.5D scale instead of going to mud.
@@ -836,8 +865,23 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       };
       const geo = geoms[p.ptype] ?? { w: p.w, h: h * 0.28 };
       const pw = geo.w, ph = geo.h;
-      let cage: THREE.Mesh;
-      if (p.ptype === 'pon' || p.ptype === 'lc') {
+      // NG-PH3D 3b: real SFP/QSFP cage geometry, once loaded, replaces the
+      // procedural box+lip with a queued InstancedMesh transform — no
+      // per-port mesh at all, so this branch adds nothing to `g` and skips
+      // the box-cage fallback below entirely.
+      const cageFam = (p.ptype === 'sfp28' || p.ptype === 'qsfp28') ? CAGE_FAM[p.ptype] : undefined;
+      const cageGeo = cageFam ? getBootGeometry(cageFam) : undefined;
+      let cage: THREE.Mesh | undefined;
+      if (cageFam && cageGeo) {
+        // world position: this InstancedMesh is flushed straight into
+        // `root`, not `g` — bake in rack.x and the device's own Y (g's own
+        // position.y, computed above as `devY`) since there's no parent
+        // transform to inherit it from.
+        cageInstances[cageFam].push({
+          pos: new THREE.Vector3(rack.x + p.x, devY + p.y, faceZ + 0.0005),
+          dev: def.id, port: p.i,
+        });
+      } else if (p.ptype === 'pon' || p.ptype === 'lc') {
         // LC duplex: two bores side by side inside one bezel
         for (const off of [-pw * 0.3, pw * 0.3]) {
           const bore = new THREE.Mesh(track(new THREE.CylinderGeometry(pw * 0.24, pw * 0.24, 0.007, 10)), mats.port);
@@ -845,6 +889,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
           bore.rotation.x = Math.PI / 2;
           bore.position.set(p.x + off, p.y, faceZ - 0.002);
           g.add(bore);
+          registry.fineDetail.push(bore);
         }
         cage = box(pw, ph, 0.005, mats.bezel, 'lc-adapter');
         cage.position.set(p.x, p.y, faceZ - 0.0035);
@@ -856,28 +901,36 @@ export function buildScene(opts: BuildOptions): BuiltScene {
           const notch = box(pw * 0.36, ph * 0.3, 0.005, mats.port, 'rj45-latch-slot');
           notch.position.set(p.x, p.y + ph * 0.5, faceZ - 0.002);
           g.add(notch);
+          registry.fineDetail.push(notch);
         } else if (p.ptype === 'sfp28' || p.ptype === 'qsfp28') {
-          // SFP/QSFP: bright EMI cage lip around a wide, shallow slot
+          // fallback only — real cage asset not loaded yet. SFP/QSFP: bright
+          // EMI cage lip around a wide, shallow slot
           const lip = box(pw * 1.12, ph * 1.3, 0.0022, mats.handle, 'sfp-cage-lip');
           lip.position.set(p.x, p.y, faceZ - 0.0012);
           lip.userData.dev = def.id;
           g.add(lip);
+          registry.fineDetail.push(lip);
         }
       }
-      cage.userData.dev = def.id;
-      cage.userData.port = p.i;
-      g.add(cage);
+      if (cage) {
+        cage.userData.dev = def.id;
+        cage.userData.port = p.i;
+        g.add(cage);
+        registry.fineDetail.push(cage);
+      }
       if (p.ptype === 'rj45') {
         const keystone = box(pw * 1.16, ph * 1.22, 0.004, mats.bezel, 'keystone-body');
         keystone.position.set(p.x, p.y, faceZ - 0.0002);
         keystone.userData.dev = def.id;
         keystone.userData.port = p.i;
         g.add(keystone);
+        registry.fineDetail.push(keystone);
       }
       if (p.ptype === 'rj45' || p.ptype === 'sfp28' || p.ptype === 'qsfp28') {
         const pip = box(pw * 0.28, 0.0016, 0.002, mats.ledOn, 'port-led');
         pip.position.set(p.x - pw * 0.26, p.y + ph * 0.32, faceZ + 0.004);
         g.add(pip);
+        registry.fineDetail.push(pip);
       }
       portRefs[p.i] = new THREE.Vector3(p.x, p.y, faceZ + 0.01);
     }
@@ -976,8 +1029,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       }
     }
 
-    const yTop = 0.055 + (def.u - 1 + def.h) * U;
-    g.position.y = yTop - (def.h * U) / 2;
+    g.position.y = devY;
     registry.devices[def.id] = { def, group: g, rackKey, portRefs, faceZ };
     return g;
   }
@@ -1604,6 +1656,30 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     root.add(im);
   }
 
+  // NG-PH3D 3b: flush the queued SFP/QSFP cage instances the same way — one
+  // InstancedMesh per family for the whole scene. Uniform EMI-shield colour
+  // (no per-instance tint, unlike the media-coloured boots above), so no
+  // setColorAt. `userData.portMap[instanceId]` lets the click-to-patch
+  // raycaster (Rack3DElevationPanel) resolve a hit back to a real
+  // dev/port pair even though there's no per-port mesh to carry it.
+  const cageMat = track(mat('cage-instanced', 0x8c8f94, { roughness: 0.4, metalness: 0.55 }));
+  for (const fam of ['cage-sfp', 'cage-qsfp'] as CageFamily[]) {
+    const list = cageInstances[fam];
+    if (!list.length) continue;
+    const geo = getBootGeometry(fam)!;
+    const im = new THREE.InstancedMesh(geo, cageMat, list.length);
+    im.name = fam + '-instanced';
+    const m4 = new THREE.Matrix4();
+    list.forEach((it, i) => {
+      m4.compose(it.pos, CAGE_QUAT, ONE);
+      im.setMatrixAt(i, m4);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    im.userData.portMap = list.map((it) => ({ dev: it.dev, port: it.port }));
+    root.add(im);
+    registry.fineDetail.push(im);
+  }
+
   const amb = new THREE.HemisphereLight(0xdce6ff, 0x1a1a18, 1.25);
   amb.name = 'room-ambient';
   root.add(amb);
@@ -1661,6 +1737,31 @@ export function applySelection(registry: Registry, sel: string | null) {
     m.opacity = on ? 1 : 0.12;
     m.needsUpdate = true;
   }
+}
+
+/** NG-PH3D 3b LOD threshold: the ortho camera's half-height (world metres —
+ *  `spanFor()` in Rack3DElevationPanel) beyond which a full rack no longer
+ *  needs per-port geometry. The panel's own default, unzoomed span for a
+ *  ~2m/42U rack is ~1.6m (the whole rack already fits); 1.2m sits a bit
+ *  below that so the out-of-the-box view is the simplified one, and zooming
+ *  in (bigger `scale` in `spanFor`, smaller span) crosses it and reveals
+ *  port-level detail. Not tuned against a device's own size — this is a
+ *  scene-wide switch, not per-object distance culling (the camera sits at a
+ *  fixed physical distance in this app; only its ortho frustum width
+ *  changes with "zoom", so a real per-object THREE.LOD's distance-to-camera
+ *  metric wouldn't track the user's actual zoom level). */
+export const LOD_FAR_SPAN_M = 1.2;
+
+/** Hide (`spanHeightM` beyond `LOD_FAR_SPAN_M`) or show every per-port fine
+ *  detail object queued into `registry.fineDetail` during buildScene — the
+ *  cage/keystone/notch/bore/LED meshes and the SFP/QSFP InstancedMeshes.
+ *  Chassis and faceplate stay visible at every zoom; the faceplate texture
+ *  already paints the port pattern at low res (faceTexture()'s decorative
+ *  outlines), so dropping the 3D detail on top of it reads as one
+ *  simplification, not a pop-in. */
+export function applyLod(registry: Registry, spanHeightM: number) {
+  const detailed = spanHeightM < LOD_FAR_SPAN_M;
+  for (const o of registry.fineDetail) o.visible = detailed;
 }
 
 /** One animation step: fans spin, packets crawl their curve. */
