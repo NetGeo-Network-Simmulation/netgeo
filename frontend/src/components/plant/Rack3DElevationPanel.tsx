@@ -113,7 +113,15 @@ export function Rack3DElevationPanel() {
   // Computed once — WebGL support doesn't change mid-session. Also re-checked
   // defensively at renderer construction (below) in case detection passes
   // but the real context still fails to init.
-  const [webglError, setWebglError] = useState(!webglAvailable());
+  // Lazy initializer (`() => ...`, not a bare call): a bare `!webglAvailable()`
+  // argument is re-evaluated by React on every render even though useState
+  // only consumes it once, and webglAvailable() itself creates a throwaway
+  // WebGL context that's never disposed — every keystroke/dropdown/rack-add
+  // re-render leaked one more context until Chromium's per-page context cap
+  // evicted the real renderer's own context, killing the scene to a silent
+  // black canvas with no error (QA 2026-08-31's "blank frame", root-caused
+  // and closed here — the POV lock alone did not fix it, this did).
+  const [webglError, setWebglError] = useState(() => !webglAvailable());
   // NG-PH3D 3a/3b: the Blender-authored boot/cage assets load once per app
   // session (loadBootAssets() is idempotent/cached) and the scene rebuild
   // effect below re-runs once they resolve, swapping the procedural
