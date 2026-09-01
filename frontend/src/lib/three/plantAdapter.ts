@@ -199,8 +199,9 @@ export function racksForSite(racks: Rack[], siteId: string | null): string[] {
  * left-to-right row of real racks to show (NG-PH3D P41: was a fixed
  * rackAId/rackBId pair — rack3d.ts now lays out however many bays it's
  * given). Unknown ids are dropped. Returns null when that resolves to zero
- * real racks — the caller must not build a scene at all in that case (an
- * empty `racks: []` would still draw the shared CPI cabinet prop).
+ * real racks — the caller must not build a scene at all in that case
+ * (buildScene's own contract: at least one real bay, see its BuildOptions
+ * comment).
  */
 export function adaptTopology(
   topology: Topology,

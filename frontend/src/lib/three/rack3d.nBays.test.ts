@@ -1,25 +1,23 @@
 /**
  * NG-PH3D P41 — buildScene's own half of the 0/N enclosure contract: given
- * a `racks` row of length N, exactly N real rack enclosures are built (plus
- * the always-present decorative CPI cabinet, which every previous slice's
- * fixtures already accounted for) — never a phantom extra bay the way the
- * old fixed rackA/rackB shape always drew a DEFAULT_ENCLOSURE 'apc' ghost
- * for whichever slot had no real rack.
+ * a `racks` row of length N, exactly N real rack enclosures are built —
+ * never a phantom extra bay. This used to include an always-present
+ * decorative CPI cabinet every fixture had to account for; Slice G removed
+ * it (a second rack the user never added, visible next to whatever they
+ * actually built — see rack3d.ts buildScene's assembly section).
  */
 import { describe, expect, it } from 'vitest';
-import { buildScene, disposeScene, CPI_KEY, type BuildOptions } from './rack3d';
+import { buildScene, disposeScene, type BuildOptions } from './rack3d';
 
 function bay(key: string): BuildOptions['racks'][number] {
   return { key, enclosure: 'apc', devices: [] };
 }
 
 describe('buildScene bay count (NG-PH3D P41)', () => {
-  it('one real rack -> exactly one real enclosure in the registry (plus the fixed CPI cabinet, never a ghost second bay)', () => {
+  it('one real rack -> exactly one enclosure in the registry, never a ghost second bay', () => {
     const built = buildScene({ racks: [bay('r1')], links: [] });
     try {
-      const keys = Object.keys(built.registry.racks);
-      expect(keys.filter((k) => k !== CPI_KEY)).toEqual(['r1']);
-      expect(keys).toContain(CPI_KEY); // decorative prop, unrelated to real rack count
+      expect(Object.keys(built.registry.racks)).toEqual(['r1']);
     } finally {
       disposeScene(built);
     }
@@ -28,7 +26,7 @@ describe('buildScene bay count (NG-PH3D P41)', () => {
   it('N real racks -> exactly N real enclosures, left to right in the given order', () => {
     const built = buildScene({ racks: [bay('r1'), bay('r2'), bay('r3'), bay('r4')], links: [] });
     try {
-      const keys = Object.keys(built.registry.racks).filter((k) => k !== CPI_KEY);
+      const keys = Object.keys(built.registry.racks);
       expect(keys).toEqual(['r1', 'r2', 'r3', 'r4']);
       const xs = keys.map((k) => built.registry.racks[k]!.x);
       expect(xs).toEqual([...xs].sort((a, b) => a - b)); // left-to-right, no overlap

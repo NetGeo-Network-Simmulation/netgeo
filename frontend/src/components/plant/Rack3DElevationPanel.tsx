@@ -56,7 +56,6 @@ import {
   mediaFor,
   stockLength,
   tick,
-  CPI_KEY,
   MEDIA,
   RACK_SPECS,
   U,
@@ -397,7 +396,7 @@ export function Rack3DElevationPanel() {
   const placeCamera = useCallback((az = view.current.az) => {
     const cam = camRef.current, built = builtRef.current;
     if (!cam || !built) return;
-    const keys = Object.keys(built.registry.racks).filter((k) => k !== CPI_KEY);
+    const keys = Object.keys(built.registry.racks);
     if (keys.length === 0) return; // nothing real built (shouldn't happen — buildScene only runs for >=1 bay)
     const entries = keys.map((k) => built.registry.racks[k]!);
     const focusKey = view.current.zoomed && built.registry.racks[view.current.focusRack] ? view.current.focusRack : null;
@@ -435,6 +434,17 @@ export function Rack3DElevationPanel() {
     }
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setSize(host.clientWidth || 1, host.clientHeight || 1);
+    // Slice G bug 2: no tone mapping meant any light hit above 1.0 (a device
+    // top catching three overhead-ish lights at once, easily) clipped hard
+    // to solid white instead of rolling off — the "glowing faceplate" was
+    // really an overexposed highlight, not a wrong material. Reinhard rolls
+    // that off instead of clipping it, without re-tuning every light's
+    // intensity per surface angle. ACESFilmic was tried first and reverted —
+    // its contrast S-curve deepened the already-dark frame/panels further,
+    // fighting the AmbientLight fix right below this effect for bug 2's
+    // other half; Reinhard compresses highlights without crushing shadows.
+    renderer.toneMapping = THREE.ReinhardToneMapping;
+    renderer.toneMappingExposure = 1.5;
     host.appendChild(renderer.domElement);
     rendererRef.current = renderer;
 
@@ -762,7 +772,6 @@ export function Rack3DElevationPanel() {
       }
       const pt = raycastFromEvent(e)[0]?.point;
       const rackXs = Object.entries(built.registry.racks)
-        .filter(([k]) => k !== CPI_KEY)
         .map(([key, v]) => ({ key, x: v.x }));
       const target = pt ? resolveDropTarget(rackXs, { x: pt.x, y: pt.y }) : null;
       cand.target = target;
@@ -833,7 +842,6 @@ export function Rack3DElevationPanel() {
         if (!any) return;
         let best: string | null = null, bd = Infinity;
         for (const [k, rk] of Object.entries(built.registry.racks)) {
-          if (k === CPI_KEY) continue; // decorative prop, not a real rack — never a valid add-device target
           const dx = Math.abs(any.point.x - rk.x);
           if (dx < bd) { bd = dx; best = k; }
         }
@@ -848,7 +856,6 @@ export function Rack3DElevationPanel() {
       // now click-to-place since the rack/RU dropdown it used is gone).
       if (currentSelNode.current && currentSelNode.current.rack_id == null && hits[0]) {
         const rackXs = Object.entries(built.registry.racks)
-          .filter(([k]) => k !== CPI_KEY)
           .map(([key, v]) => ({ key, x: v.x }));
         const target = resolveDropTarget(rackXs, { x: hits[0].point.x, y: hits[0].point.y });
         const { bays: curBays, viewRacks: curRacks, moveDevice: curMove } = dragCtxRef.current;
@@ -899,7 +906,7 @@ export function Rack3DElevationPanel() {
   const deviceCount = bays.reduce((n, b) => n + b.devices.length, 0);
   const btn = (on: boolean) =>
     `flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs transition ${
-      on ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-recess hover:bg-fg/5 hover:text-fg'
+      on ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-fg-muted hover:bg-fg/5 hover:text-fg'
     }`;
 
   /** Per-rack enclosure-profile picker, one per bay actually shown — replaces
@@ -907,7 +914,7 @@ export function Rack3DElevationPanel() {
    *  is automatic now, driven by the site selector, not manually chosen
    *  here; this control only still lets you change *how a shown rack looks*). */
   const rackChip = (rack: Rack) => (
-    <label key={rack.id} className="flex min-w-0 items-center gap-1.5 text-xs text-recess">
+    <label key={rack.id} className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
       <span className="max-w-[7rem] truncate text-fg" title={rack.name}>{rack.name}</span>
       <select
         value={rack.enclosure_profile ?? DEFAULT_ENCLOSURE}
@@ -1007,7 +1014,7 @@ export function Rack3DElevationPanel() {
         {/* Site being viewed — every rack in it renders, no manual per-rack
             picking (permintaan Surya). Switching this is what "resets to 0"
             and then shows only the new site's racks. */}
-        <label className="flex min-w-0 items-center gap-1.5 text-xs text-recess">
+        <label className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
           Site
           <select
             aria-label="Site ditampilkan"
@@ -1084,7 +1091,7 @@ export function Rack3DElevationPanel() {
           the exact same place-a-device path P2 already shipped. */}
       {unplaced.length > 0 && (
         <div className="flex flex-wrap items-center gap-1.5 border-b border-fg/10 px-3 py-1.5 text-xs">
-          <span className="text-recess">Unplaced ({unplaced.length})</span>
+          <span className="text-fg-muted">Unplaced ({unplaced.length})</span>
           {unplaced.map((n) => (
             <button
               key={n.id}
@@ -1111,9 +1118,9 @@ export function Rack3DElevationPanel() {
           klik-untuk-tempatkan, sama seperti sebelumnya. */}
       {selNode && (
         <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-1.5 text-xs">
-          <Move className="size-3.5 text-recess" />
+          <Move className="size-3.5 text-fg-muted" />
           <span className="text-fg">{selNode.name}</span>
-          <span className="text-recess">
+          <span className="text-fg-muted">
             {selNode.rack_id
               ? 'Seret perangkat di scene untuk memindahkannya'
               : 'Klik U kosong di sebuah rak untuk menempatkannya'}
@@ -1135,7 +1142,7 @@ export function Rack3DElevationPanel() {
       </div>
 
       {/* status bar + legend */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-fg/10 px-3 py-1.5 text-[11px] text-recess">
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-fg/10 px-3 py-1.5 text-[11px] text-fg-muted">
         <span className="text-fg">{status}</span>
         {/* NG-PH3D P3: watts/BTU for exactly the two racks shown — same
             nodeWatts()/wattsToBtu() the 2D panel's per-site rollup uses. */}

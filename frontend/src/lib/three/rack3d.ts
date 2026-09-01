@@ -42,14 +42,19 @@ export interface RackSpec {
 }
 
 /* Enclosure datasheets — width × depth × height in mm, per vendor spec. */
+// QA 2026-09-01 (Slice G bug 2): these were 0x17171a..0x2e2e30 — within a
+// few percent of the scene's own near-black background (--ng-bg-0 #0F0F0E),
+// so every enclosure read as a flat silhouette instead of dark metal. Lifted
+// each to sit clearly above the background while keeping the per-vendor
+// shade differences (still reads as "dark rack", not light gray).
 export const RACK_SPECS: Record<string, RackSpec> = {
-  apc: { label: 'APC NetShelter SX AR3100', u: 42, w: 600, d: 1070, h: 1991, frame: 0x17171a, door: true, exit: 'top' },
-  dell: { label: 'Dell PowerEdge 4210', u: 42, w: 600, d: 1200, h: 2010, frame: 0x191a1c, door: true, exit: 'top' },
-  hpe: { label: 'HPE G2 Enterprise 42U', u: 42, w: 600, d: 1075, h: 2015, frame: 0x1c1d20, door: true, exit: 'rear' },
-  vertiv: { label: 'Vertiv VR3350', u: 42, w: 600, d: 1100, h: 2000, frame: 0x18181a, door: true, exit: 'side' },
-  eaton: { label: 'Eaton RE 42U', u: 42, w: 600, d: 1000, h: 2000, frame: 0x1a1a1c, door: true, exit: 'side' },
-  rittal: { label: 'Rittal TS IT 42U', u: 42, w: 600, d: 1000, h: 2000, frame: 0x2a2c2e, door: true, exit: 'top' },
-  cpi: { label: 'Chatsworth two-post 45U', u: 45, w: 500, d: 76, h: 2134, frame: 0x2e2e30, door: false, exit: 'side' },
+  apc: { label: 'APC NetShelter SX AR3100', u: 42, w: 600, d: 1070, h: 1991, frame: 0x35353a, door: true, exit: 'top' },
+  dell: { label: 'Dell PowerEdge 4210', u: 42, w: 600, d: 1200, h: 2010, frame: 0x38393e, door: true, exit: 'top' },
+  hpe: { label: 'HPE G2 Enterprise 42U', u: 42, w: 600, d: 1075, h: 2015, frame: 0x3d3f45, door: true, exit: 'rear' },
+  vertiv: { label: 'Vertiv VR3350', u: 42, w: 600, d: 1100, h: 2000, frame: 0x363639, door: true, exit: 'side' },
+  eaton: { label: 'Eaton RE 42U', u: 42, w: 600, d: 1000, h: 2000, frame: 0x393a3e, door: true, exit: 'side' },
+  rittal: { label: 'Rittal TS IT 42U', u: 42, w: 600, d: 1000, h: 2000, frame: 0x4c4f52, door: true, exit: 'top' },
+  cpi: { label: 'Chatsworth two-post 45U', u: 45, w: 500, d: 76, h: 2134, frame: 0x525356, door: false, exit: 'side' },
 };
 
 /** A rack's real backend `ru_height` almost never matches its enclosure
@@ -208,9 +213,13 @@ function mat(name: string, color: number, opts: THREE.MeshStandardMaterialParame
 
 function makeMaterials() {
   const m = {
-    frame: mat('rack-frame', 0x1b1b1d, { roughness: 0.5, metalness: 0.35 }),
-    panelDark: mat('panel-dark', 0x121211, { roughness: 0.7 }),
-    mesh: mat('mesh-door', 0x232325, { roughness: 0.55, metalness: 0.3, transparent: true, opacity: 0.55 }),
+    frame: mat('rack-frame', 0x35353a, { roughness: 0.5, metalness: 0.35 }),
+    // QA 2026-09-01 (Slice G bug 2): panelDark/mesh were 0x121211/0x232325 —
+    // the side panels and mesh front door are the largest visible surfaces
+    // in the 2.5D POV, so leaving them this dark is most of why the whole
+    // enclosure read as a black silhouette even after the frame/rail lift.
+    panelDark: mat('panel-dark', 0x3c3b38, { roughness: 0.7 }),
+    mesh: mat('mesh-door', 0x505055, { roughness: 0.55, metalness: 0.3, transparent: true, opacity: 0.55 }),
     tray: mat('ladder-tray', 0x3a3a3c, { roughness: 0.45, metalness: 0.4 }),
     port: mat('port-cage', 0x0b0b0c, { roughness: 0.85, metalness: 0.08 }),
     ledOn: mat('led-green', 0x27c28b, { emissive: 0x27c28b, emissiveIntensity: 0.9, roughness: 0.4 }),
@@ -241,13 +250,15 @@ function railTexture(u: number) {
   cvs.width = 32;
   cvs.height = perU * u;
   const ctx = cvs.getContext('2d')!;
-  ctx.fillStyle = '#1B1B1D';
+  // QA 2026-09-01 (Slice G bug 2): was #1B1B1D, near the scene's own
+  // near-black background — matches the RACK_SPECS frame lift above.
+  ctx.fillStyle = '#35353A';
   ctx.fillRect(0, 0, cvs.width, cvs.height);
   // EIA-310: three holes per U at 15.875 / 15.875 / 12.7 mm centres
   const offs = [0.1786, 0.5, 0.8214].map((f) => f * perU);
   for (let i = 0; i < u; i++) {
     const y0 = i * perU;
-    ctx.fillStyle = '#07070A';
+    ctx.fillStyle = '#141416';
     for (const o of offs) ctx.fillRect(11, y0 + o - 3.4, 7, 6.8);
     ctx.fillStyle = 'rgba(250,249,245,0.42)';
     ctx.font = '600 7px monospace';
@@ -450,8 +461,7 @@ export interface RackBay {
   devices: DeviceDef[];
   /** Real backend `ru_height` (RU) — when it differs from the enclosure
    *  profile's own U count, the built mesh follows this instead (Slice F).
-   *  Undefined/omitted keeps the profile's own U count (existing fixtures,
-   *  the CPI decorative prop). */
+   *  Undefined/omitted keeps the profile's own U count (existing fixtures). */
   ruHeight?: number;
 }
 
@@ -469,16 +479,11 @@ export interface BuiltScene {
   registry: Registry;
   trayY: number;
   /** Total real-rack row width in metres (sum of enclosure widths + 0.1m
-   *  gaps, N-1 gaps for N bays) — NOT counting the decorative CPI cabinet.
-   *  Exposed so the host panel's camera framing can widen the frustum for a
-   *  wide row instead of duplicating this arithmetic (NG-PH3D P41). */
+   *  gaps, N-1 gaps for N bays). Exposed so the host panel's camera framing
+   *  can widen the frustum for a wide row instead of duplicating this
+   *  arithmetic (NG-PH3D P41). */
   rowWidthM: number;
 }
-
-/** Registry key of the decorative CPI cable-management cabinet buildScene()
- *  always appends after the real racks — not a user rack, callers that walk
- *  `registry.racks` to frame/pick real bays must skip it. */
-export const CPI_KEY = '__cpi__';
 
 export function buildScene(opts: BuildOptions): BuiltScene {
   const mats = makeMaterials();
@@ -1805,10 +1810,6 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     xOf.set(b.key, x);
     root.add(buildRack(b.key, b.enclosure, x, b.ruHeight));
   });
-  const lastSpec = specs[specs.length - 1]!;
-  const cpiX = xOf.get(bays[bays.length - 1]!.key)! + lastSpec.w / 2000 + 0.75;
-  root.add(buildRack(CPI_KEY, 'cpi', cpiX));
-
   for (const b of bays) {
     for (const def of b.devices) registry.racks[b.key]!.group.add(buildDevice(def, b.key));
   }
@@ -1817,7 +1818,13 @@ export function buildScene(opts: BuildOptions): BuiltScene {
 
   const trayY = Math.max(...specs.map((s) => s.h)) / 1000 + 0.11;
   const firstX = xOf.get(bays[0]!.key)!;
-  root.add(buildTray(firstX - specs[0]!.w / 2000 - 0.1, cpiX + 0.4, trayY));
+  const lastSpec = specs[specs.length - 1]!;
+  const lastX = xOf.get(bays[bays.length - 1]!.key)!;
+  // Same 0.1m overhang past the row on both ends (mirrors the left edge
+  // below) — used to derive from the decorative CPI cabinet's position, but
+  // that prop never belonged in the scene (Slice G bug 1: it drew a second,
+  // user-never-added rack next to whatever the user actually built).
+  root.add(buildTray(firstX - specs[0]!.w / 2000 - 0.1, lastX + lastSpec.w / 2000 + 0.1, trayY));
 
   // vertical manager channel per bay: between the 19" rail and the side panel
   const chanOf = new Map<string, number>();
@@ -1984,7 +1991,10 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   // setColorAt. `userData.portMap[instanceId]` lets the click-to-patch
   // raycaster (Rack3DElevationPanel) resolve a hit back to a real
   // dev/port pair even though there's no per-port mesh to carry it.
-  const cageMat = track(mat('cage-instanced', 0x8c8f94, { roughness: 0.4, metalness: 0.55 }));
+  // QA 2026-09-01 (Slice G bug 2): was roughness 0.4/metalness 0.55 — glossy
+  // enough that a packed SFP/QSFP row caught the key light as one continuous
+  // hot (near-white) band instead of reading as individual metal cages.
+  const cageMat = track(mat('cage-instanced', 0x6a6d72, { roughness: 0.62, metalness: 0.35 }));
   for (const fam of ['cage-sfp', 'cage-qsfp'] as CageFamily[]) {
     const list = cageInstances[fam];
     if (!list.length) continue;
@@ -2008,6 +2018,15 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   const amb = new THREE.HemisphereLight(0xdce6ff, 0x1a1a18, 1.45);
   amb.name = 'room-ambient';
   root.add(amb);
+  // Slice G bug 2: HemisphereLight still scales with a surface normal's
+  // vertical component — a side panel or a swung-open door (normal roughly
+  // horizontal) sits far enough from every DirectionalLight below that it
+  // read as flat black regardless of how much its own material was lifted.
+  // A small orientation-independent AmbientLight is the one light every
+  // face picks up no matter which way it's turned.
+  const flat = new THREE.AmbientLight(0xd8d4cc, 0.95);
+  flat.name = 'omni-fill';
+  root.add(flat);
   // was 2.1 — paired with the chassis lift() above, this alone was enough to
   // clip the faceplate toward white next to the frame's own near-black
   // albedo (which no amount of this light could brighten in kind).

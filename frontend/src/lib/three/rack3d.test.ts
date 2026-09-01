@@ -178,7 +178,7 @@ describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
           dev('a-duct', 2, 1, 'duct', 0),
           dev('a-sw', 3, 1, 'switch', 24, 'rj45'),
         ] },
-        { key: 'B', enclosure: 'cpi', devices: [dev('b-sw', 5, 1, 'switch', 12, 'qsfp28')] }, // side exit, no door — buildScene always adds a 3rd cpi rack too
+        { key: 'B', enclosure: 'cpi', devices: [dev('b-sw', 5, 1, 'switch', 12, 'qsfp28')] }, // side exit, no door
       ],
       links: [
         link(['a-odf', 0], ['a-sw', 0], 'os2'), // panel-hop: odf counts as a hop kind
