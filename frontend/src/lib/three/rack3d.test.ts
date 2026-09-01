@@ -195,15 +195,12 @@ describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
     }
   });
 
-  // NG-PH3D 3e (Surya) known defect, not fixed this slice (tracked for
-  // follow-up, same as the it.skip above): externalCableCurve's tray-stub
-  // tail travels `dir * half` off the rack's own exit x, but for a top-exit
-  // enclosure that still lands back inside the SAME rack's own chassis/rails
-  // a few cm away (confirmed via this repro) — the stub needs the rack's own
-  // half-width (RACK_SPECS[...].w), not just a fixed clearance, to reliably
-  // clear its own footprint on every exit kind. Skipped rather than deleted
-  // so the repro isn't lost.
-  it.skip('external link (other endpoint not in this scene) routes to a tray stub without clipping the rack', () => {
+  // NG-PH3D 3e/D2: was a known, tracked defect (externalCableCurve's
+  // tray-stub tail could land back inside its own rack's chassis/rails a
+  // few cm away on a top-exit enclosure) — `half` (rack3d.ts) is now
+  // derived from the real distance to rackA's own far edge instead of a
+  // guessed 600mm-wide constant. Closed.
+  it('external link (other endpoint not in this scene) routes to a tray stub without clipping the rack', () => {
     const opts: BuildOptions = {
       racks: [
         { key: 'A', enclosure: 'apc', devices: [ // top exit
@@ -229,6 +226,40 @@ describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
         (c) => c.meta.devs.length === 1 && c.mediaKey !== 'pwrA' && c.mediaKey !== 'pwrB');
       expect(externalLinks.length).toBe(3);
       assertNoIntersections(built);
+    } finally {
+      disposeScene(built);
+    }
+  });
+
+  // NG-PH3D 3e/D2: externalCableCurve's whole point is to route the in-scene
+  // half of an off-scene link up into the cable tray rather than dropping
+  // it at some arbitrary mid-air height — prove the stub's own end actually
+  // reaches tray height, on both an exit kind that climbs straight to
+  // trayY (top) and one that has to sweep across via `descend()` (side).
+  it('an external link\'s tray stub actually reaches tray height, on a top exit and a side exit', () => {
+    const opts: BuildOptions = {
+      racks: [
+        { key: 'A', enclosure: 'apc', devices: [dev('a-sw', 3, 1, 'switch', 24, 'rj45')] }, // top exit
+        { key: 'B', enclosure: 'vertiv', devices: [dev('b-sw', 5, 1, 'switch', 24, 'rj45')] }, // side exit
+      ],
+      links: [
+        link(['a-sw', 2], ['offsite-radio', 0], 'cat6a'),
+        link(['b-sw', 5], ['other-site-core', 0], 'cat6a'),
+      ],
+    };
+    const built = buildScene(opts);
+    built.root.updateMatrixWorld(true);
+    try {
+      const externalLinks = built.registry.cables.filter(
+        (c) => c.meta.devs.length === 1 && c.mediaKey !== 'pwrA' && c.mediaKey !== 'pwrB');
+      expect(externalLinks.length).toBe(2);
+      for (const c of externalLinks) {
+        const stubEnd = c.curve.getPointAt(1);
+        // within 5cm of the tray deck's own y (trayY + a small clearance
+        // baked into externalCableCurve's last waypoint) — not just "went
+        // up some", actually arrived at the tray it's meant to terminate in.
+        expect(Math.abs(stubEnd.y - built.trayY)).toBeLessThan(0.05);
+      }
     } finally {
       disposeScene(built);
     }

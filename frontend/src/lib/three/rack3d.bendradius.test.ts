@@ -117,7 +117,7 @@ describe('minimum bend-radius invariant (NG-PH3D 3a)', () => {
   // geometric here either, the tray-stub tail's elbow turn falls a few mm
   // short of cat6a's 51mm minimum on this same top/side-exit pairing).
   // Skipped rather than deleted so the repro isn't lost.
-  it.skip('external link (other endpoint off-scene) stays within its own minBendM, top and side exits', () => {
+  it('external link (other endpoint off-scene) stays within its own minBendM, top and side exits', () => {
     const opts: BuildOptions = {
       racks: [
         { key: 'A', enclosure: 'apc', devices: [dev('a-sw', 3, 1, 'switch', 24, 'rj45')] }, // top exit
