@@ -52,6 +52,20 @@ export const RACK_SPECS: Record<string, RackSpec> = {
   cpi: { label: 'Chatsworth two-post 45U', u: 45, w: 500, d: 76, h: 2134, frame: 0x2e2e30, door: false, exit: 'side' },
 };
 
+/** A rack's real backend `ru_height` almost never matches its enclosure
+ *  profile's datasheet U count (RACK_SPECS is a fixed template per vendor
+ *  SKU) — Slice F: derive the mesh spec actually built from the real height
+ *  instead of always building the template's own U count regardless. The
+ *  frame cap / base thickness above the rail zone is real hardware, not
+ *  proportional to U count, so it's held constant (taken from the template)
+ *  while only the rail section scales. */
+function deriveSpec(specKey: string, ruHeight?: number): RackSpec {
+  const t = RACK_SPECS[specKey]!;
+  if (!ruHeight || ruHeight === t.u) return t;
+  const capMm = t.h - t.u * U * 1000;
+  return { ...t, u: ruHeight, h: ruHeight * U * 1000 + capMm };
+}
+
 export interface MediaSpec {
   label: string;
   jacket: number;
@@ -434,6 +448,11 @@ export interface RackBay {
   /** RACK_SPECS enclosure key */
   enclosure: string;
   devices: DeviceDef[];
+  /** Real backend `ru_height` (RU) — when it differs from the enclosure
+   *  profile's own U count, the built mesh follows this instead (Slice F).
+   *  Undefined/omitted keeps the profile's own U count (existing fixtures,
+   *  the CPI decorative prop). */
+  ruHeight?: number;
 }
 
 export interface BuildOptions {
@@ -562,8 +581,8 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   };
 
   /* ─── Enclosure ───────────────────────────────────────────────────────── */
-  function buildRack(key: string, specKey: string, x: number) {
-    const s = RACK_SPECS[specKey]!;
+  function buildRack(key: string, specKey: string, x: number, ruHeight?: number) {
+    const s = deriveSpec(specKey, ruHeight);
     const w = s.w / 1000, d = s.d / 1000, h = s.h / 1000;
     const g = new THREE.Group();
     g.name = 'rack-' + key + '-' + specKey;
@@ -1770,7 +1789,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   // same xA/xB the old fixed formula did (verified: for equal widths this
   // reduces to -(w+gap)/2 / (w+gap)/2).
   const bays = opts.racks;
-  const specs = bays.map((b) => RACK_SPECS[b.enclosure]!);
+  const specs = bays.map((b) => deriveSpec(b.enclosure, b.ruHeight));
   const gap = 0.1;
   let cursor = 0;
   const rawX = specs.map((s) => {
@@ -1784,7 +1803,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   bays.forEach((b, i) => {
     const x = rawX[i]! - rowOffset;
     xOf.set(b.key, x);
-    root.add(buildRack(b.key, b.enclosure, x));
+    root.add(buildRack(b.key, b.enclosure, x, b.ruHeight));
   });
   const lastSpec = specs[specs.length - 1]!;
   const cpiX = xOf.get(bays[bays.length - 1]!.key)! + lastSpec.w / 2000 + 0.75;

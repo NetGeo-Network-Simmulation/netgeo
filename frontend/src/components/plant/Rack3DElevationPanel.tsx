@@ -41,6 +41,7 @@ import {
   DEFAULT_ENCLOSURE,
   dropDecision,
   ENCLOSURE_KEYS,
+  frustumSpan,
   racksForSite,
   resolveDropTarget,
 } from '@/lib/three/plantAdapter';
@@ -350,26 +351,22 @@ export function Rack3DElevationPanel() {
     target: { rackKey: string; ru: number } | null;
   } | null>(null);
 
-  /** Frustum half-height the shot needs: the tallest shown rack (backend
-   *  ru_height, not the fixed-42U enclosure mesh) plus tray headroom — or,
-   *  unzoomed with more than one bay, whatever's larger between that and
-   *  the half-width the full row needs (NG-PH3D P41: a 2-bay shot was
-   *  always narrow enough that only height mattered; an N-bay row can now
-   *  be the wider constraint). Zoomed work-mode frames one bay, so the
-   *  row's total width is irrelevant then. */
+  /** Frustum half-height the shot needs — the exact-fit arithmetic lives in
+   *  plantAdapter's frustumSpan() (pure, unit-tested); this just supplies
+   *  the ref-derived inputs and applies the outer zoom factor. `scale`
+   *  (POV.span, 1.40 — permintaan Surya) is headroom on top of the exact
+   *  fit, not a divisor: it widens the frustum, it never shrinks it below
+   *  what frustumSpan() says is needed to avoid cropping the rack (Slice F
+   *  bug 1 — the old `/scale` shrank the shot ~29% and always clipped the
+   *  top). Zoomed work-mode still deliberately closes in (0.42). */
   const spanFor = useCallback((scale: number, zoomed: boolean) => {
     const heights = Object.values(rackHeightRef.current);
-    const top = (heights.length ? Math.max(...heights) : 42 * U) + 0.3;
-    const heightSpan = (top + 0.08) / 2;
+    const railTopM = heights.length ? Math.max(...heights) : 42 * U;
     const host = hostRef.current;
     const aspect = host ? (host.clientWidth || 1) / (host.clientHeight || 1) : 16 / 9;
     const rowWidthM = builtRef.current?.rowWidthM ?? 0;
-    // +1.2m: generous headroom for the cable tray overhang and the always-
-    // present CPI cabinet past the last real rack, neither counted in
-    // rowWidthM (see rack3d.ts's own comment on the field).
-    const widthSpan = !zoomed && rowWidthM > 0 ? (rowWidthM + 1.2) / 2 / aspect : 0;
-    const span = Math.max(heightSpan, widthSpan);
-    return (span / Math.max(0.2, scale)) * (zoomed ? 0.42 : 1);
+    const span = frustumSpan({ railTopM, rowWidthM, aspect, zoomed });
+    return zoomed ? span * 0.42 : span * Math.max(1, scale);
   }, []);
 
   const fitCamera = useCallback(() => {

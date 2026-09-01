@@ -226,7 +226,7 @@ export function adaptTopology(
   const ifaceByDevPort = new Map<string, string>();
   for (const rack of shown) {
     const { devices, ordinals, ifaceByDevPort: devPorts } = adaptRackDevices(rack, nodes, deviceTypesById);
-    bays.push({ key: rack.id, enclosure: rack.enclosure_profile ?? DEFAULT_ENCLOSURE, devices });
+    bays.push({ key: rack.id, enclosure: rack.enclosure_profile ?? DEFAULT_ENCLOSURE, devices, ruHeight: rack.ru_height });
     for (const d of devices) devIdToKey.set(d.id, rack.id);
     for (const [ifaceId, ordinal] of ordinals) ordinalsByIface.set(ifaceId, ordinal);
     for (const [key, ifaceId] of devPorts) ifaceByDevPort.set(key, ifaceId);
@@ -383,4 +383,33 @@ export function dropDecision(
   if (ruHeight == null) return { commit: false };
   if (!canPlaceDevice(bays, target.rackKey, target.ru, span, ruHeight, deviceId)) return { commit: false };
   return { commit: true, rackId: target.rackKey, ruStart: target.ru };
+}
+
+/** Exact-fit orthographic half-extent (before Rack3DElevationPanel's own
+ *  POV.span looseness multiplier) that keeps a rack row — floor to mesh-top
+ *  plus tray headroom — entirely inside the camera frustum. Slice F: pulled
+ *  out of that panel's spanFor() as a pure function so the arithmetic can be
+ *  tested without a WebGL context (spanFor() itself just supplies the
+ *  ref-derived inputs and returns `zoomed ? span*0.42 : span*scale`).
+ *
+ *  A naive `(railTopM + pad) / 2` used to undershoot: the look-at height
+ *  (`cy`, kept in lockstep with placeCamera's own 0.46 factor) is well below
+ *  the true vertical centre of [floor, meshTop], so halving the top alone
+ *  left the frustum's top edge short of the real mesh top — the rack's own
+ *  head got clipped regardless of any outer zoom factor. */
+export function frustumSpan(opts: {
+  /** Tallest shown rack's real rail height (ru_height * U), metres. */
+  railTopM: number;
+  /** Real-rack row width, metres (0 before anything is built). */
+  rowWidthM: number;
+  /** Viewport width / height. */
+  aspect: number;
+  zoomed: boolean;
+}): number {
+  const meshTop = opts.railTopM + 0.3; // frame cap + cable-tray headroom above the rails
+  const cy = opts.railTopM * 0.46; // placeCamera's look-at height (unfocused)
+  const floorY = -0.08; // casters/plinth sit slightly below the rail zero
+  const heightSpan = Math.max(cy - floorY, meshTop - cy);
+  const widthSpan = !opts.zoomed && opts.rowWidthM > 0 ? (opts.rowWidthM + 1.2) / 2 / opts.aspect : 0;
+  return Math.max(heightSpan, widthSpan);
 }
