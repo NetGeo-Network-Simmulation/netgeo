@@ -1229,9 +1229,38 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const kind = rack.spec.exit;
     // must agree with the aperture cut in buildRack (ex.x / ex.z)
     const chx = rack.x + rack.w / 2 - 0.13;
-    if (kind === 'side') return { p: new THREE.Vector3(rack.x + rack.w / 2 + 0.016, rack.h * 0.86, rack.d / 2 - 0.22), kind };
-    if (kind === 'rear') return { p: new THREE.Vector3(chx, rack.h * 0.93, -rack.d / 2 + 0.1), kind };
-    return { p: new THREE.Vector3(chx, rack.h + 0.028, rack.d / 2 - 0.2), kind };
+    if (kind === 'side') return { p: new THREE.Vector3(rack.x + rack.w / 2 + 0.016, rack.h * 0.86, rack.d / 2 - 0.22), kind, d: rack.d };
+    if (kind === 'rear') return { p: new THREE.Vector3(chx, rack.h * 0.93, -rack.d / 2 + 0.1), kind, d: rack.d };
+    return { p: new THREE.Vector3(chx, rack.h + 0.028, rack.d / 2 - 0.2), kind, d: rack.d };
+  }
+
+  /** NG-PH3D 3d: the two EIA rail uprights (buildRack's `railGeos`) sit at
+   *  a fixed x per rack half (`MOUNT_W/2`) and each occupies a narrow,
+   *  fixed z band (`d/2-0.09` and `-d/2+0.16`) running the rack's full
+   *  height — a side-exit rack's cable lane sits close enough to that x
+   *  that a z-only nudge meant to buy a filleted corner more shared-edge
+   *  length can walk the STRAIGHT SEGMENT to its neighbour through one of
+   *  those bands, even when the nudged point itself lands safely outside
+   *  it (confirmed empirically: capping only the endpoint still left the
+   *  segment from a neighbour on the band's far side clipping it).
+   *  `from` is that neighbour's own z (assumed already safe, since it's
+   *  never itself nudged) — the target is capped at the near edge of
+   *  whichever band sits between the two, so the whole segment stays on
+   *  `from`'s side of it. */
+  function clampZAwayFromRail(from: number, to: number, d: number): number {
+    // rail's own 20mm z-depth/2, plus enough margin for the Catmull-Rom
+    // curve through this waypoint to overshoot past it before the next
+    // control point pulls it back (measured empirically chasing this
+    // invariant's violations — a margin sized to the rail's own physical
+    // edge alone left the smoothed curve clipping it anyway).
+    const half = 0.01 + 0.02;
+    let z = to;
+    for (const rz of [d / 2 - 0.09, -d / 2 + 0.16]) {
+      const lo = rz - half, hi = rz + half;
+      if (from <= lo) z = Math.min(z, lo);
+      else if (from >= hi) z = Math.max(z, hi);
+    }
+    return z;
   }
 
   /** The gathered bundle: each run keeps its jacket colour, strands twist
@@ -1319,7 +1348,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     }
   }
 
-  type ExitRef = { p: THREE.Vector3; kind: ExitKind };
+  type ExitRef = { p: THREE.Vector3; kind: ExitKind; d: number };
 
   /** Structured run: port → forward → droop → side comb → (tray) → back in. */
   function cableCurve(
@@ -1372,23 +1401,42 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // limit, not the fillet math — nudge the lane-side x outward for
       // this one sweep (not `la` itself, so the comb-channel merge point
       // used elsewhere is untouched) to give a stiff cable's two turns
-      // enough shared edge to both reach their own minimum. top/rear only:
-      // a side-exit rack's mounting rail sits close enough to `la` that
-      // this same nudge walked the sweep straight into it (caught by P4's
-      // own no-intersection invariant) — side-exit racks keep the original
-      // unwidened sweep, so a stiff cable through one still isn't proven
-      // to clear its own bend radius here; only top/rear are.
+      // enough shared edge to both reach their own minimum. top/rear widen
+      // the lane-side x for this one sweep (not `la` itself, so the
+      // comb-channel merge point used elsewhere is untouched). A side-exit
+      // rack's mounting rail sits in that x band instead, and the cutout
+      // it must thread through is only ~360mm tall — both a y nudge and an
+      // x nudge each walked a sample into one of those (caught by P4's own
+      // no-intersection invariant when tried; a y nudge also flips the
+      // corner at the lane end into a much sharper reversal whenever
+      // climbA is skipped, made worse not better). z is the one axis nudged
+      // in this file, this test) — instead of sharing one z (their
+      // midpoint) as top/rear's sweep does, pull each end toward the z its
+      // OWN other neighbour already sits at: the lane end toward legIn's
+      // own z, the exit end toward the exit aperture's own z. That's a
+      // strictly gentler turn at both neighbouring joints too (each point
+      // moves toward, not away from, its other neighbour) as well as a
+      // longer shared edge.
       const laX = exitA.kind === 'side' ? la : la + Math.sign(ea.x - la || 1) * minBend * 1.2;
       const climbA = ea.y - 0.22;
       if (climbA > a.y + 0.03) pts.push(new THREE.Vector3(la, climbA, a.z + COMB_Z + tierA));
-      const preExitZA = (a.z + COMB_Z + tierA + ea.z) / 2;
-      pts.push(new THREE.Vector3(laX, ea.y - preDrop, preExitZA));
+      const zBefore = a.z + COMB_Z + tierA;
+      const preExitZA = (zBefore + ea.z) / 2;
+      // NG-PH3D 3d: the two ends split this z-spread unevenly — the lane
+      // end (deep inside the rack, nowhere near the cutout regardless of
+      // z) can move freely, but the exit end sits right at the aperture,
+      // so it's pulled almost all the way to ea.z specifically (not just
+      // partway) since that's the exit's own already-verified-safe centre,
+      // not merely "some direction away from the midpoint".
+      const sideZFracLane = exitA.kind === 'side' ? 0.35 : 0;
+      const sideZFracExit = exitA.kind === 'side' ? 0.85 : 0;
+      pts.push(new THREE.Vector3(laX, ea.y - preDrop, preExitZA + (zBefore - preExitZA) * sideZFracLane));
       // NG-PH3D P4: sweep x from the lane to the exit point at a fixed z
       // first — going straight from (la, preExitZA) to ea.x/ea.clone() (x and
       // z changing together) could cut through the mounting rail sitting
       // between them for a rear/top-exit rack (same class of bug as the
       // PDU/tray-descent fixes above).
-      pts.push(new THREE.Vector3(ea.x, ea.y - preDrop, preExitZA));
+      pts.push(new THREE.Vector3(ea.x, ea.y - preDrop, preExitZA + (ea.z - preExitZA) * sideZFracExit));
       const sx = ((runIx % 5) - 2) * 0.016; // across the 210 mm aperture
       const sz = tzOf(runIx);
       if (exitA.kind === 'top') {
@@ -1423,7 +1471,43 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       pts.push(new THREE.Vector3(lb, eb.y - preDrop, (b.z + COMB_Z + tierB + eb.z) / 2));
       const climbB = eb.y - 0.22;
       if (climbB > b.y + 0.03) pts.push(new THREE.Vector3(lb, climbB, b.z + COMB_Z + tierB));
-      pts.push(new THREE.Vector3(lb, b.y - drop(b.x, lb) * 0.3, b.z + COMB_Z + tierB));
+      // NG-PH3D 3d: this point stands in for legIn(b)'s own last point (the
+      // reversed spread below drops the real one via slice(1)) so THIS end
+      // of the run has a fillet-able corner symmetric with legIn(a)'s at
+      // the top of this function — but unlike that one, it's exposed to
+      // routeCurve's fillet (it's inside [prefixEnd, suffixStart]), and its
+      // only neighbour on the far side is legIn(b)'s own 62%-of-gap point,
+      // never moved. When a port already sits close to the lane in x, that
+      // shared edge is too short for a stiff cable's own minimum bend
+      // radius no matter how it's filleted (confirmed empirically chasing
+      // this invariant's last violations, only reachable through this
+      // slice's own side-exit scenario — top/rear's tested devices never
+      // land close enough to the lane to trip it, so this floor is scoped
+      // to `exitB.kind === 'side'` rather than risking their proven-fine
+      // geometry). y looked free the same way the sweep's did, but this
+      // point's OTHER neighbour (climbB, or the zmove point when climbB is
+      // skipped) shares its exact y-formula-derived z already, and its
+      // incoming edge is often a long straight drop — nudging y here
+      // either shortens that drop into the same short-shared-edge problem
+      // this is meant to fix, or, worse, reverses partway back up into it
+      // (confirmed empirically). z moves this point off both neighbours'
+      // near-identical z without touching either one's own position — but
+      // this lane sits close enough to its own rail's x that the nudge can
+      // land inside the rail's own z band, so it's run through the same
+      // clamp the P4 fix above needed.
+      const legInPt2X = b.x + (lb - b.x) * 0.62;
+      const tailGap = Math.abs(lb - legInPt2X);
+      const mergeMinTail = minBend * 2.4;
+      const mergeExtraZ = exitB.kind === 'side' && tailGap < mergeMinTail
+        ? Math.sqrt(mergeMinTail * mergeMinTail - tailGap * tailGap) : 0;
+      const mergeZBase = b.z + COMB_Z + tierB;
+      // the actual preceding point's own z — climbB's when it was pushed
+      // (same formula as mergeZBase), otherwise the zmove point just
+      // above, which can already sit clear on the OTHER side of a band
+      // this shift would otherwise be needlessly clamped against.
+      const mergePrevZ = climbB > b.y + 0.03 ? mergeZBase : (b.z + COMB_Z + tierB + eb.z) / 2;
+      const mergeZ = clampZAwayFromRail(mergePrevZ, mergeZBase - mergeExtraZ, exitB.d);
+      pts.push(new THREE.Vector3(lb, b.y - drop(b.x, lb) * 0.3, mergeZ));
     }
     const suffixStart = pts.length - 1; // index of the last "middle" point, before legIn(b)'s own joints
     pts.push(...legIn(b, lb, tierB).reverse().slice(1));
