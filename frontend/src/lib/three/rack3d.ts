@@ -836,12 +836,17 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const depth = def.bodyDepthM != null ? Math.min(def.bodyDepthM, Math.max(0.05, rack.d - 0.18)) : heuristicDepth;
     const bodyW = def.bodyWidthM ?? CHASSIS_BODY_W;
     // faceplate art is dim under an ortho key light; lift the chassis tone so
-    // the panel reads at 2.5D scale instead of going to mud.
+    // the panel reads at 2.5D scale instead of going to mud. QA 2026-09-01:
+    // the old 2.6x lift plus a very hot "faceplate-fill" key light (see
+    // makeMaterials's caller below) blew this out to near-white next to the
+    // rack's near-black frame — toned down together with that light so the
+    // faceplate reads as "lit metal" rather than "overexposed", not just
+    // uniformly dimmer (a single-light cut alone would still clip here).
     const lift = (hex: number) => {
       const c = new THREE.Color(hex).convertSRGBToLinear();
-      c.r = Math.min(1, c.r * 2.6 + 0.06);
-      c.g = Math.min(1, c.g * 2.6 + 0.06);
-      c.b = Math.min(1, c.b * 2.6 + 0.065);
+      c.r = Math.min(1, c.r * 1.7 + 0.05);
+      c.g = Math.min(1, c.g * 1.7 + 0.05);
+      c.b = Math.min(1, c.b * 1.7 + 0.055);
       return c.convertLinearToSRGB();
     };
     const baseHex = def.chassis ?? (def.kind === 'patch' || def.kind === 'odf' || def.kind === 'duct' ? 0x3a3a3c : 0x1c1c1a);
@@ -1978,10 +1983,16 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     registry.fineDetail.push(im);
   }
 
-  const amb = new THREE.HemisphereLight(0xdce6ff, 0x1a1a18, 1.25);
+  // QA 2026-09-01: room ambient raised a touch so the near-black frame/rails
+  // pick up some fill too — the faceplate-vs-rack imbalance wasn't just the
+  // faceplate being too hot, the frame was also under-lit relative to it.
+  const amb = new THREE.HemisphereLight(0xdce6ff, 0x1a1a18, 1.45);
   amb.name = 'room-ambient';
   root.add(amb);
-  const fill = new THREE.DirectionalLight(0xfff6ec, 2.1);
+  // was 2.1 — paired with the chassis lift() above, this alone was enough to
+  // clip the faceplate toward white next to the frame's own near-black
+  // albedo (which no amount of this light could brighten in kind).
+  const fill = new THREE.DirectionalLight(0xfff6ec, 1.35);
   fill.name = 'faceplate-fill';
   fill.position.set(-2.2, 2.0, 2.6);
   root.add(fill);
