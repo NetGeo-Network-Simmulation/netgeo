@@ -245,13 +245,22 @@ export function adaptTopology(
     const aNode = nodeByIface.get(link.a_iface);
     const bNode = nodeByIface.get(link.b_iface);
     if (!aNode || !bNode) continue;
-    if (!devIdToKey.has(aNode.id) || !devIdToKey.has(bNode.id)) continue; // endpoint outside the shown bays
-    const aOrd = ordinalsByIface.get(link.a_iface);
-    const bOrd = ordinalsByIface.get(link.b_iface);
-    if (aOrd === undefined || bOrd === undefined) continue; // interface has no cable-able front port
+    const aIn = devIdToKey.has(aNode.id);
+    const bIn = devIdToKey.has(bNode.id);
+    // NG-PH3D 3e (Surya): a link with exactly one endpoint outside the shown
+    // bays — a different site, or a wireless radio on a tower with no rack
+    // of its own — is kept, not dropped; rack3d.ts routes the in-scene half
+    // up into the cable tray and caps it there instead of reaching a real
+    // far-end position. Only drop a link when NEITHER end is shown.
+    if (!aIn && !bIn) continue;
+    const aOrd = aIn ? ordinalsByIface.get(link.a_iface) : 0;
+    const bOrd = bIn ? ordinalsByIface.get(link.b_iface) : 0;
+    // the in-scene endpoint still needs a real cable-able front port; the
+    // off-scene one never renders, so its ordinal is a harmless placeholder
+    if ((aIn && aOrd === undefined) || (bIn && bOrd === undefined)) continue;
     links.push({
-      a: [aNode.id, aOrd],
-      b: [bNode.id, bOrd],
+      a: [aNode.id, aOrd ?? 0],
+      b: [bNode.id, bOrd ?? 0],
       m: MEDIA_MAP[cable.media] ?? 'cat6a',
       live: !DEAD_LINK_STATUS.has(link.status ?? 'up'),
     });

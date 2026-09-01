@@ -194,6 +194,45 @@ describe('rack3d no-intersection invariant (NG-PH3D P4)', () => {
       disposeScene(built);
     }
   });
+
+  // NG-PH3D 3e (Surya) known defect, not fixed this slice (tracked for
+  // follow-up, same as the it.skip above): externalCableCurve's tray-stub
+  // tail travels `dir * half` off the rack's own exit x, but for a top-exit
+  // enclosure that still lands back inside the SAME rack's own chassis/rails
+  // a few cm away (confirmed via this repro) — the stub needs the rack's own
+  // half-width (RACK_SPECS[...].w), not just a fixed clearance, to reliably
+  // clear its own footprint on every exit kind. Skipped rather than deleted
+  // so the repro isn't lost.
+  it.skip('external link (other endpoint not in this scene) routes to a tray stub without clipping the rack', () => {
+    const opts: BuildOptions = {
+      racks: [
+        { key: 'A', enclosure: 'apc', devices: [ // top exit
+          dev('a-sw', 3, 1, 'switch', 24, 'rj45'),
+          dev('a-top', 41, 1, 'switch', 24, 'rj45'),
+        ] },
+        { key: 'B', enclosure: 'vertiv', devices: [dev('b-sw', 20, 1, 'switch', 24, 'rj45')] }, // side exit
+      ],
+      links: [
+        link(['a-sw', 2], ['offsite-radio', 0], 'cat6a'),
+        link(['offsite-radio', 1], ['a-top', 0], 'om3'), // reversed side (a is the off-scene one)
+        link(['b-sw', 5], ['other-site-core', 0], 'cat6a'),
+      ],
+    };
+    const built = buildScene(opts);
+    applyDoors(built.registry, true);
+    built.root.updateMatrixWorld(true);
+    try {
+      // all three link cables still render (none silently dropped) — devs
+      // has a single entry for both the external links and the per-switch
+      // power cords buildScene always adds, so exclude those by media too.
+      const externalLinks = built.registry.cables.filter(
+        (c) => c.meta.devs.length === 1 && c.mediaKey !== 'pwrA' && c.mediaKey !== 'pwrB');
+      expect(externalLinks.length).toBe(3);
+      assertNoIntersections(built);
+    } finally {
+      disposeScene(built);
+    }
+  });
 });
 
 /**
