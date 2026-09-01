@@ -1548,13 +1548,25 @@ export function buildScene(opts: BuildOptions): BuiltScene {
    *  `addCable`'s stub cap reads as "this run continues past the tray edge"
    *  instead of a cable dangling in mid-air. */
   function externalCableCurve(
-    a: THREE.Vector3, chanA: number, trayY: number, laneA: number, exitA: ExitRef, runIx = 0,
+    a: THREE.Vector3, chanA: number, trayY: number, laneA: number, exitA: ExitRef, rackA: RackEntry, runIx = 0,
     minBend = 0.02,
   ) {
     const tierA = (laneA % 7) * 0.012;
     const la = lane(chanA, laneA);
     const pts = [a.clone(), ...legIn(a, la, tierA, minBend)];
-    const prefixEnd = pts.length;
+    // NG-PH3D 3e/D2: legIn's own last leg (its 62%-of-span point -> la) is a
+    // fixed-mm z hop (oz/cz — see legIn's own comment — never scaled by
+    // span) that a SHORT span (a device port close to its own rack's lane,
+    // e.g. a side-exit rack's channel sitting near the rail) leaves
+    // disproportionately tight: measured 45.8mm on a repro, under cat6a's
+    // own 51mm minimum, entirely inside legIn's exempted "never fillet"
+    // stretch. Pulling this point's own x earlier (40% of span instead of
+    // 62%) trades length from the segment before it (never the tightest
+    // one measured) to the one after — the one actually failing — without
+    // touching legIn() itself or any of its other callers.
+    pts[3] = pts[3]!.clone();
+    pts[3].x = a.x + (la - a.x) * 0.4;
+    const prefixEnd = pts.length - 1; // let routeCurve fillet the la corner too — see comment below
     const ea = exitA.p;
     const preDrop = Math.max(0.06, minBend * 3);
     const laX = exitA.kind === 'side' ? la : la + Math.sign(ea.x - la || 1) * minBend * 1.2;
@@ -1562,9 +1574,30 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     if (climbA > a.y + 0.03) pts.push(new THREE.Vector3(la, climbA, a.z + COMB_Z + tierA));
     const zBefore = a.z + COMB_Z + tierA;
     const preExitZA = (zBefore + ea.z) / 2;
-    const sideZFracLane = exitA.kind === 'side' ? 0.35 : 0;
-    pts.push(new THREE.Vector3(laX, ea.y - preDrop, preExitZA + (zBefore - preExitZA) * sideZFracLane));
-    pts.push(new THREE.Vector3(ea.x, ea.y - preDrop, ea.z));
+    const sideZFracLane = 0.35;
+    const sideZFracExit = 0.85;
+    // NG-PH3D 3e/D2: a top/rear exit's aperture sits directly above whatever
+    // device occupies the rack's topmost U slots (confirmed via repro: the
+    // exit x/z the sweep below lands on falls squarely inside a full-width
+    // device's own footprint, e.g. a switch at U41 right under an apc's top
+    // exit) — this preDrop dip is still below ea.y, so pulling z toward the
+    // aperture here cuts straight through that device's chassis. `side`'s
+    // exit sits well below the rack ceiling and has its own tested
+    // rail-clearance fractions (NG-PH3D 3d, graduated pull below); top/rear
+    // hold z at legIn's own comb z (already clear of every device's front
+    // face, same margin legIn itself relies on) through this whole dip and
+    // only pull toward ea.z once y has climbed past ea.y in the branch
+    // below, where no device ever reaches (ea.y sits above the rack's own
+    // usable U range by construction).
+    const z4 = exitA.kind === 'side' ? preExitZA + (zBefore - preExitZA) * sideZFracLane : zBefore;
+    const z5 = exitA.kind === 'side' ? preExitZA + (ea.z - preExitZA) * sideZFracExit : zBefore;
+    // top/rear: laX's small offset from `la` only ever existed to buy the
+    // side-exit fillet a longer shared edge (comment above) — with z held
+    // flat through this dip, the laX->ea.x leg is short on every axis and
+    // clamps its own corner instead. One point straight to ea.x removes
+    // that corner rather than widening it.
+    if (exitA.kind === 'side') pts.push(new THREE.Vector3(laX, ea.y - preDrop, z4));
+    pts.push(new THREE.Vector3(ea.x, ea.y - preDrop, z5));
     const sx = ((runIx % 5) - 2) * 0.016;
     const sz = tzOf(runIx);
     if (exitA.kind === 'top') {
@@ -1585,13 +1618,20 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     // so its full length counts, not just its x-component.
     const land = pts[pts.length - 1]!;
     const dir = land.x < 0 ? -1 : 1;
-    // NG-PH3D 3e: `half` also has to clear whatever rack A itself is wide
-    // (max 600mm in RACK_SPECS, so a rack's own far edge is at most ~0.5m
-    // from its exit aperture) or the stub re-enters its OWN chassis/rails —
-    // caught by the no-intersection test. z is held constant (no pull
+    // NG-PH3D 3e/D2: `half` also has to clear whatever rack A itself is
+    // wide, or the stub re-enters its OWN chassis/rails — caught by the
+    // no-intersection test. This used to guess the widest RACK_SPECS enclosure
+    // (600mm) rather than measure rackA itself; derive it instead from the
+    // real distance between the landing point and this bay's own far edge
+    // (rackA.x ± rackA.w/2, whichever side `dir` is heading), plus an
+    // explicit clearance margin past that edge. z is held constant (no pull
     // toward the tray centreline) so both new edges stay a clean `half`
-    // long, well past what the bend-radius floor above alone would need.
-    const half = Math.max(0.5, minBend * 3.3);
+    // long, well past what the bend-radius floor below alone would need.
+    const bayEdgeX = rackA.x + dir * (rackA.w / 2);
+    const marginPastEdge = 0.05;
+    const clearHalf = dir * (bayEdgeX - land.x) + marginPastEdge;
+    const bendHalf = minBend * 3.3; // per the fillet-clamp floor above (minBend*1.45/0.49)
+    const half = Math.max(bendHalf, clearHalf);
     pts.push(new THREE.Vector3(land.x + dir * half, land.y, land.z));
     pts.push(new THREE.Vector3(land.x + dir * half * 2, trayY + 0.012, land.z));
     return routeCurve(pts, minBend * 1.45, 5, prefixEnd);
@@ -1802,7 +1842,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       const key = rackOf(end[0])!;
       const ln = laneOrder.get(key + ':' + i) ?? nextLane(key);
       const curve = externalCableCurve(p, chanOf.get(key)!, trayY - 0.03, ln,
-        exitPoint(registry.racks[key]!), crossIx++, MEDIA[l.m]?.minBendM ?? 0.02);
+        exitPoint(registry.racks[key]!), registry.racks[key]!, crossIx++, MEDIA[l.m]?.minBendM ?? 0.02);
       bundleMedia[key]?.push(l.m);
       const len = addCable(curve, l.m, {
         name: end[0] + ':' + end[1] + ' → luar scene',
