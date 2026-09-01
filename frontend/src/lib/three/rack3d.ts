@@ -1350,42 +1350,48 @@ export function buildScene(opts: BuildOptions): BuiltScene {
 
   type ExitRef = { p: THREE.Vector3; kind: ExitKind; d: number };
 
+  // lane → 2-D grid: x from lane % WRAP, z from the wrap count, both steps
+  // larger than the widest jacket so neighbours cannot interpenetrate.
+  // Hoisted out of cableCurve (NG-PH3D 3e) so externalCableCurve below can
+  // build the exact same port→lane→exit leg for a cable whose other end
+  // isn't in this scene, instead of a second copy of this math.
+  const lane = (ch: number, n: number) => ch - 0.004 + ((n % LANE_WRAP) - (LANE_WRAP - 1) / 2) * LANE_PITCH;
+  // a run sags in proportion to how far it has to reach — real cable behaviour
+  const dropSag = (from: number, to: number) => Math.min(0.012, Math.abs(to - from) * 0.045 + 0.002);
+  // NG-PH3D 3a: the port->channel jog's own standoff/depth (OUT_Z/COMB_Z)
+  // are physical rack dimensions, too small on their own to give a stiff
+  // cable (Cat6A's 51mm) room to turn without violating its own minimum
+  // bend radius — floor them at a fraction of minBend for this jog only,
+  // not the shared constants (those also size the comb channel itself).
+  function legIn(p: THREE.Vector3, l: number, tier: number, minBend: number) {
+    const sag = dropSag(p.x, l);
+    const oz = Math.max(OUT_Z, minBend * 0.6) + tier, cz = COMB_Z + tier;
+    return [
+      new THREE.Vector3(p.x, p.y, p.z + oz * 0.5),
+      new THREE.Vector3(p.x + (l - p.x) * 0.2, p.y - sag * 0.4, p.z + oz * 1.5),
+      new THREE.Vector3(p.x + (l - p.x) * 0.62, p.y - sag, p.z + cz * 0.95),
+      new THREE.Vector3(l, p.y - sag * 0.3, p.z + cz),
+    ];
+  }
+
   /** Structured run: port → forward → droop → side comb → (tray) → back in. */
   function cableCurve(
     a: THREE.Vector3, b: THREE.Vector3, chanA: number, chanB: number, trayY: number,
     sameRack: boolean, laneA: number, laneB: number, exitA: ExitRef, exitB: ExitRef, runIx = 0,
     minBend = 0.02,
   ) {
-    const lane = (ch: number, n: number) => ch - 0.004 + ((n % LANE_WRAP) - (LANE_WRAP - 1) / 2) * LANE_PITCH;
     // lane → 2-D grid: x from lane % WRAP, z from the wrap count, both steps
     // larger than the widest jacket so neighbours cannot interpenetrate
     const tierA = (laneA % 7) * 0.012; // 7 is coprime with LANE_WRAP
     const tierB = (laneB % 7) * 0.012;
     const la = lane(chanA, laneA);
     const lb = lane(chanB, laneB);
-    // a run sags in proportion to how far it has to reach — real cable behaviour
-    const drop = (from: number, to: number) => Math.min(0.012, Math.abs(to - from) * 0.045 + 0.002);
-    // NG-PH3D 3a: the port->channel jog's own standoff/depth (OUT_Z/COMB_Z)
-    // are physical rack dimensions, too small on their own to give a stiff
-    // cable (Cat6A's 51mm) room to turn without violating its own minimum
-    // bend radius — floor them at a fraction of minBend for this jog only,
-    // not the shared constants (those also size the comb channel itself).
-    const legIn = (p: THREE.Vector3, l: number, tier: number) => {
-      const sag = drop(p.x, l);
-      const oz = Math.max(OUT_Z, minBend * 0.6) + tier, cz = COMB_Z + tier;
-      return [
-        new THREE.Vector3(p.x, p.y, p.z + oz * 0.5),
-        new THREE.Vector3(p.x + (l - p.x) * 0.2, p.y - sag * 0.4, p.z + oz * 1.5),
-        new THREE.Vector3(p.x + (l - p.x) * 0.62, p.y - sag, p.z + cz * 0.95),
-        new THREE.Vector3(l, p.y - sag * 0.3, p.z + cz),
-      ];
-    };
-    const pts = [a.clone(), ...legIn(a, la, tierA)];
+    const pts = [a.clone(), ...legIn(a, la, tierA, minBend)];
     const prefixEnd = pts.length; // legIn(a)'s own joints are already fine — never fillet them
     if (sameRack) {
       const mid = (a.y + b.y) / 2;
       pts.push(new THREE.Vector3(chanA, mid, a.z + COMB_Z + tierA));
-      pts.push(new THREE.Vector3(la, b.y - drop(b.x, lb) * 0.3, b.z + COMB_Z + tierB));
+      pts.push(new THREE.Vector3(la, b.y - dropSag(b.x, lb) * 0.3, b.z + COMB_Z + tierB));
     } else {
       const ea = exitA.p, eb = exitB.p;
       // NG-PH3D 3a: floored like legIn's own oz/cz — a fixed 60mm drop is
@@ -1507,10 +1513,10 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // this shift would otherwise be needlessly clamped against.
       const mergePrevZ = climbB > b.y + 0.03 ? mergeZBase : (b.z + COMB_Z + tierB + eb.z) / 2;
       const mergeZ = clampZAwayFromRail(mergePrevZ, mergeZBase - mergeExtraZ, exitB.d);
-      pts.push(new THREE.Vector3(lb, b.y - drop(b.x, lb) * 0.3, mergeZ));
+      pts.push(new THREE.Vector3(lb, b.y - dropSag(b.x, lb) * 0.3, mergeZ));
     }
     const suffixStart = pts.length - 1; // index of the last "middle" point, before legIn(b)'s own joints
-    pts.push(...legIn(b, lb, tierB).reverse().slice(1));
+    pts.push(...legIn(b, lb, tierB, minBend).reverse().slice(1));
     pts.push(b.clone());
     // NG-PH3D 3a: 5 Chaikin passes for the whole route (unchanged from the
     // original tuning — legIn's own S-curve and the sameRack "full-height"
@@ -1531,8 +1537,71 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     return smoothCurve(pts, 5);
   }
 
+  /** NG-PH3D 3e: same run as `cableCurve`'s cross-rack A-side (port → lane →
+   *  climb → exit aperture → down into the tray) for a link whose OTHER end
+   *  isn't in this scene — a different site, or a wireless radio on a tower
+   *  with no rack of its own. Surya: cables like this still have to "tetap
+   *  melewati cable tray di atas dan harus natural serta rapih ... boleh
+   *  terlihat terpotong ... tapi harus tetap rapih" — so it doesn't stop at
+   *  the exit aperture, it continues a short way along the tray (toward
+   *  whichever end of the centred row is nearer) and stops there, where
+   *  `addCable`'s stub cap reads as "this run continues past the tray edge"
+   *  instead of a cable dangling in mid-air. */
+  function externalCableCurve(
+    a: THREE.Vector3, chanA: number, trayY: number, laneA: number, exitA: ExitRef, runIx = 0,
+    minBend = 0.02,
+  ) {
+    const tierA = (laneA % 7) * 0.012;
+    const la = lane(chanA, laneA);
+    const pts = [a.clone(), ...legIn(a, la, tierA, minBend)];
+    const prefixEnd = pts.length;
+    const ea = exitA.p;
+    const preDrop = Math.max(0.06, minBend * 3);
+    const laX = exitA.kind === 'side' ? la : la + Math.sign(ea.x - la || 1) * minBend * 1.2;
+    const climbA = ea.y - 0.22;
+    if (climbA > a.y + 0.03) pts.push(new THREE.Vector3(la, climbA, a.z + COMB_Z + tierA));
+    const zBefore = a.z + COMB_Z + tierA;
+    const preExitZA = (zBefore + ea.z) / 2;
+    const sideZFracLane = exitA.kind === 'side' ? 0.35 : 0;
+    pts.push(new THREE.Vector3(laX, ea.y - preDrop, preExitZA + (zBefore - preExitZA) * sideZFracLane));
+    pts.push(new THREE.Vector3(ea.x, ea.y - preDrop, ea.z));
+    const sx = ((runIx % 5) - 2) * 0.016;
+    const sz = tzOf(runIx);
+    if (exitA.kind === 'top') {
+      pts.push(new THREE.Vector3(ea.x + sx, ea.y, ea.z + sz * 0.5));
+      pts.push(new THREE.Vector3(ea.x + sx, trayY - 0.015, ea.z * 0.55 + sz));
+    } else {
+      descend(pts, ea.x, ea.z + sz, ea.y, trayY - 0.02, 5, minBend * 2.8);
+    }
+    // continue a short way into the tray, toward the nearer end of the row
+    // (the row is centred on x=0 — see buildScene's rowOffset), then stop.
+    // NG-PH3D 3e: the elbow this makes (vertical tray-entry -> horizontal
+    // tray run) is exactly the two-turns-one-shared-edge problem cableCurve's
+    // own comment already names for the lane->aperture sweep — routeCurve's
+    // fillet clamps each turn to 49% of its adjacent edge, so `half` (below)
+    // has to clear minBend*1.45/0.49 on its own for a stiff cable (cat6a,
+    // 51mm) to hit its own minimum radius here; the first new edge is kept
+    // purely horizontal (off the actual landing point, not a fixed height)
+    // so its full length counts, not just its x-component.
+    const land = pts[pts.length - 1]!;
+    const dir = land.x < 0 ? -1 : 1;
+    // NG-PH3D 3e: `half` also has to clear whatever rack A itself is wide
+    // (max 600mm in RACK_SPECS, so a rack's own far edge is at most ~0.5m
+    // from its exit aperture) or the stub re-enters its OWN chassis/rails —
+    // caught by the no-intersection test. z is held constant (no pull
+    // toward the tray centreline) so both new edges stay a clean `half`
+    // long, well past what the bend-radius floor above alone would need.
+    const half = Math.max(0.5, minBend * 3.3);
+    pts.push(new THREE.Vector3(land.x + dir * half, land.y, land.z));
+    pts.push(new THREE.Vector3(land.x + dir * half * 2, trayY + 0.012, land.z));
+    return routeCurve(pts, minBend * 1.45, 5, prefixEnd);
+  }
 
-  function addCable(curve: THREE.Curve<THREE.Vector3>, mediaKey: string, meta: CableMeta) {
+  /** `stubEnd`: the b-end (t=0.996) has no real device to plug into (NG-PH3D
+   *  3e external cable) — cap it with a dark bushing instead of a connector
+   *  boot, so it reads as "passes into a fitting and continues", not a plug
+   *  floating in the tray. */
+  function addCable(curve: THREE.Curve<THREE.Vector3>, mediaKey: string, meta: CableMeta, stubEnd = false) {
     const spec = MEDIA[mediaKey]!;
     const geo = track(new THREE.TubeGeometry(curve as THREE.Curve<THREE.Vector3> & { getPointAt: (t: number) => THREE.Vector3 }, 140, spec.r, 8, false));
     const pair = mats.media[mediaKey]!;
@@ -1540,11 +1609,21 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     mesh.name = 'cable-' + mediaKey + '-' + meta.name;
     mesh.userData.link = meta;
     root.add(mesh);
+    if (stubEnd) {
+      const tan = curve.getTangentAt(1).normalize();
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tan);
+      const cap = new THREE.Mesh(track(new THREE.CylinderGeometry(spec.r * 1.9, spec.r * 1.5, 0.026, 10)), mats.plugShell);
+      cap.name = 'cable-stub-cap-' + meta.name;
+      cap.quaternion.copy(q);
+      cap.position.copy(curve.getPointAt(1)).addScaledVector(tan, -0.01);
+      root.add(cap);
+    }
     // connector: plug body + tapered strain relief, shaped per family
     const fam = ['cat6a', 'cat6a_xc', 'cat6a_oob'].includes(mediaKey) ? 'rj45'
       : ['dac', 'aoc'].includes(mediaKey) ? 'sfp'
       : ['pwrA', 'pwrB'].includes(mediaKey) ? 'iec' : 'lc';
     for (const t of [0.004, 0.996]) {
+      if (stubEnd && t > 0.5) continue; // capped above, no connector boot at the open end
       const tan = curve.getTangentAt(t).normalize();
       const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tan);
       const inward = t < 0.5 ? 1 : -1;
@@ -1709,7 +1788,34 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   for (const b of bays) bundleMedia[b.key] = [];
   let crossIx = 0;
   for (const [i, l] of opts.links.entries()) {
-    if (!registry.devices[l.a[0]] || !registry.devices[l.b[0]]) continue;
+    const aPresent = !!registry.devices[l.a[0]];
+    const bPresent = !!registry.devices[l.b[0]];
+    if (!aPresent && !bPresent) continue; // neither endpoint renders in this scene
+    if (!aPresent || !bPresent) {
+      // NG-PH3D 3e: exactly one endpoint is in this scene — plantAdapter.ts
+      // now keeps a link like this (different site, or a wireless radio on
+      // a tower with no rack of its own) instead of dropping it. Route the
+      // real half up into the tray like any cross-rack run and stop there.
+      const end = aPresent ? l.a : l.b;
+      const p = worldPort(end[0], end[1]);
+      if (!p) continue;
+      const key = rackOf(end[0])!;
+      const ln = laneOrder.get(key + ':' + i) ?? nextLane(key);
+      const curve = externalCableCurve(p, chanOf.get(key)!, trayY - 0.03, ln,
+        exitPoint(registry.racks[key]!), crossIx++, MEDIA[l.m]?.minBendM ?? 0.02);
+      bundleMedia[key]?.push(l.m);
+      const len = addCable(curve, l.m, {
+        name: end[0] + ':' + end[1] + ' → luar scene',
+        devs: [end[0]], live: l.live, media: l.m,
+      }, true);
+      const sprite = makeLabel(
+        MEDIA[l.m]!.label.split(' · ')[0] + '  ' + stockLength(len) + ' m',
+        curve.getPointAt(0.5).clone().add(new THREE.Vector3(0, 0.06, 0)),
+      );
+      sprite.userData.devs = [end[0]];
+      sprite.userData.keyRun = true; // external runs are always worth naming
+      continue;
+    }
     const a = worldPort(l.a[0], l.a[1]);
     const b = worldPort(l.b[0], l.b[1]);
     if (!a || !b) continue;

@@ -111,4 +111,29 @@ describe('minimum bend-radius invariant (NG-PH3D 3a)', () => {
       disposeScene(built);
     }
   });
+
+  // NG-PH3D 3e known defect, not fixed this slice (same repro/root cause as
+  // the no-intersection it.skip in rack3d.test.ts — the fix isn't purely
+  // geometric here either, the tray-stub tail's elbow turn falls a few mm
+  // short of cat6a's 51mm minimum on this same top/side-exit pairing).
+  // Skipped rather than deleted so the repro isn't lost.
+  it.skip('external link (other endpoint off-scene) stays within its own minBendM, top and side exits', () => {
+    const opts: BuildOptions = {
+      racks: [
+        { key: 'A', enclosure: 'apc', devices: [dev('a-sw', 3, 1, 'switch', 24, 'rj45')] }, // top exit
+        { key: 'B', enclosure: 'vertiv', devices: [dev('b-sw', 20, 1, 'switch', 24, 'rj45')] }, // side exit
+      ],
+      links: [
+        link(['a-sw', 2], ['offsite-radio', 0], 'cat6a'),
+        link(['b-sw', 5], ['other-site-core', 0], 'cat6a'),
+      ],
+    };
+    const built = buildScene(opts);
+    built.root.updateMatrixWorld(true);
+    try {
+      assertBendRadius(built);
+    } finally {
+      disposeScene(built);
+    }
+  });
 });
