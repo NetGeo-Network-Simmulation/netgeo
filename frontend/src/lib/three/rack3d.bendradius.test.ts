@@ -82,4 +82,33 @@ describe('minimum bend-radius invariant (NG-PH3D 3a)', () => {
       disposeScene(built);
     }
   });
+
+  // NG-PH3D 3d: closes the debt this module carried since 3a — top/rear
+  // cross-rack exits were verified above, but a `side`-exit enclosure
+  // (vertiv/eaton/cpi) with a stiff cat6a run had never been sampled.
+  it('cross-rack cat6a through a side-exit enclosure at both ends stays within its own minBendM', () => {
+    const opts: BuildOptions = {
+      racks: [
+        { key: 'A', enclosure: 'vertiv', devices: [ // side exit
+          dev('a-sw1', 3, 1, 'switch', 24, 'rj45'),
+          dev('a-top', 41, 1, 'switch', 24, 'rj45'),
+        ] },
+        { key: 'B', enclosure: 'eaton', devices: [ // side exit
+          dev('b-sw1', 5, 1, 'switch', 24, 'rj45'),
+          dev('b-top', 40, 1, 'switch', 24, 'rj45'),
+        ] },
+      ],
+      links: [
+        link(['a-sw1', 2], ['b-sw1', 4], 'cat6a'),
+        link(['a-top', 0], ['b-top', 6], 'cat6a'),
+      ],
+    };
+    const built = buildScene(opts);
+    built.root.updateMatrixWorld(true);
+    try {
+      assertBendRadius(built);
+    } finally {
+      disposeScene(built);
+    }
+  });
 });
