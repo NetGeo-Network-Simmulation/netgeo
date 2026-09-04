@@ -74,8 +74,11 @@ describe('SFP/QSFP cage instancing (NG-PH3D 3b)', () => {
     expect(afterNames.some((n) => n.startsWith('port-sfp28-'))).toBe(false);
     expect(afterNames.some((n) => n.startsWith('port-qsfp28-'))).toBe(false);
     expect(afterNames).not.toContain('sfp-cage-lip');
-    // rj45 ports are untouched by this slice — still the procedural fallback
-    expect(afterNames.some((n) => n.startsWith('port-rj45-'))).toBe(true);
+    // rj45 ports are instanced too (Sesi LOD tuning, unconditionally — not
+    // gated on boot-asset load like the sfp/qsfp cages above), so no more
+    // per-port 'port-rj45-*' meshes either.
+    expect(afterNames.some((n) => n.startsWith('port-rj45-'))).toBe(false);
+    expect(afterNames).toContain('rj45-cage-instanced');
 
     // instancing must reduce draw-call-contributing objects (6 sfp+qsfp
     // ports collapse from 2 meshes each to 2 InstancedMesh total), not add

@@ -518,6 +518,31 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   // with the faceplate — no per-port orientation needed.
   const CAGE_QUAT = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, 1));
 
+  /* Sesi LOD tuning (2026-09-02): the procedural RJ45/LC port decoration —
+   * cage box, latch notch, keystone body, port LED, LC bores, LC adapter —
+   * used to be one THREE.Mesh per port per part (a 48-port switch alone
+   * cost ~190 draw calls just for these). Every part shares one fixed
+   * material (mats.port/bezel/ledOn) and only differs by position + a
+   * per-device box/cylinder size (faceplate height scales with U count), so
+   * the same InstancedMesh-with-non-uniform-scale trick the SFP/QSFP cages
+   * already use (above) applies: a single unit geometry (1x1x1 box, or a
+   * unit cylinder for the LC bore) with each instance's real w/h/d baked
+   * into that instance's own TRS matrix scale, not the shared geometry.
+   * `dev`/`port` ride along so click-to-patch picking can resolve an
+   * InstancedMesh hit back to a real port exactly like the cage instancing
+   * above (see the portMap comment there). */
+  interface PortDetailInstance { pos: THREE.Vector3; quat: THREE.Quaternion; scale: THREE.Vector3; dev: string; port: number }
+  const portDetailInstances = {
+    'rj45-cage': [] as PortDetailInstance[],
+    'rj45-notch': [] as PortDetailInstance[],
+    'keystone': [] as PortDetailInstance[],
+    'port-led': [] as PortDetailInstance[],
+    'lc-bore': [] as PortDetailInstance[],
+    'lc-adapter': [] as PortDetailInstance[],
+  };
+  const IDENTITY_QUAT = new THREE.Quaternion();
+  const LC_BORE_QUAT = new THREE.Quaternion().setFromEuler(new THREE.Euler(Math.PI / 2, 0, 0));
+
   const track = <T extends THREE.BufferGeometry | THREE.Material | THREE.Texture>(x: T): T => {
     registry.disposables.push(x);
     return x;
@@ -957,27 +982,40 @@ export function buildScene(opts: BuildOptions): BuiltScene {
           dev: def.id, port: p.i,
         });
       } else if (p.ptype === 'pon' || p.ptype === 'lc') {
-        // LC duplex: two bores side by side inside one bezel
+        // LC duplex: two bores side by side inside one bezel — queued for
+        // InstancedMesh flush (Sesi LOD tuning, see portDetailInstances
+        // comment) instead of a mesh per bore/adapter.
         for (const off of [-pw * 0.3, pw * 0.3]) {
-          const bore = new THREE.Mesh(track(new THREE.CylinderGeometry(pw * 0.24, pw * 0.24, 0.007, 10)), mats.port);
-          bore.name = 'lc-bore';
-          bore.rotation.x = Math.PI / 2;
-          bore.position.set(p.x + off, p.y, faceZ - 0.002);
-          g.add(bore);
-          registry.fineDetail.push(bore);
+          portDetailInstances['lc-bore'].push({
+            pos: new THREE.Vector3(rack.x + p.x + off, devY + p.y, faceZ - 0.002),
+            quat: LC_BORE_QUAT, scale: new THREE.Vector3(pw * 0.24, 0.007, pw * 0.24),
+            dev: def.id, port: p.i,
+          });
         }
-        cage = box(pw, ph, 0.005, mats.bezel, 'lc-adapter');
-        cage.position.set(p.x, p.y, faceZ - 0.0035);
+        portDetailInstances['lc-adapter'].push({
+          pos: new THREE.Vector3(rack.x + p.x, devY + p.y, faceZ - 0.0035),
+          quat: IDENTITY_QUAT, scale: new THREE.Vector3(pw, ph, 0.005),
+          dev: def.id, port: p.i,
+        });
+      } else if (p.ptype === 'rj45') {
+        // RJ45 cage + latch notch + keystone (below) — by far the densest
+        // port family (a 48-port switch alone used to cost ~190 draw calls
+        // here), so these are the ones that actually move the draw-call
+        // budget; queued for InstancedMesh flush instead of one mesh each.
+        portDetailInstances['rj45-cage'].push({
+          pos: new THREE.Vector3(rack.x + p.x, devY + p.y, faceZ - 0.0025),
+          quat: IDENTITY_QUAT, scale: new THREE.Vector3(pw, ph, 0.006),
+          dev: def.id, port: p.i,
+        });
+        portDetailInstances['rj45-notch'].push({
+          pos: new THREE.Vector3(rack.x + p.x, devY + p.y + ph * 0.5, faceZ - 0.002),
+          quat: IDENTITY_QUAT, scale: new THREE.Vector3(pw * 0.36, ph * 0.3, 0.005),
+          dev: def.id, port: p.i,
+        });
       } else {
         cage = box(pw, ph, 0.006, mats.port, 'port-' + p.ptype + '-' + p.i);
         cage.position.set(p.x, p.y, faceZ - 0.0025);
-        if (p.ptype === 'rj45') {
-          // RJ45: the latch notch in the top edge is what makes it readable
-          const notch = box(pw * 0.36, ph * 0.3, 0.005, mats.port, 'rj45-latch-slot');
-          notch.position.set(p.x, p.y + ph * 0.5, faceZ - 0.002);
-          g.add(notch);
-          registry.fineDetail.push(notch);
-        } else if (p.ptype === 'sfp28' || p.ptype === 'qsfp28') {
+        if (p.ptype === 'sfp28' || p.ptype === 'qsfp28') {
           // fallback only — real cage asset not loaded yet. SFP/QSFP: bright
           // EMI cage lip around a wide, shallow slot
           const lip = box(pw * 1.12, ph * 1.3, 0.0022, mats.handle, 'sfp-cage-lip');
@@ -994,18 +1032,18 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         registry.fineDetail.push(cage);
       }
       if (p.ptype === 'rj45') {
-        const keystone = box(pw * 1.16, ph * 1.22, 0.004, mats.bezel, 'keystone-body');
-        keystone.position.set(p.x, p.y, faceZ - 0.0002);
-        keystone.userData.dev = def.id;
-        keystone.userData.port = p.i;
-        g.add(keystone);
-        registry.fineDetail.push(keystone);
+        portDetailInstances['keystone'].push({
+          pos: new THREE.Vector3(rack.x + p.x, devY + p.y, faceZ - 0.0002),
+          quat: IDENTITY_QUAT, scale: new THREE.Vector3(pw * 1.16, ph * 1.22, 0.004),
+          dev: def.id, port: p.i,
+        });
       }
       if (p.ptype === 'rj45' || p.ptype === 'sfp28' || p.ptype === 'qsfp28') {
-        const pip = box(pw * 0.28, 0.0016, 0.002, mats.ledOn, 'port-led');
-        pip.position.set(p.x - pw * 0.26, p.y + ph * 0.32, faceZ + 0.004);
-        g.add(pip);
-        registry.fineDetail.push(pip);
+        portDetailInstances['port-led'].push({
+          pos: new THREE.Vector3(rack.x + p.x - pw * 0.26, devY + p.y + ph * 0.32, faceZ + 0.004),
+          quat: IDENTITY_QUAT, scale: new THREE.Vector3(pw * 0.28, 0.0016, 0.002),
+          dev: def.id, port: p.i,
+        });
       }
       portRefs[p.i] = new THREE.Vector3(p.x, p.y, faceZ + 0.01);
     }
@@ -2004,6 +2042,39 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const m4 = new THREE.Matrix4();
     list.forEach((it, i) => {
       m4.compose(it.pos, CAGE_QUAT, ONE);
+      im.setMatrixAt(i, m4);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    im.userData.portMap = list.map((it) => ({ dev: it.dev, port: it.port }));
+    root.add(im);
+    registry.fineDetail.push(im);
+  }
+
+  // Sesi LOD tuning: flush the RJ45 cage/notch/keystone/LED + LC bore/
+  // adapter queues (portDetailInstances, declared above) the same way — one
+  // InstancedMesh per part, unit geometry with each instance's real box/
+  // cylinder size baked into that instance's own scale (devices differ in
+  // faceplate height by U count, so a shared fixed-size geometry like the
+  // SFP/QSFP cages above can't be reused as-is). portMap on every one of
+  // them, not just the ones most likely to be raycast-hit first (keystone
+  // sits frontmost in front of the cage, matching pre-instancing z-order) —
+  // cheap to carry, and keeps every layer resolvable if the visual stack
+  // ever reorders.
+  const UNIT_BOX = track(new THREE.BoxGeometry(1, 1, 1));
+  const UNIT_CYL = track(new THREE.CylinderGeometry(1, 1, 1, 10));
+  const portDetailMat: Record<keyof typeof portDetailInstances, THREE.Material> = {
+    'rj45-cage': mats.port, 'rj45-notch': mats.port, keystone: mats.bezel,
+    'port-led': mats.ledOn, 'lc-bore': mats.port, 'lc-adapter': mats.bezel,
+  };
+  for (const key of Object.keys(portDetailInstances) as (keyof typeof portDetailInstances)[]) {
+    const list = portDetailInstances[key];
+    if (!list.length) continue;
+    const geo = key === 'lc-bore' ? UNIT_CYL : UNIT_BOX;
+    const im = new THREE.InstancedMesh(geo, portDetailMat[key], list.length);
+    im.name = key + '-instanced';
+    const m4 = new THREE.Matrix4();
+    list.forEach((it, i) => {
+      m4.compose(it.pos, it.quat, it.scale);
       im.setMatrixAt(i, m4);
     });
     im.instanceMatrix.needsUpdate = true;
