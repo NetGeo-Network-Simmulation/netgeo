@@ -63,10 +63,21 @@ class Device:
 
     kind = "device"
 
-    def __init__(self, name: str, node_id: str | None = None, nos: str = "forgeos") -> None:
+    def __init__(
+        self,
+        name: str,
+        node_id: str | None = None,
+        nos: str = "forgeos",
+        mode: str = "sim",
+    ) -> None:
         self.name = name
         self.node_id = node_id or name
         self.nos = nos
+        # "sim" (default, pure Python DES) or "emul" (backed by a real NOS
+        # container via engine.emulation — see kinds.py). Not to be confused
+        # with `kind` above, which is the simulated device *category*
+        # (router/switch/...); this is the *execution mode*.
+        self.mode = mode
         self.interfaces: dict[str, Interface] = {}
         self.powered_on = True
         # Extra L2/L3 identities this device answers to — e.g. a VRRP master
@@ -130,6 +141,7 @@ class Device:
             "name": self.name,
             "kind": self.kind,
             "nos": self.nos,
+            "mode": self.mode,
             "interfaces": [i.brief() for i in self.interfaces.values()],
         }
 
