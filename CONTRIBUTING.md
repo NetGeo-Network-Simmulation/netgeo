@@ -37,6 +37,15 @@ cd frontend && npm run typecheck && npm run build
 
 CI di GitHub Actions menjalankan hal yang sama di tiap PR — PR yang gagal CI tidak di-merge.
 
+### Tes jalur emulasi NOS (marker `podman`)
+
+Tes yang menyentuh `PodmanAdaptor` (`tests/test_podman_adaptor.py` dst.) ditandai `@pytest.mark.podman` dan otomatis **di-skip** kalau socket rootless Podman tidak aktif — mesin tanpa Podman tetap hijau. Untuk benar-benar menjalankannya (dibutuhkan kalau kerja di `emul/`):
+
+```bash
+systemctl --user enable --now podman.socket   # sekali saja, per user, tanpa sudo
+cd backend && .venv/bin/python -m pytest -m podman tests/test_podman_adaptor.py -q
+```
+
 ## Branch & PR
 
 - Tiap kontributor kerja di **branch sendiri** (bukan langsung ke `main`). Pola nama: `<area>/<slug>`, awalan `area` sesuai `CODEOWNERS`: `proto/` (protokol di `netstack/protocols/`), `rf/` (RF/wireless), `emul/` (jalur emulasi NOS), `ui/` (frontend), `docs/`, `fix/` (bugfix lintas-area). Contoh: `proto/isis-lsp-refresh`, `ui/rack-panel-resize`.

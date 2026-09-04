@@ -16,7 +16,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 
-from engine.model import LinkModel, NodeModel
+from engine.model import LinkModel
+from engine.netstack.device import Device
 
 
 class EmulationStatus(str, Enum):
@@ -50,8 +51,12 @@ class EmulationAdaptor(ABC):
     name: str = "abstract"
 
     @abstractmethod
-    async def spawn(self, node: NodeModel) -> EmulatedNodeHandle:
-        """Create and boot the container that emulates ``node``."""
+    async def spawn(self, device: Device) -> EmulatedNodeHandle:
+        """Create and boot the container that emulates ``device``.
+
+        ``device.nos`` is the kind key into :data:`engine.emulation.kinds.KINDS`
+        (e.g. ``"frr"``); ``device.node_id`` identifies the resulting handle.
+        """
 
     @abstractmethod
     async def destroy(self, node_id: str) -> None:
@@ -89,9 +94,9 @@ class NullEmulationAdaptor(EmulationAdaptor):
 
     name = "null"
 
-    async def spawn(self, node: NodeModel) -> EmulatedNodeHandle:
+    async def spawn(self, device: Device) -> EmulatedNodeHandle:
         return EmulatedNodeHandle(
-            node_id=node.id,
+            node_id=device.node_id,
             container_id="",
             status=EmulationStatus.ABSENT,
             meta={"reason": "no emulation runtime configured"},
