@@ -256,6 +256,10 @@ class Project(_Base):
     description: str = ""
     version: int = 1
     created_at: datetime = Field(default_factory=_now)
+    # NG-SIM-08 / N-1: "pure-sim" (default, backward compatible with every
+    # existing project) | "pure-emul" | "mixed". Drives seek/grading-exact
+    # capability gating once emulation lands (see engine/emulation/kinds.py).
+    mode: Literal["pure-sim", "pure-emul", "mixed"] = "pure-sim"
 
 
 class ProjectCreate(_Base):
