@@ -1,0 +1,63 @@
+# =============================================================================
+# NetGeo CI — Podman emulation smoke test (N-2b, non-blocking)
+# =============================================================================
+# Runs the `podman`-marked tests (real FRR container spawn/destroy via
+# rootless podman) on a genuine ubuntu-latest GitHub Actions runner, not just
+# Surya's dev machine.
+#
+# NON-BLOCKING BY DESIGN: `continue-on-error: true` below, and this job is
+# NOT added to any branch-protection required-checks list. Rootless podman
+# on a GitHub-hosted runner (systemd --user session vs a manually started
+# `podman system service`) has never been exercised in this project before —
+# per the N-2b plan (nos-emulation-track-plan.md), it may only become a
+# required merge gate after it has gone green three runs in a row. A flaky
+# CI gate is more expensive than one that's still being proven out.
+name: podman-emulation-ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  podman-smoke:
+    runs-on: ubuntu-latest
+    continue-on-error: true # see header — not proven stable yet, not a merge gate
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure podman is installed
+        run: command -v podman || (sudo apt-get update && sudo apt-get install -y podman)
+
+      - name: Start rootless podman socket
+        run: |
+          set -e
+          sock="/run/user/$(id -u)/podman/podman.sock"
+          mkdir -p "$(dirname "$sock")"
+          if systemctl --user enable --now podman.socket 2>/dev/null; then
+            echo "podman.socket started via systemd --user"
+          else
+            echo "systemd --user session unavailable; starting podman system service manually"
+            nohup podman system service --time=0 "unix://${sock}" >/tmp/podman-service.log 2>&1 &
+            sleep 2
+          fi
+          ls -l "$sock"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Pull FRR image
+        run: podman pull quay.io/frrouting/frr:10.7.0
+
+      - name: Test (pytest -m podman)
+        working-directory: backend
+        run: pytest -m podman -q
