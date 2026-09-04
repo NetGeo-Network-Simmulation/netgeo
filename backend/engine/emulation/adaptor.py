@@ -16,7 +16,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
 
-from engine.model import LinkModel
+from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
 
 
@@ -67,9 +67,18 @@ class EmulationAdaptor(ABC):
         """Apply a generated config artifact (cli|netconf|yaml) to the node."""
 
     @abstractmethod
-    async def wire_link(self, link: LinkModel) -> None:
-        """Create the veth/bridge realising ``link`` between two emul nodes,
-        or the sim↔emul shim when one end is simulated."""
+    async def wire_link(self, link: LinkModel, a: InterfaceModel, b: InterfaceModel) -> None:
+        """Create the veth/bridge/network realising ``link`` between the nodes
+        owning interfaces ``a`` and ``b``.
+
+        ``LinkModel`` alone only names interface ids, not which node each one
+        belongs to — callers must resolve and pass the two ``InterfaceModel``
+        endpoints explicitly (N-3).
+        """
+
+    @abstractmethod
+    async def destroy_link(self, link_id: str) -> None:
+        """Tear down whatever ``wire_link`` created for this link (idempotent)."""
 
     @abstractmethod
     async def status(self, node_id: str) -> EmulationStatus:
@@ -108,7 +117,10 @@ class NullEmulationAdaptor(EmulationAdaptor):
     async def push_config(self, node_id: str, config: str, fmt: str = "cli") -> None:
         return None
 
-    async def wire_link(self, link: LinkModel) -> None:
+    async def wire_link(self, link: LinkModel, a: InterfaceModel, b: InterfaceModel) -> None:
+        return None
+
+    async def destroy_link(self, link_id: str) -> None:
         return None
 
     async def status(self, node_id: str) -> EmulationStatus:

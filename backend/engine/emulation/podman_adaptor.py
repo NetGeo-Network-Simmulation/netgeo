@@ -1,9 +1,11 @@
 """First concrete :class:`EmulationAdaptor`: spawns real NOS containers via
 the rootless Podman REST socket (``podman-py``).
 
-Only ``spawn``/``destroy`` are implemented in this slice (N-2) — ``wire_link``
-(N-3), ``push_config`` (N-5) and ``attach_console`` (ws follow-up) are stubbed
-to raise ``NotImplementedError`` on purpose rather than silently no-op.
+``spawn``/``destroy`` landed in N-2; ``wire_link``/``destroy_link`` land here
+in N-3 (one podman network per link, explicit static IPs — never netavark's
+own IPAM, see ``ip_alloc.py``). ``push_config`` (N-5) and ``attach_console``
+(ws follow-up) are still stubbed to raise ``NotImplementedError`` on purpose
+rather than silently no-op.
 """
 from __future__ import annotations
 
@@ -18,12 +20,14 @@ from engine.emulation.adaptor import (
     EmulationAdaptor,
     EmulationStatus,
 )
+from engine.emulation.ip_alloc import link_subnet
 from engine.emulation.kinds import KINDS
-from engine.model import LinkModel
+from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
 
 SOCKET_PATH = f"/run/user/{os.getuid()}/podman/podman.sock"
 CONTAINER_PREFIX = "netgeo-"
+LINK_NETWORK_PREFIX = "netgeo-link-"
 
 
 def socket_reachable(path: str = SOCKET_PATH) -> bool:
@@ -98,6 +102,9 @@ class PodmanAdaptor(EmulationAdaptor):
             mem_limit=f"{spec.mem_limit_mb}m",
             labels={"netgeo.managed": "true", "netgeo.kind": kind},
             detach=True,
+            # bridge, not the rootless default (pasta) — pasta-mode containers
+            # can't join the extra per-link networks wire_link() attaches (N-3).
+            network_mode="bridge",
         )
         container.start()
         container.reload()
@@ -128,8 +135,38 @@ class PodmanAdaptor(EmulationAdaptor):
     async def push_config(self, node_id: str, config: str, fmt: str = "cli") -> None:
         raise NotImplementedError("push_config lands in N-5")
 
-    async def wire_link(self, link: LinkModel) -> None:
-        raise NotImplementedError("wire_link lands in N-3")
+    async def wire_link(self, link: LinkModel, a: InterfaceModel, b: InterfaceModel) -> None:
+        client = self._get_client()
+        cidr, gateway, ip_a, ip_b = link_subnet(link.id)
+        network = client.networks.create(
+            f"{LINK_NETWORK_PREFIX}{link.id}",
+            driver="bridge",
+            labels={"netgeo.managed": "true", "netgeo.link": link.id},
+            ipam={"Config": [{"Subnet": cidr, "Gateway": gateway}]},
+        )
+        container_a = client.containers.get(f"{CONTAINER_PREFIX}{a.node_id}")
+        container_b = client.containers.get(f"{CONTAINER_PREFIX}{b.node_id}")
+        network.connect(container_a, ipv4_address=ip_a)
+        network.connect(container_b, ipv4_address=ip_b)
+
+    async def destroy_link(self, link_id: str) -> None:
+        client = self._get_client()
+        try:
+            network = client.networks.get(f"{LINK_NETWORK_PREFIX}{link_id}")
+        except NotFound:
+            return
+        network.reload()
+        # libpod's JSON uses lowercase "containers" (not docker-compat's
+        # "Containers") — found via a real inspect while debugging N-3.
+        for container_id in network.attrs.get("containers") or {}:
+            try:
+                network.disconnect(container_id, force=True)
+            except (NotFound, APIError):
+                pass
+        try:
+            network.remove()
+        except (NotFound, APIError):
+            pass
 
     async def status(self, node_id: str) -> EmulationStatus:
         client = self._get_client()
