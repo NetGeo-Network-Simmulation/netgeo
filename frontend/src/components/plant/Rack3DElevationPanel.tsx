@@ -77,11 +77,16 @@ function webglAvailable(): boolean {
   }
 }
 
-// Fixed POV (permintaan Surya): azimuth 7°, elevation 4°, scale 1.40 — no
-// free camera, no user-adjustable zoom/elevation. `dist` is the camera's
-// fixed physical distance from the rack; `span` (the frustum half-height
-// input to spanFor()) is what "scale" means here.
-const POV = { az: (7 * Math.PI) / 180, elev: (4 * Math.PI) / 180, span: 1.4, dist: 14 };
+// Fixed POV (permintaan Surya): azimuth 7°, elevation 4° — no free camera,
+// no user-adjustable zoom/elevation. `dist` is the camera's fixed physical
+// distance from the rack; `span` (the frustum half-height input to
+// spanFor()) is what "scale" means here. 1.05 (was 1.4): frustumSpan()
+// already returns the exact-fit half-height for the rack itself (2026-09-04
+// QA — Surya: rack rendered far too small, ~350px in a 1920px window,
+// window resize barely changed it); 1.4 was 40% headroom on top of an
+// already-safe fit. 1.05 keeps a small buffer, not zero — bumped up if a
+// future enclosure profile turns out to need more.
+const POV = { az: (7 * Math.PI) / 180, elev: (4 * Math.PI) / 180, span: 1.05, dist: 14 };
 const EMPTY_BAYS: RackBay[] = [];
 const EMPTY_LINKS: LinkDef[] = [];
 
