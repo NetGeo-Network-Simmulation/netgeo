@@ -14,6 +14,7 @@ python-multipart==0.0.18  # security: >=0.0.18 fixes DoS CVE-2024-53981
 pyyaml==6.0.2
 websockets==13.0.1
 psutil==6.0.0          # host NIC discovery for cloud/internet bridge nodes
+podman==5.8.0           # PodmanAdaptor — rootless REST socket client (Fase 1 N-2)
 
 # dev/test
 pytest==8.3.2
