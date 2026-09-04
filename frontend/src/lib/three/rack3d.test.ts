@@ -283,6 +283,16 @@ describe('per-SKU port geometry (NG-PH3D P5)', () => {
     return names;
   }
 
+  // rj45 ports are instanced scene-wide (Sesi LOD tuning) — their geometry
+  // lives on one root-level InstancedMesh, not inside the device's own
+  // group, so "does this device have rj45 ports" is answered from that
+  // mesh's portMap instead of meshNamesFor()'s per-group mesh-name scan.
+  function hasRj45For(built: ReturnType<typeof buildScene>, devId: string): boolean {
+    const im = built.root.getObjectByName('rj45-cage-instanced') as THREE.InstancedMesh | null;
+    const map = im?.userData.portMap as { dev: string; port: number }[] | undefined;
+    return !!map?.some((p) => p.dev === devId);
+  }
+
   it('multi-family portGroups render every real connector family; the single-family fallback renders only one', () => {
     const realSku: DeviceDef = {
       id: 'sw-real', u: 1, h: 1, kind: 'switch', brand: 'Cisco', model: 'C9300-48P',
@@ -299,10 +309,10 @@ describe('per-SKU port geometry (NG-PH3D P5)', () => {
       const realNames = meshNamesFor(built, 'sw-real');
       const genericNames = meshNamesFor(built, 'sw-generic');
 
-      expect(realNames.some((n) => n.startsWith('port-rj45-'))).toBe(true);
+      expect(hasRj45For(built, 'sw-real')).toBe(true);
       expect(realNames.some((n) => n.startsWith('port-sfp28-'))).toBe(true);
 
-      expect(genericNames.some((n) => n.startsWith('port-rj45-'))).toBe(true);
+      expect(hasRj45For(built, 'sw-generic')).toBe(true);
       expect(genericNames.some((n) => n.startsWith('port-sfp28-'))).toBe(false);
     } finally {
       disposeScene(built);
