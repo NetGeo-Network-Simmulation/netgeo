@@ -23,7 +23,7 @@ _REAL_PACKS = {
     "olt": 3,
     "routers": 7,
     "switches": 9,
-    "firewalls": 3,
+    "firewalls": 11,
     "onu": 3,
     "wireless-ap": 4,
     "optical-transport": 3,

@@ -169,6 +169,441 @@
         "form_factor": "modular-chassis"
       },
       "datasheet_note": "PA-5450 modular DC NGFW; threat-prot puluhan Gbps; segmentasi DC."
+    },
+    {
+      "id": "checkpoint-quantum-spark-1800",
+      "display_name": "Check Point Quantum Spark 1800",
+      "vendor": "Check Point",
+      "vendor_options": [
+        "Check Point"
+      ],
+      "kind": "firewall",
+      "subcategory": "utm",
+      "tags": [
+        "utm",
+        "smb",
+        "branch",
+        "vpn",
+        "ha-cluster"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "gaia-embedded",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 18,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "wan-sfp{n}",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "dmz-sfp{n}",
+          "count": 1,
+          "type": "sfp28",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 93.6,
+        "psu": "redundant",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "Quantum Spark 1800: FW 7.5Gbps, Threat Prevention 2Gbps, IPS 5.5Gbps (checkpoint.com datasheet-4532, V)."
+    },
+    {
+      "id": "sophos-xgs-3300",
+      "display_name": "Sophos XGS 3300",
+      "vendor": "Sophos",
+      "vendor_options": [
+        "Sophos"
+      ],
+      "kind": "firewall",
+      "subcategory": "ngfw",
+      "tags": [
+        "ngfw",
+        "distributed-edge",
+        "xstream",
+        "1u"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "sophos-firewall-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "lan{n}",
+          "count": 8,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "f{n}-sfpplus",
+          "count": 2,
+          "type": "sfp28",
+          "speed_mbps": 10000
+        },
+        {
+          "pattern": "f{n}-sfp",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": 50,
+        "max_w": 201,
+        "psu": "single (redundant external opsional)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "XGS 3300: FW 58Gbps, IPS 14Gbps, NGFW/threat 12.5Gbps (sophos.com, V)."
+    },
+    {
+      "id": "sonicwall-nsa-2700",
+      "display_name": "SonicWall NSa 2700",
+      "vendor": "SonicWall",
+      "vendor_options": [
+        "SonicWall"
+      ],
+      "kind": "firewall",
+      "subcategory": "ngfw",
+      "tags": [
+        "ngfw",
+        "mid-enterprise",
+        "sd-wan",
+        "gen7"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "sonicos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "x{n}",
+          "count": 16,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "x{n}-sfpplus",
+          "count": 3,
+          "type": "sfp28",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 21.5,
+        "psu": "redundant (optional)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "NSa 2700: FW inspection 5.5Gbps, threat prevention 3.0Gbps (SonicWall datasheet via blueally.com mirror, V(2nd))."
+    },
+    {
+      "id": "watchguard-firebox-m370",
+      "display_name": "WatchGuard Firebox M370",
+      "vendor": "WatchGuard",
+      "vendor_options": [
+        "WatchGuard"
+      ],
+      "kind": "firewall",
+      "subcategory": "ngfw",
+      "tags": [
+        "ngfw",
+        "smb",
+        "msp",
+        "total-security-suite"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "fireboxos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 8,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 75,
+        "psu": "single",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "Firebox M370: FW throughput UDP1518 8Gbps, UTM full-scan 1.7Gbps (WatchGuard datasheet via bechtle.com mirror, V(2nd))."
+    },
+    {
+      "id": "barracuda-cloudgen-f400",
+      "display_name": "Barracuda CloudGen Firewall F400",
+      "vendor": "Barracuda Networks",
+      "vendor_options": [
+        "Barracuda Networks"
+      ],
+      "kind": "firewall",
+      "subcategory": "ngfw",
+      "tags": [
+        "ngfw",
+        "sd-wan",
+        "mid-range"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "cloudgen-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 8,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "single",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "F400 STD: FW 7.1Gbps, VPN 2.3Gbps, NGFW 2.2Gbps (assets.barracuda.com datasheet, V)."
+    },
+    {
+      "id": "hillstone-sg-6000-a2600-in",
+      "display_name": "Hillstone SG-6000-A2600-IN",
+      "vendor": "Hillstone Networks",
+      "vendor_options": [
+        "Hillstone Networks"
+      ],
+      "kind": "firewall",
+      "subcategory": "ngfw",
+      "tags": [
+        "ngfw",
+        "asic",
+        "stoneos",
+        "china-apac"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "stoneos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "ge{n}",
+          "count": 8,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "redundant (dual AC)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "SG-6000-A2600-IN: FW 5Gbps, NGFW 2.5Gbps, IPsec VPN 3Gbps (hillstonenet.com V5.5R10 datasheet, V)."
+    },
+    {
+      "id": "stormshield-sn2100",
+      "display_name": "Stormshield SN2100",
+      "vendor": "Stormshield",
+      "vendor_options": [
+        "Stormshield"
+      ],
+      "kind": "firewall",
+      "subcategory": "ngfw",
+      "tags": [
+        "ngfw",
+        "eu-government",
+        "anssi",
+        "modular"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "stormshield-network-security",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 2,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "single (IEC C14)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed-modular"
+      },
+      "datasheet_note": "SN2100: FW 1518B-UDP 72.3Gbps, IPS 37.9Gbps, IPsec VPN AES-GCM256 17.1Gbps (stormshield.com, V). 2x1GbE fixed + 3 slot modular RJ45/fiber (tak dimodelkan sbg ports tetap)."
+    },
+    {
+      "id": "netgate-8200-max",
+      "display_name": "Netgate 8200 MAX",
+      "vendor": "Netgate",
+      "vendor_options": [
+        "Netgate"
+      ],
+      "kind": "firewall",
+      "subcategory": "software-firewall-appliance",
+      "tags": [
+        "pfsense",
+        "opensource-based",
+        "bgp",
+        "ospf-via-frr",
+        "qat-acceleration"
+      ],
+      "icon": {
+        "name": "firewall",
+        "emoji": "🧱"
+      },
+      "nos": [
+        "pfsense-plus",
+        "frr"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "lan{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 2500
+        },
+        {
+          "pattern": "wan-combo{n}",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "wan-sfpplus{n}",
+          "count": 2,
+          "type": "sfp28",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 60,
+        "psu": "single (external, locking barrel)",
+        "feed": "DC (12V, external AC/DC brick)"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "8200 MAX: CPU Intel Atom C3758R 8-core + QAT/AES-NI, RAM 16GB, storage NVMe SSD (shop.netgate.com + docs.netgate.com, V)."
     }
   ],
   "_notes": "Migrated from network/devices/library/firewalls.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'firewalls:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none."
