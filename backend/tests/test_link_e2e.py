@@ -5,7 +5,9 @@ the adaptor's own return value, shell out to ``podman network``/``podman ps``
 to prove the network and attachments actually exist, and prove the link is
 live with a real ``ping`` between the two containers.
 """
+import json
 import subprocess
+import time
 
 import pytest
 
@@ -37,12 +39,28 @@ def _network_exists(name: str) -> bool:
     ).returncode == 0
 
 
-def _network_containers(name: str) -> str:
-    """Raw ``podman network inspect`` output (grep-friendly) for attachment checks."""
+def _container_networks(container_name: str) -> dict:
+    """``NetworkSettings.Networks`` of a container — stable across podman versions,
+    unlike ``podman network inspect``'s ``containers`` field (schema/timing varies,
+    see CI regression this helper replaced)."""
     out = subprocess.run(
-        ["podman", "network", "inspect", name], capture_output=True, text=True, check=False
+        ["podman", "inspect", container_name, "--format", "{{json .NetworkSettings.Networks}}"],
+        capture_output=True,
+        text=True,
+        check=False,
     )
-    return out.stdout
+    return json.loads(out.stdout or "{}")
+
+
+def _wait_for_attachment(container_name: str, network_name: str, timeout: float = 10.0) -> bool:
+    """Poll until ``network.connect()`` is visible on the container (handles slower
+    CI runners), rather than a blind sleep."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if network_name in _container_networks(container_name):
+            return True
+        time.sleep(0.5)
+    return False
 
 
 def _container_state(container_name: str) -> str | None:
@@ -98,9 +116,8 @@ async def test_wire_link_then_destroy(adaptor):
     await a.wire_link(link, iface_a, iface_b)
 
     assert _network_exists(NETWORK_NAME)
-    inspected = _network_containers(NETWORK_NAME)
-    assert f"{CONTAINER_PREFIX}{NODE_A}" in inspected
-    assert f"{CONTAINER_PREFIX}{NODE_B}" in inspected
+    assert _wait_for_attachment(f"{CONTAINER_PREFIX}{NODE_A}", NETWORK_NAME)
+    assert _wait_for_attachment(f"{CONTAINER_PREFIX}{NODE_B}", NETWORK_NAME)
 
     # The link must actually pass traffic between the two real containers.
     ping = _ping(f"{CONTAINER_PREFIX}{NODE_A}", ip_b)

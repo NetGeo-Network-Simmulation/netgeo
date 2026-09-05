@@ -151,21 +151,26 @@ class PodmanAdaptor(EmulationAdaptor):
 
     async def destroy_link(self, link_id: str) -> None:
         client = self._get_client()
+        network_name = f"{LINK_NETWORK_PREFIX}{link_id}"
         try:
-            network = client.networks.get(f"{LINK_NETWORK_PREFIX}{link_id}")
+            network = client.networks.get(network_name)
         except NotFound:
             return
-        network.reload()
-        # libpod's JSON uses lowercase "containers" (not docker-compat's
-        # "Containers") — found via a real inspect while debugging N-3.
-        for container_id in network.attrs.get("containers") or {}:
-            try:
-                network.disconnect(container_id, force=True)
-            except (NotFound, APIError):
-                pass
+        # The network's own "containers" field (libpod inspect) is not
+        # reliably populated on every podman version/timing (see
+        # test_link_e2e.py's CI regression) — ask each container directly
+        # instead, via its own NetworkSettings.Networks, which is stable.
+        for container in client.containers.list(all=True, sparse=False):
+            if network_name in ((container.attrs.get("NetworkSettings") or {}).get("Networks") or {}):
+                try:
+                    network.disconnect(container, force=True)
+                except (NotFound, APIError):
+                    pass
+        # Do not swallow a genuine removal failure (e.g. still in use because
+        # a disconnect above silently failed) — that hid this exact bug.
         try:
             network.remove()
-        except (NotFound, APIError):
+        except NotFound:
             pass
 
     async def status(self, node_id: str) -> EmulationStatus:
