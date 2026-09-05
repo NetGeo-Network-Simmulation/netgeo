@@ -474,6 +474,457 @@ export const DEVICE_TYPES: DeviceType[] = [
     brand: { accent: '#EE3124', chassis: '#2A2D33', label: 'Fortinet', badge: 'stripe' },
   },
 
+  // ── Check Point Quantum Spark 1800 ────────────────────────────────────────
+  {
+    slug: 'checkpoint-quantum-spark-1800',
+    manufacturer: 'Check Point',
+    model: 'Quantum Spark 1800',
+    nos: undefined,
+    uHeight: 1,
+    // §8.1 V (checkpoint.com/resources/datasheet-4532, dibuka langsung):
+    // 430x300x44.2mm; sumber tak bedakan body/faceplate tapi jauh dari 19"
+    // standar jadi diperlakukan sebagai body chassis (interpretasi derived).
+    chassisMm: { widthMm: 430, depthMm: 300 },
+    front: {
+      portZones: [
+        {
+          ports: [
+            { type: 'console-usb', count: 1 },
+            { type: 'console-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.09,
+        },
+        {
+          // V: 18x rj45 LAN (16 GbE + LAN1-2 also 2.5GbE-capable — schema
+          // doesn't distinguish per-port speed, noted in label instead).
+          ports: [{ type: 'rj45', count: 18, label: 'LAN (2x port 1-2 = 2.5GbE)' }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          // V jumlah/tipe, derived representasi: 2x combo SFP/RJ45 WAN + 1x
+          // dedicated EXT RJ45 diperlakukan sebagai 3x rj45 (schema tak
+          // punya field combo) — lihat catatan combo di label.
+          ports: [{ type: 'rj45', count: 3, label: 'WAN (2 combo SFP/RJ45)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.12,
+        },
+        {
+          // V jumlah/tipe, derived representasi: 1x combo 10GbE SFP/RJ45
+          // DMZ jadi sfp+ murni (fiber-capable terdekat) + 1x usb 3.0.
+          ports: [
+            { type: 'sfp+', count: 1, label: 'DMZ (combo w/ RJ45)' },
+            { type: 'usb', count: 1 },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
+      ],
+      // V (sc1.checkpoint.com Front-Panel.htm): Management/Internet/Power
+      // status LEDs all report blue when healthy; simplified to 3 system
+      // LEDs here (per-port link LEDs are rendered by the port cages, not
+      // this system-level list).
+      leds: [
+        { label: 'PWR', color: 'blue', position: 'left' },
+        { label: 'INTERNET', color: 'blue', position: 'left' },
+        { label: 'MGMT', color: 'blue', position: 'left' },
+      ],
+    },
+    rear: {
+      // V ([[b03-firewall]] §1 via research note): dual 150W redundant PSU,
+      // no fan-tray/psu-slot bays called out in the source diagram.
+      blocks: [
+        { type: 'iec-inlet', count: 2 },
+      ],
+    },
+    brand: { accent: '#EE0A24', chassis: '#1A1A1A', label: 'Check Point', badge: 'stripe' },
+  },
+
+  // ── Sophos XGS 3300 ─────────────────────────────────────────────────────
+  {
+    slug: 'sophos-xgs-3300',
+    manufacturer: 'Sophos',
+    model: 'XGS 3300',
+    nos: undefined,
+    uHeight: 1,
+    // §8.1 V (docs.sophos.com Operating Instructions PDF, dibuka & di-
+    // pdftotext langsung): "438 x 405 x 44 mm Width x Depth x Height".
+    chassisMm: { widthMm: 438, depthMm: 405 },
+    front: {
+      hasLcd: true,
+      lcdPos: 'left',
+      portZones: [
+        {
+          // V: console-usb (Micro-USB) + console-rj45 + 2x usb 3.0 + 1x
+          // mgmt-rj45, all grouped in one "COM" zone per source diagram.
+          ports: [
+            { type: 'console-usb', count: 1 },
+            { type: 'console-rj45', count: 1 },
+            { type: 'usb', count: 2 },
+            { type: 'mgmt-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.2,
+        },
+        {
+          ports: [{ type: 'rj45', count: 8, label: 'LAN 1-8 (1/2 bypass)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'sfp+', count: 2, label: 'F1-F2' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
+        {
+          ports: [{ type: 'sfp', count: 2, label: 'F3-F4' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+      ],
+      // V (docs.sophos.com "LED Status" table): Power 1/2 + SSD are the
+      // system-level LEDs; per-port ACT/LNK/Speed rendered by port cages.
+      leds: [
+        { label: 'PWR1', color: 'green', position: 'left' },
+        { label: 'PWR2', color: 'green', position: 'left' },
+        { label: 'SSD', color: 'blue', position: 'left' },
+      ],
+    },
+    rear: {
+      // V (docs.sophos.com): dual internal AC-DC, "Power 1 & Power 2" LEDs
+      // imply 2 rear power inlets on this model (redundant internal).
+      blocks: [
+        { type: 'iec-inlet', count: 2 },
+      ],
+    },
+    brand: { accent: '#DC271E', chassis: '#0D0D0D', label: 'Sophos', badge: 'stripe' },
+  },
+
+  // ── SonicWall NSa 2700 ──────────────────────────────────────────────────
+  {
+    slug: 'sonicwall-nsa-2700',
+    manufacturer: 'SonicWall',
+    model: 'NSa 2700',
+    nos: undefined,
+    uHeight: 1,
+    // §8.1 V(2nd) (SonicWall datasheet via cdn.blueally.com mirror, dibuka &
+    // di-pdftotext sesi ini): "43 x 32.5 x 4.5 (cm)".
+    chassisMm: { widthMm: 430, depthMm: 325 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'console-rj45', count: 1 }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.05,
+        },
+        {
+          ports: [{ type: 'rj45', count: 16, label: '16x 1-GbE' }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [
+            { type: 'mgmt-rj45', count: 1 },
+            { type: 'usb', count: 2 },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
+        {
+          ports: [{ type: 'sfp+', count: 3, label: '10-GbE SFP+' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
+      ],
+      // UNVERIFIED: datasheet has no LED color/label table — using the same
+      // minimal PWR/ACT pattern as other entries lacking LED detail (e.g.
+      // mikrotik-crs317-1g-16splus-rm) rather than inventing specifics.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V(2nd): PSU rated 60W, redundant PSU is an optional add-on (default
+      // config is single).
+      blocks: [
+        { type: 'iec-inlet', count: 1 },
+      ],
+    },
+    brand: { accent: '#FF6600', chassis: '#111111', label: 'SonicWall', badge: 'stripe' },
+  },
+
+  // ── WatchGuard Firebox M370 ─────────────────────────────────────────────
+  {
+    slug: 'watchguard-firebox-m370',
+    manufacturer: 'WatchGuard',
+    model: 'Firebox M370',
+    nos: undefined,
+    uHeight: 1,
+    // §8.1 V(2nd) (Firebox M270 & M370 datasheet via media.bechtle.com
+    // mirror): "17” x 1.75” x 12.08” (431 x 44 x 307 mm)" for M370.
+    chassisMm: { widthMm: 431, depthMm: 307 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'rj45', count: 8 }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'console-rj45', count: 1, label: 'SRL' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.06,
+        },
+        {
+          ports: [{ type: 'usb', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.06,
+        },
+      ],
+      // V(2nd) keberadaan "LEDs" di panel depan, UNVERIFIED warna/label
+      // per-LED individual — pola minimal seperti entri lain.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'STATUS', color: 'amber', position: 'left' },
+      ],
+    },
+    rear: {
+      // Catatan implementasi: datasheet menempatkan PSU & fan di FRONT
+      // panel appliance ini (bukan rear seperti device rackmount lain di
+      // NetGeo) — V(2nd) untuk fakta itu, tapi tetap dimodelkan sebagai
+      // iec-inlet di rear.blocks sesuai konvensi skema (derived placement,
+      // bukan klaim vendor bahwa inlet ada di belakang).
+      blocks: [
+        { type: 'iec-inlet', count: 1 },
+      ],
+    },
+    brand: { accent: '#CC0000', chassis: '#8B0000', label: 'WatchGuard', badge: 'stripe' },
+  },
+
+  // ── Barracuda CloudGen Firewall F400 ───────────────────────────────────
+  {
+    slug: 'barracuda-cloudgen-f400',
+    manufacturer: 'Barracuda Networks',
+    model: 'CloudGen Firewall F400',
+    nos: undefined,
+    uHeight: 1,
+    // §8.1 chassisMm HILANGKAN — dua sumber sekunder kontradiktif (SHI Gov
+    // "17.3x17.3x1.7in" ~439x439x43mm vs snippet lain "42.6x39.6x4.4cm"
+    // 426x396x44mm, selisih terlalu besar untuk rounding); datasheet resmi
+    // assets.barracuda.com tak memuat dimensi fisik. 3D builder pakai
+    // fallback generic body size, bukan angka tebakan.
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'rj45', count: 8, label: 'LAN/WAN' }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di datasheet performa yang terbaca —
+      // pola minimal seperti entri UNVERIFIED lain.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'STATUS', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // Power watt UNVERIFIED, PSU single internal — V untuk single/internal.
+      blocks: [
+        { type: 'iec-inlet', count: 1 },
+      ],
+    },
+    brand: { accent: '#EE2E24', chassis: '#141414', label: 'Barracuda', badge: 'stripe' },
+  },
+
+  // ── Hillstone SG-6000-A2600-IN ──────────────────────────────────────────
+  {
+    slug: 'hillstone-sg-6000-a2600-in',
+    manufacturer: 'Hillstone Networks',
+    model: 'SG-6000-A2600-IN',
+    nos: undefined,
+    uHeight: 1,
+    // §8.1 V (hillstonenet.com datasheet, dibuka & di-pdftotext langsung):
+    // "436x320x44 mm".
+    chassisMm: { widthMm: 436, depthMm: 320 },
+    front: {
+      portZones: [
+        {
+          // V(2nd) (SG-6000 A-Series Hardware Reference Manual via
+          // manualslib.com snippet, mengutip manual resmi Hillstone).
+          ports: [
+            { type: 'usb', count: 2 },
+            { type: 'console-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.14,
+        },
+        {
+          ports: [{ type: 'mgmt-rj45', count: 1, label: 'MGT' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.06,
+        },
+        {
+          ports: [{ type: 'rj45', count: 8, label: 'GE 0-7' }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V(2nd) keberadaan (Power, Status, Alarm, SSD, 2x Power supply) —
+      // warna spesifik per-LED UNVERIFIED (snippet tak merinci), memakai
+      // konvensi warna umum status/alarm dari entri lain.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'STATUS', color: 'green', position: 'left' },
+        { label: 'ALM', color: 'red', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: dual AC redundant PSU tersedia untuk kelas A2000/A2600+.
+      blocks: [
+        { type: 'iec-inlet', count: 2 },
+      ],
+    },
+    brand: { accent: '#0072BC', chassis: '#1C1C1C', label: 'Hillstone', badge: 'stripe' },
+  },
+
+  // ── Stormshield SN2100 ──────────────────────────────────────────────────
+  {
+    slug: 'stormshield-sn2100',
+    manufacturer: 'Stormshield',
+    model: 'SN2100',
+    nos: undefined,
+    uHeight: 1,
+    // §8.1 V (stormshield.com/products/sn2100 halaman resmi, dibuka
+    // langsung): "44,45x443x610 mm" tinggi x lebar x kedalaman — 1U
+    // full-depth (kedalaman jauh melebihi device rackmount lain di batch).
+    chassisMm: { widthMm: 443, depthMm: 610 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'rj45', count: 2, label: 'Fixed 1GbE' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          // V(2nd) keberadaan/jumlah 3 slot ekspansi modular (RJ45 1G/2.5G/
+          // 10G ATAU fiber 1G-40G, tergantung modul terpasang) — schema
+          // PortSpec tak punya representasi "modul kosong beragam tipe";
+          // dipetakan ke `sfp` x3 sebagai placeholder terdekat (fiber-
+          // capable), label menandai ini slot generik kosong, bukan tipe
+          // fisik pasti.
+          ports: [{ type: 'sfp', count: 3, label: 'Expansion slot (modular, empty)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.18,
+        },
+        {
+          ports: [{ type: 'usb', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+      ],
+      // UNVERIFIED: tak ditemukan tabel LED resmi di sumber manapun —
+      // pola minimal seperti entri UNVERIFIED lain.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'STATUS', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V(2nd): 1x power port IEC-60320-C14, single PSU.
+      blocks: [
+        { type: 'iec-inlet', count: 1 },
+      ],
+    },
+    brand: { accent: '#FF6A13', chassis: '#1A1A1A', label: 'Stormshield', badge: 'stripe' },
+  },
+
+  // ── Netgate 8200 MAX ────────────────────────────────────────────────────
+  {
+    slug: 'netgate-8200-max',
+    manufacturer: 'Netgate',
+    model: '8200 MAX',
+    nos: undefined,
+    uHeight: 1,
+    // §8.1 V(2nd)/derived widthMm, V depthMm (shop.netgate.com "19 x 10 x
+    // 1.75 in" — 482.6mm is faceplate/rack-ears per §1.2.1 convention, not
+    // chassis body; body estimated ~437mm per research note's own explicit
+    // recommendation when a body-only number is needed). depthMm 254mm
+    // taken as-is (depth rarely differs body vs faceplate).
+    chassisMm: { widthMm: 437, depthMm: 254 },
+    front: {
+      portZones: [
+        {
+          // V jenis/jumlah, UNVERIFIED urutan X-Y presisi (deskripsi teks,
+          // bukan diagram bergambar) — combo RJ45/Micro-B auto-detect
+          // direpresentasikan console-rj45 saja (schema tak punya combo).
+          ports: [{ type: 'console-rj45', count: 1 }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.07,
+        },
+        {
+          ports: [{ type: 'sfp+', count: 2, label: '10G WAN' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.1,
+        },
+        {
+          // V jenis/jumlah, derived representasi: combo 1G WAN diwakili
+          // sfp murni (schema tak punya combo).
+          ports: [{ type: 'sfp', count: 2, label: '1G WAN (combo)' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.1,
+        },
+        {
+          ports: [{ type: 'rj45', count: 4, label: '2.5G LAN' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'usb', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.06,
+        },
+      ],
+      // V keberadaan (3x LED 4-warna RGB+amber, software-controlled),
+      // UNVERIFIED posisi/makna per-LED individual — disederhanakan jadi
+      // satu LED sistem representatif alih-alih menebak 3 label/posisi.
+      leds: [
+        { label: 'STATUS', color: 'blue', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: PSU eksternal 12V 5A (60W), konektor barrel berulir (locking) —
+      // bukan IEC C14 AC seperti device lain; `iec-inlet` dipakai sebagai
+      // representasi rear-power-connector terdekat yang ada di schema
+      // (tidak ada tipe "dc-barrel"), TIDAK menyiratkan klaim AC C14 nyata.
+      blocks: [
+        { type: 'iec-inlet', count: 1 },
+      ],
+    },
+    brand: { accent: '#F58220', chassis: '#101010', label: 'Netgate', badge: 'stripe' },
+  },
+
   // ── Dell PowerEdge R740 (2U server) ───────────────────────────────────────
   {
     slug: 'dell-poweredge-r740',
