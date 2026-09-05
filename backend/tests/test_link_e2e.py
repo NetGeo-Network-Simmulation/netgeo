@@ -10,6 +10,7 @@ import subprocess
 import time
 
 import pytest
+
 from engine.emulation.ip_alloc import link_subnet
 from engine.emulation.podman_adaptor import (
     CONTAINER_PREFIX,
