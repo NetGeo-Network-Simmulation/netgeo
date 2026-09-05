@@ -20,7 +20,7 @@ from app.api import device_types as dt
 # (network/devices/packs/<id>/manifest.json is the source of truth; this list
 # just needs to stay in sync so the parametrized test below is meaningful).
 _REAL_PACKS = {
-    "olt": 3,
+    "olt": 11,
     "routers": 7,
     "switches": 9,
     "firewalls": 11,
@@ -37,16 +37,24 @@ def test_real_olt_pack_is_enabled_by_default_and_merges_into_device_types():
     olt = next((p for p in packs if p["id"] == "olt"), None)
     assert olt is not None, "olt pack manifest not discovered"
     assert olt["enabled"] is True
-    assert olt["device_count"] == 3
+    assert olt["device_count"] == 11
 
     devices = dt._load_enabled_pack_devices()
     olt_devices = [d for d in devices if d.id.startswith("olt:")]
-    assert len(olt_devices) == 3
+    assert len(olt_devices) == 11
     ids = {d.id for d in olt_devices}
     assert ids == {
         "olt:huawei-ma5800-x7-chassis",
         "olt:zte-c320-pizzabox",
         "olt:nokia-isam-fx-olt",
+        "olt:vsol-v5600x7",
+        "olt:cdata-fd1700s",
+        "olt:bdcom-gp3600-8cgp",
+        "olt:dzs-velocity-v14",
+        "olt:adtran-sdx-6320",
+        "olt:calix-axos-e7-2",
+        "olt:raisecom-iscom6860",
+        "olt:iskratel-lumia-t14",
     }
     huawei = next(d for d in olt_devices if d.id == "olt:huawei-ma5800-x7-chassis")
     assert huawei.category == "fiber"

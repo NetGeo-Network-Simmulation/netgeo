@@ -105,6 +105,174 @@
         "tx_power_dbm": { "gpon_class_b+": 3.0, "xgs_n2": 6.0 }
       },
       "datasheet_note": "Nokia 7360 ISAM FX tier-1 carrier OLT; densitas PON tinggi; XGS-PON ready."
+    },
+    {
+      "id": "vsol-v5600x7",
+      "display_name": "VSOL V5600X7 (OLT Chassis GPON)",
+      "vendor": "VSOL",
+      "vendor_options": ["VSOL"],
+      "kind": "olt",
+      "subcategory": "chassis",
+      "tags": ["ftth", "gpon", "xgs-pon", "carrier", "chassis", "isp", "china", "id-presence"],
+      "icon": { "name": "olt-chassis", "emoji": "🏢" },
+      "nos": ["olt-firmware", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false, "image": null, "ram_mb": null },
+      "ports": [
+        { "pattern": "gpon0/1/{n}", "count": 16, "type": "gpon", "speed_mbps": 2488, "pon_standard": "GPON", "split_max": null },
+        { "pattern": "uplink-sfp{n}", "count": 8, "type": "sfp", "speed_mbps": 10000 },
+        { "pattern": "uplink-qsfp28{n}", "count": 1, "type": "qsfp", "speed_mbps": 100000 }
+      ],
+      "power": { "typical_w": null, "max_w": null, "psu": "DC only (-48V, no AC option per ordering info)", "feed": "DC" },
+      "physical": { "ru": 6, "form_factor": "modular-chassis", "service_slots": 7 },
+      "datasheet_note": "V5600X7: backplane 3.920 Gbps; konfigurasi representatif = 1x kartu CBG1601 16-port GPON di slot 1 dari 7 slot servis (bukan konfigurasi maksimum 112 port); kartu combo CBXG08C01 (GPON+XG-PON+XGS-PON) tidak dimodelkan (vsolcn.com V5600X-Series-Datasheet-V1.0-EN, V)."
+    },
+    {
+      "id": "cdata-fd1700s",
+      "display_name": "C-DATA FD1700S (OLT Compact Modular GPON)",
+      "vendor": "C-DATA",
+      "vendor_options": ["C-DATA"],
+      "kind": "olt",
+      "subcategory": "compact-modular",
+      "tags": ["ftth", "gpon", "xgs-pon", "compact", "isp", "budget", "china"],
+      "icon": { "name": "olt-chassis", "emoji": "🏢" },
+      "nos": ["olt-firmware", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false, "image": null, "ram_mb": null },
+      "ports": [
+        { "pattern": "gpon0/{n}", "count": 16, "type": "gpon", "speed_mbps": 2488, "pon_standard": "GPON", "split_max": 128 },
+        { "pattern": "uplink-sfp{n}", "count": 4, "type": "sfp", "speed_mbps": 10000 }
+      ],
+      "power": { "typical_w": null, "max_w": null, "psu": "dual redundant (AC or DC)", "feed": "AC/DC (dual-option)" },
+      "physical": { "ru": 1, "form_factor": "1U-modular-2slot", "service_slots": 2 },
+      "datasheet_note": "FD1700S: backplane 400 Gbps, split ratio GPON 1:128 hingga 4.096 ONU total pada konfigurasi maksimum 32xGPON. Konfigurasi representatif di sini pakai 1 kartu 16-port, bukan maksimum 32-port (cdatatec.com, V)."
+    },
+    {
+      "id": "bdcom-gp3600-8cgp",
+      "display_name": "BDCOM GP3600-8CGP (OLT 1U Combo-PON)",
+      "vendor": "BDCOM",
+      "vendor_options": ["BDCOM"],
+      "kind": "olt",
+      "subcategory": "pizzabox",
+      "tags": ["ftth", "gpon", "xgs-pon", "combo-pon", "fixed-port", "china"],
+      "icon": { "name": "olt-pizzabox", "emoji": "🍕" },
+      "nos": ["olt-firmware", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false, "image": null, "ram_mb": null },
+      "ports": [
+        { "pattern": "pon{n}", "count": 8, "type": "gpon", "speed_mbps": 9953, "pon_standard": "Combo GPON/XG-PON/XGS-PON (modul terpisah)", "split_max": 256 },
+        { "pattern": "uplink-sfp{n}", "count": 8, "type": "sfp", "speed_mbps": 10000 },
+        { "pattern": "uplink-qsfp28{n}", "count": 2, "type": "qsfp", "speed_mbps": 100000 }
+      ],
+      "power": { "typical_w": null, "max_w": 100, "psu": "single hot-swap (varian AC atau varian DC terpisah)", "feed": "AC atau DC (SKU beda, bukan dual-otomatis)" },
+      "physical": { "ru": 1, "form_factor": "1U-fixed", "service_slots": 0 },
+      "datasheet_note": "GP3600-8CGP: backplane 800 Gbps, split ratio combo hingga 1:256, standar ITU-T G.984/G.987/G.988 (bdcom.cn PDF resmi, V)."
+    },
+    {
+      "id": "dzs-velocity-v14",
+      "display_name": "DZS Velocity V14 (OLT Chassis GPON/XGS-PON)",
+      "vendor": "DZS",
+      "vendor_options": ["DZS"],
+      "kind": "olt",
+      "subcategory": "chassis",
+      "tags": ["ftth", "gpon", "xgs-pon", "combo-pon", "carrier", "tier1", "chassis", "usa-korea"],
+      "icon": { "name": "olt-chassis", "emoji": "🏢" },
+      "nos": ["olt-firmware", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false, "image": null, "ram_mb": null },
+      "ports": [
+        { "pattern": "gpon-svc{n}", "count": 16, "type": "gpon", "speed_mbps": 2488, "pon_standard": "GPON (kartu lain: XGS-PON / Combo, tidak dimodelkan di representasi ini)", "split_max": 128 },
+        { "pattern": "uplink-qsfp28{n}", "count": 2, "type": "qsfp", "speed_mbps": 100000 },
+        { "pattern": "uplink-sfp28{n}", "count": 4, "type": "sfp28", "speed_mbps": 25000 },
+        { "pattern": "uplink-sfp{n}", "count": 2, "type": "sfp", "speed_mbps": 1000 }
+      ],
+      "power": { "typical_w": null, "max_w": null, "psu": "dual A/B redundant", "feed": "DC (-43.75 to -59.9VDC)" },
+      "physical": { "ru": 14, "form_factor": "modular-chassis", "service_slots": 13 },
+      "datasheet_note": "Velocity V14: kartu XCelerate System-on-a-Card, mode single-central-blade (1 slot switch pusat + 13 slot subscriber). chassisMm dihilangkan di deviceTypes.ts — label vendor W×H×D tak konsisten matematis dengan 14U (digicomm.com PDF resmi DZS, V)."
+    },
+    {
+      "id": "adtran-sdx-6320",
+      "display_name": "Adtran SDX 6320 (OLT Disaggregated Combo-PON)",
+      "vendor": "Adtran",
+      "vendor_options": ["Adtran"],
+      "kind": "olt",
+      "subcategory": "disaggregated",
+      "tags": ["ftth", "gpon", "xgs-pon", "combo-pon", "disaggregated", "carrier", "usa-germany"],
+      "icon": { "name": "olt-chassis", "emoji": "🏢" },
+      "nos": ["olt-firmware", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false, "image": null, "ram_mb": null },
+      "ports": [
+        { "pattern": "pon{n}", "count": 16, "type": "gpon", "speed_mbps": 9953, "pon_standard": "Combo GPON/XGS-PON (10G Combo PON, simultan)", "split_max": null },
+        { "pattern": "uplink-qsfp28{n}", "count": 4, "type": "qsfp", "speed_mbps": 100000 },
+        { "pattern": "uplink-sfp{n}", "count": 4, "type": "sfp", "speed_mbps": 10000 }
+      ],
+      "power": { "typical_w": 186, "max_w": null, "psu": "-48VDC redundant", "feed": "DC" },
+      "physical": { "ru": 2, "form_factor": "disaggregated-fixed", "service_slots": 0 },
+      "datasheet_note": "SDX 6320: vendor menyatakan ~1.5RU (225x387x66mm); ru dibulatkan ke 2 di sini karena physical.ru feeds directly into DeviceType.uHeight (frontend/src/components/rack/deviceTypes.ts buildFromPack()), yang dipakai sebagai span slot RU bilangan bulat. typical_w 186W berlabel 'without optics @25C', bukan max. Subscriber count klaim marketing 'over 2.000' (adtran.com PDF resmi, V)."
+    },
+    {
+      "id": "calix-axos-e7-2",
+      "display_name": "Calix AXOS E7-2 + XG801 (OLT Modular Selectable-PON)",
+      "vendor": "Calix",
+      "vendor_options": ["Calix"],
+      "kind": "olt",
+      "subcategory": "chassis",
+      "tags": ["ftth", "xgs-pon", "gpon", "selectable-pon", "carrier", "north-america"],
+      "icon": { "name": "olt-chassis", "emoji": "🏢" },
+      "nos": ["olt-firmware", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false, "image": null, "ram_mb": null },
+      "ports": [
+        { "pattern": "pon{n}", "count": 16, "type": "gpon", "speed_mbps": 9953, "pon_standard": "Selectable per-port: XGS-PON / GPON / P2P Ethernet (ITU-T G.989 family)", "split_max": 128 },
+        { "pattern": "uplink-sfp{n}", "count": 8, "type": "sfp", "speed_mbps": 10000 },
+        { "pattern": "uplink-qsfpdd{n}", "count": 4, "type": "qsfp", "speed_mbps": 100000 }
+      ],
+      "power": { "typical_w": null, "max_w": null, "psu": "UNVERIFIED (chassis; per-kartu XG801 typ 90W / max 130W)", "feed": "UNVERIFIED (chassis)" },
+      "physical": { "ru": 1, "form_factor": "modular-chassis-small", "service_slots": 2 },
+      "datasheet_note": "AXOS E7-2 + XG801: chassis skalabel 1RU-10RU, konfigurasi dasar representatif = 2 slot terisi kartu XG801. Uplink QSFP-DD (100GE/40GE) direpresentasikan type qsfp (approximate, schema tak punya QSFP-DD terpisah). chassisMm dihilangkan di deviceTypes.ts — datasheet chassis lengkap terkunci login (calix.com, V untuk data kartu)."
+    },
+    {
+      "id": "raisecom-iscom6860",
+      "display_name": "Raisecom ISCOM6860 (OLT Chassis Multi-PON)",
+      "vendor": "Raisecom",
+      "vendor_options": ["Raisecom"],
+      "kind": "olt",
+      "subcategory": "chassis",
+      "tags": ["ftth", "gpon", "epon", "10g-epon", "xg-pon1", "carrier", "china-usa-dual-hq"],
+      "icon": { "name": "olt-chassis", "emoji": "🏢" },
+      "nos": ["olt-firmware", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false, "image": null, "ram_mb": null },
+      "ports": [
+        { "pattern": "gpon-svc{n}", "count": 16, "type": "gpon", "speed_mbps": 2488, "pon_standard": "GPON (chassis mendukung EPON/10G-EPON/XG-PON1/XG-PON2 via kartu berbeda, tidak dimodelkan bersamaan di representasi ini)", "split_max": 128 },
+        { "pattern": "uplink-sfp{n}", "count": 8, "type": "sfp", "speed_mbps": 10000 }
+      ],
+      "power": { "typical_w": null, "max_w": null, "psu": "dual DC, 1+1 redundant", "feed": "DC (-38.4 to -57.6VDC)" },
+      "physical": { "ru": 6, "form_factor": "modular-chassis", "service_slots": 7 },
+      "datasheet_note": "ISCOM6860: total konsumsi daya <1000W untuk sistem TERPASANG PENUH (bukan per-kartu, tidak dipakai sebagai max_w di sini). Kapasitas maksimum: GPON 112 interface/14.336 ONU per chassis penuh (unicorsa.com.ar mirror PDF resmi Raisecom, V)."
+    },
+    {
+      "id": "iskratel-lumia-t14",
+      "display_name": "Iskratel Lumia T14 (OLT Chassis 50G-PON)",
+      "vendor": "Iskratel",
+      "vendor_options": ["Iskratel"],
+      "kind": "olt",
+      "subcategory": "chassis",
+      "tags": ["ftth", "gpon", "xgs-pon", "50g-pon", "combo-pon", "carrier", "eu", "slovenia", "kontron"],
+      "icon": { "name": "olt-chassis", "emoji": "🏢" },
+      "nos": ["olt-firmware", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false, "image": null, "ram_mb": null },
+      "ports": [
+        { "pattern": "combo-pon{n}", "count": 16, "type": "gpon", "speed_mbps": 9953, "pon_standard": "Combo GPON/XGS-PON (varian kartu 25G/50G-PON juga tersedia, tidak dimodelkan di representasi ini)", "split_max": 128 },
+        { "pattern": "uplink-qsfp28{n}", "count": 2, "type": "qsfp", "speed_mbps": 100000 },
+        { "pattern": "uplink-sfp28{n}", "count": 4, "type": "sfp28", "speed_mbps": 25000 },
+        { "pattern": "uplink-sfp{n}", "count": 2, "type": "sfp", "speed_mbps": 1000 }
+      ],
+      "power": { "typical_w": 1755, "max_w": null, "psu": "dual-rail DC redundant", "feed": "DC (-42 to -60VDC)" },
+      "physical": { "ru": 14, "form_factor": "modular-chassis", "service_slots": 13 },
+      "datasheet_note": "Lumia T14: teknologi 50G-PON next-gen; typical_w 1755W adalah FULL chassis (12xC16T+1xP300T), bukan per konfigurasi representatif 1-kartu. chassisMm dihilangkan di deviceTypes.ts — lebar 482.6mm = persis 19in (kemungkinan faceplate) DAN tinggi mentah 572mm tak cocok matematis dengan 14U (dua red flag). Nama badan hukum era transisi 'S&T Iskratel' kini Kontron d.o.o. sejak 2023/2024 (mirror hfctechnics.hu PDF resmi, V)."
     }
   ]
 }

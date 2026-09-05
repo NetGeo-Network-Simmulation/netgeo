@@ -968,6 +968,431 @@ export const DEVICE_TYPES: DeviceType[] = [
     brand: { accent: '#007DB8', chassis: '#17171A', label: 'Dell', badge: 'stripe' },
   },
 
+  // ── VSOL V5600X7 (OLT chassis) ──────────────────────────────────────────
+  {
+    slug: 'vsol-v5600x7',
+    manufacturer: 'VSOL',
+    model: 'V5600X7',
+    uHeight: 6,
+    // §8.1 V (vsolcn.com V5600X-Series-Datasheet-V1.0-EN, dikutip via
+    // research/3d-device-specs-olt.md §1): "442x299x266.7mm" tanpa telinga
+    // mounting. uHeight 6 derived (266.7 / 44.45 ≈ 6, vendor tak sebut "6U"
+    // literal).
+    chassisMm: { widthMm: 442, depthMm: 299 },
+    front: {
+      portZones: [
+        {
+          // V jenis/jumlah kartu; konfigurasi representatif (1x kartu
+          // CBG1601 16-port GPON di slot 1 dari 7 slot servis) — chassis
+          // punya 6 slot lain yang dibiarkan kosong di representasi ini,
+          // bukan konfigurasi maksimum 112 port.
+          ports: [{ type: 'pon', count: 16, label: 'GPON slot 1 (kartu CBG1601)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          // V: kartu CSMUX701 (kontrol/uplink) di slot 5 — AUX out-band.
+          ports: [
+            { type: 'console-rj45', count: 1 },
+            { type: 'mgmt-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.09,
+        },
+        {
+          ports: [{ type: 'usb', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.06,
+        },
+        {
+          // V jumlah/jenis, derived representasi: SFP(GE)/SFP+(10GE)
+          // dual-rate diwakili `sfp` murni (schema tak punya combo).
+          ports: [
+            { type: 'sfp', count: 8, label: 'Uplink CSMU (SFP/SFP+ dual-rate)' },
+            { type: 'qsfp28', count: 1, label: 'Uplink 40/50/100GE' },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.18,
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di sumber resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V feed (DC only, -48V, no AC option per ordering info); jumlah slot
+      // PSU UNVERIFIED — pakai 1 sebagai default minimal alih-alih menebak
+      // redundansi.
+      blocks: [
+        { type: 'psu-slot', count: 1 },
+      ],
+    },
+    brand: { accent: '#0072BC', chassis: '#1C1C1C', label: 'VSOL', badge: 'stripe' },
+  },
+
+  // ── C-DATA FD1700S (compact modular OLT) ────────────────────────────────
+  {
+    slug: 'cdata-fd1700s',
+    manufacturer: 'C-DATA',
+    model: 'FD1700S',
+    uHeight: 1,
+    // §8.1 V (cdatatec.com halaman resmi FD1700S): "1U 19-inch standard
+    // box", "440x375x44mm".
+    chassisMm: { widthMm: 440, depthMm: 375 },
+    front: {
+      portZones: [
+        {
+          // V jenis/jumlah; konfigurasi representatif = 1x kartu 16-port
+          // GPON (opsi 8/24/32-port juga tersedia, tidak dimodelkan di sini).
+          ports: [{ type: 'pon', count: 16, label: 'GPON slot (kartu 16-port, opsi 8/24/32 juga tersedia)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          // V jumlah, derived representasi: opsi "4x1G(SFP)/10G(SFP+)"
+          // diwakili sfp+ murni; opsi kedua "4x10G(SFP+)/25G(SFP28)" tidak
+          // dipakai di konfigurasi representatif ini.
+          ports: [{ type: 'sfp+', count: 4, label: 'Uplink (opsi 4x10G SFP+, varian 25G tidak dimodelkan)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di sumber resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: dual redundant PSU module (AC 100-240V atau DC -40~-72V).
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+      ],
+    },
+    brand: { accent: '#0A3D62', chassis: '#141414', label: 'C-DATA', badge: 'stripe' },
+  },
+
+  // ── BDCOM GP3600-8CGP (1U fixed-port OLT) ───────────────────────────────
+  {
+    slug: 'bdcom-gp3600-8cgp',
+    manufacturer: 'BDCOM',
+    model: 'GP3600-8CGP',
+    uHeight: 1,
+    // §8.1 V (bdcom.cn PDF resmi): "440x270x44mm". uHeight 1 derived
+    // (44 / 44.45 ≈ 1, vendor tak sebut "1U" literal).
+    chassisMm: { widthMm: 440, depthMm: 270 },
+    front: {
+      portZones: [
+        {
+          // V jenis/jumlah — port fixed (bukan slot kartu), combo
+          // GPON/XG-PON/XGS-PON pada port fisik yang sama, modul PON dijual
+          // terpisah.
+          ports: [{ type: 'pon', count: 8, label: 'Combo GPON/XG-PON/XGS-PON (modul PON dijual terpisah)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'sfp+', count: 8, label: 'Uplink 10GE' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.16,
+        },
+        {
+          ports: [{ type: 'qsfp28', count: 2, label: 'Uplink 100GE' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di sumber resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: 2x "power slot" hot-swap (SKU AC 100-240V atau SKU DC 36-72V
+      // terpisah, bukan dual-input otomatis); max consumption 100W eksplisit
+      // (bukan typical).
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+      ],
+    },
+    // brand accent tidak cukup dikenal untuk ditebak dengan keyakinan
+    // (research/3d-device-specs-olt.md §3) — pakai abu-abu netral alih-alih
+    // menebak warna logo.
+    brand: { accent: '#4A4A4A', chassis: '#101010', label: 'BDCOM', badge: 'stripe' },
+  },
+
+  // ── DZS Velocity V14 (large chassis OLT) ────────────────────────────────
+  {
+    slug: 'dzs-velocity-v14',
+    manufacturer: 'DZS',
+    model: 'Velocity V14',
+    uHeight: 14,
+    // §8.1 chassisMm HILANGKAN — label vendor "622x441x280mm (W×H×D)" tidak
+    // konsisten matematis: 622mm = 14x44.45mm (tinggi 14U sebenarnya), BUKAN
+    // lebar seperti urutan label menyiratkan (digicomm.com PDF resmi DZS,
+    // dikutip via research/3d-device-specs-olt.md §4). Mana dari 441/280 itu
+    // width vs depth jadi simpulan, bukan kutipan langsung — tidak ditebak
+    // sebagai chassisMm nyata, 3D builder pakai fallback generic body size.
+    front: {
+      portZones: [
+        {
+          // V jenis+jumlah kartu; konfigurasi representatif = mode
+          // single-central-blade (1 slot switch pusat + 13 slot subscriber),
+          // 1x kartu 16-port GPON OLT service card di salah satu dari 13
+          // slot — bukan satu-satunya konfigurasi yang mungkin.
+          ports: [{ type: 'pon', count: 16, label: 'Kartu GPON OLT 16-port, 1 dari 13 slot subscriber (mode single-central-blade)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          // derived: agregat central switch "2x100GE + 4x10G/25GE + 2xGE"
+          // dipetakan per-jenis; medium "GE" polos diasumsikan optik SFP,
+          // UNVERIFIED apakah RJ45 elektrik atau SFP di sumber.
+          ports: [
+            { type: 'qsfp28', count: 2, label: 'Central switch uplink 100GE' },
+            { type: 'sfp28', count: 4, label: 'Central switch uplink 10/25GE' },
+            { type: 'sfp', count: 2, label: 'Central switch uplink GE' },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.22,
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di sumber resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: dual A/B redundant feeds, DC only -43.75 to -59.9VDC.
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+      ],
+    },
+    brand: { accent: '#6E3FA3', chassis: '#1A1A1A', label: 'DZS', badge: 'stripe' },
+  },
+
+  // ── Adtran SDX 6320 (disaggregated OLT) ─────────────────────────────────
+  {
+    slug: 'adtran-sdx-6320',
+    manufacturer: 'Adtran',
+    model: 'SDX 6320',
+    // uHeight 2, BUKAN 1.5 walau vendor menyatakan "1.5RU" (adtran.com PDF
+    // resmi, tabel dimensi "225x387x66mm" konsisten 66/44.45≈1.5) — uHeight
+    // dipakai sebagai span slot RU bilangan bulat di canPlaceDevice()/
+    // dropDecision() (frontend/src/lib/three/plantAdapter.ts), pecahan akan
+    // merusak aritmetika slot rak. Dibulatkan ke atas (keputusan leader).
+    uHeight: 2,
+    // §8.1 V (adtran.com PDF resmi, tabel dimensi D×W×H mm).
+    chassisMm: { widthMm: 387, depthMm: 225 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'pon', count: 16, label: 'Combo PON (GPON+XGS-PON simultan per port)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'qsfp28', count: 4, label: 'Uplink 100GbE' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.16,
+        },
+        {
+          ports: [{ type: 'sfp+', count: 4, label: 'Uplink 10GbE' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.12,
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di sumber resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: -48VDC redundant.
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+      ],
+    },
+    brand: { accent: '#0072CE', chassis: '#1B1B1B', label: 'Adtran', badge: 'stripe' },
+  },
+
+  // ── Calix AXOS E7-2 + XG801 (small modular OLT) ─────────────────────────
+  {
+    slug: 'calix-axos-e7-2',
+    manufacturer: 'Calix',
+    model: 'AXOS E7-2 + XG801',
+    // V: chassis "scalable from 1RU to 10RU", 1RU dipilih sebagai
+    // konfigurasi dasar representatif, bukan satu-satunya ukuran.
+    uHeight: 1,
+    // §8.1 chassisMm HILANGKAN — halaman produk resmi calix.com tak
+    // mencantumkan dimensi fisik chassis, datasheet lengkap terkunci login
+    // (research/3d-device-specs-olt.md §6, preseden Barracuda). 3D builder
+    // pakai fallback generic body size, bukan angka tebakan.
+    front: {
+      portZones: [
+        {
+          // V jenis/jumlah per kartu XG801; konfigurasi representatif = 2
+          // slot chassis dasar, kedua slot diisi kartu XG801 (port
+          // selectable GPON/XGS-PON/P2P Ethernet per-port) — bukan
+          // satu-satunya konfigurasi (chassis skalabel hingga 10RU/20 slot).
+          ports: [{ type: 'pon', count: 16, label: 'Kartu XG801 slot 1+2 (16x port selectable XGS-PON/GPON/P2P Ethernet)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'sfp+', count: 8, label: 'Uplink slot 1+2 (10GE/2.5GE/GE multi-rate)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.18,
+        },
+        {
+          // derived/approximate: datasheet asli QSFP-DD (100GE/40GE atau DAC
+          // P2P/P2MP), schema tak punya tipe QSFP-DD terpisah — qsfp28
+          // dipakai sebagai representasi terdekat, bukan kecocokan
+          // form-factor persis.
+          ports: [{ type: 'qsfp28', count: 4, label: 'Uplink QSFP-DD (direpresentasikan qsfp28, approximate)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di sumber resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // Power chassis (PSU/RU lengkap) UNVERIFIED — hanya power per-kartu
+      // yang diketahui (max 130W, typical 90W per XG801). Pakai 1 slot
+      // sebagai default minimal alih-alih menebak redundansi.
+      blocks: [
+        { type: 'psu-slot', count: 1 },
+      ],
+    },
+    // brand accent tidak cukup dikenal untuk ditebak dengan keyakinan —
+    // pakai abu-abu netral sama seperti BDCOM alih-alih menebak warna logo.
+    brand: { accent: '#4A4A4A', chassis: '#161616', label: 'Calix', badge: 'stripe' },
+  },
+
+  // ── Raisecom ISCOM6860 (large chassis OLT) ──────────────────────────────
+  {
+    slug: 'raisecom-iscom6860',
+    manufacturer: 'Raisecom',
+    model: 'ISCOM6860',
+    uHeight: 6,
+    // §8.1 V (PDF resmi Raisecom via mirror unicorsa.com.ar): "443x237x266mm",
+    // RU dinyatakan eksplisit oleh vendor sendiri.
+    chassisMm: { widthMm: 443, depthMm: 237 },
+    front: {
+      portZones: [
+        {
+          // V jenis kartu, derived density (16 port/kartu = 112 interface
+          // maksimum / 7 slot servis); konfigurasi representatif = 1x kartu
+          // GPON 16-port di salah satu dari 7 slot servis, bukan
+          // satu-satunya konfigurasi. Slot SMC (Switch/Main Control) x2 tak
+          // dirinci portnya di sumber — UNVERIFIED, tidak dimasukkan sebagai
+          // PortSpec.
+          ports: [{ type: 'pon', count: 16, label: 'Kartu GPON 16-port, 1 dari 7 slot servis' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'sfp+', count: 8, label: 'Uplink dedicated 10GE' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.16,
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di sumber resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: 2 slot PSU, 1+1 redundant, DC -48V (-38.4 to -57.6VDC).
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+      ],
+    },
+    // brand accent tidak cukup dikenal untuk ditebak dengan keyakinan —
+    // pakai abu-abu netral sama seperti BDCOM alih-alih menebak warna logo.
+    brand: { accent: '#4A4A4A', chassis: '#181818', label: 'Raisecom', badge: 'stripe' },
+  },
+
+  // ── Iskratel Lumia T14 (large chassis OLT, EU) ──────────────────────────
+  {
+    slug: 'iskratel-lumia-t14',
+    manufacturer: 'Iskratel',
+    model: 'Lumia T14',
+    // V ("S&T Iskratel" via mirror hfctechnics.hu PDF resmi): "14 slots,
+    // 14U", termasuk 1U dicadangkan untuk pendinginan. Brand kini bagian
+    // Kontron d.o.o. sejak rebrand 2023/2024.
+    uHeight: 14,
+    // §8.1 chassisMm HILANGKAN — dua red flag di sumber (research/
+    // 3d-device-specs-olt.md §8): (1) lebar mentah 482.6mm = persis 19 inci,
+    // kemungkinan besar faceplate+rack-ears, bukan chassis body murni; (2)
+    // tinggi mentah 572mm tak cocok matematis dengan "14U" yang dinyatakan
+    // vendor sendiri (572/44.45≈12.87). Tidak diselesaikan/ditebak — 3D
+    // builder pakai fallback generic body size.
+    front: {
+      portZones: [
+        {
+          // V jenis kartu & split ratio; konfigurasi representatif = mode
+          // single-central-blade (1 slot switch pusat + 13 slot subscriber),
+          // 1x kartu Lumia C16T combo di salah satu slot subscriber, bukan
+          // satu-satunya konfigurasi.
+          ports: [{ type: 'pon', count: 16, label: 'Kartu Lumia C16T combo GPON/XGS-PON/Combo, 1 dari 13 slot subscriber (mode single-central-blade)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          // derived: agregat central switch "2x100GE + 4x10G/25GE + 2xGE"
+          // dipetakan per-jenis; medium "GE" polos diasumsikan optik,
+          // UNVERIFIED medium fisik persis.
+          ports: [
+            { type: 'qsfp28', count: 2, label: 'Central switch uplink 100GE' },
+            { type: 'sfp28', count: 4, label: 'Central switch uplink 10/25GE' },
+            { type: 'sfp', count: 2, label: 'Central switch uplink GE' },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.22,
+        },
+      ],
+      // UNVERIFIED: tak ada tabel LED di sumber resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: dual-rail DC redundant, -42 to -60VDC.
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+      ],
+    },
+    // brand accent tidak cukup dikenal untuk ditebak dengan keyakinan
+    // (identitas visual sedang transisi ke Kontron) — pakai abu-abu netral
+    // sama seperti BDCOM alih-alih menebak warna logo.
+    brand: { accent: '#4A4A4A', chassis: '#1A1A1A', label: 'Iskratel', badge: 'stripe' },
+  },
+
   // ── Generic OLT (forgeos/olt) ─────────────────────────────────────────────
   {
     slug: 'generic-olt',
