@@ -1433,6 +1433,419 @@ export const DEVICE_TYPES: DeviceType[] = [
     },
     brand: { accent: '#F5A623', chassis: '#1F1E1D', label: 'NetGeo', badge: 'stripe' },
   },
+
+  // ── Skyworth Digital GN630V (desktop ONU) ───────────────────────────────
+  {
+    slug: 'skyworth-gn630v',
+    manufacturer: 'Skyworth Digital',
+    model: 'GN630V',
+    uHeight: 1, // shelf/desktop placement di rak NetGeo, BUKAN RU vendor — ONU ini tabletop, tidak pernah diklaim rackmount.
+    // §8.1 V(2nd), sumber tunggal non-domain-vendor (agregator, mengutip QIG
+    // Skyworth), belum re-verifiable (halaman resmi en.skyworthdigital.com
+    // dikonfirmasi TIDAK mencantumkan dimensi; re-fetch sumber sekunder 403).
+    // Confidence lebih rendah dari V(2nd) biasa — lihat research/3d-device-specs-onu.md §1.
+    chassisMm: { widthMm: 210, depthMm: 150 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'pon', count: 1, label: 'GPON' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.16,
+        },
+        {
+          ports: [{ type: 'rj45', count: 4, label: 'LAN' }],
+          rows: 1,
+          align: 'fill',
+        },
+        // 2x FXS RJ-11 (voice) tidak direpresentasikan — tidak ada PortType
+        // yang cocok (konektor RJ-11 beda fisik dari RJ-45), lihat research §gap-1.
+        {
+          ports: [{ type: 'usb', count: 1 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+      ],
+      // V (en.skyworthdigital.com, label eksplisit); warna derived (halaman
+      // resmi tak punya kolom warna, klaim warna agregator TIDAK dipakai).
+      leds: [
+        { label: 'Power', color: 'green', position: 'left' },
+        { label: 'PON', color: 'green', position: 'left' },
+        { label: 'LOS', color: 'red', position: 'left' },
+        { label: 'Internet', color: 'green', position: 'left' },
+        { label: 'LAN1-4', color: 'green', position: 'left' },
+        { label: '2.4G', color: 'blue', position: 'left' },
+        { label: '5G', color: 'blue', position: 'left' },
+        { label: 'WPS', color: 'amber', position: 'left' },
+      ],
+    },
+    rear: {
+      // Adaptor eksternal (bukan AC inlet internal) — dimodelkan sbg
+      // psu-slot generik, schema tak punya tipe rear-block "DC jack".
+      blocks: [{ type: 'psu-slot', count: 1 }],
+    },
+    // brand.chassis: derived dari saran research (chassis putih/abu umum
+    // consumer CPE, tak ada foto resmi diperiksa). accent: tidak
+    // ditentukan di research — netral abu, bukan tebakan logo brand.
+    brand: { accent: '#9A9A96', chassis: '#F2F2F0', label: 'Skyworth', badge: 'stripe' },
+  },
+
+  // ── GL-COM GL-X822U-MTK (desktop ONU) ───────────────────────────────────
+  {
+    slug: 'glcom-gl-x822u-mtk',
+    manufacturer: 'GL-COM',
+    model: 'GL-X822U-MTK',
+    uHeight: 1, // shelf/desktop di rak NetGeo, bukan RU vendor.
+    // §8.1 V (gl-com.com/Products_Details/GL-X822U-MTK.html, dibuka
+    // langsung): "205mm x155mm x30mm (W x D x H)".
+    chassisMm: { widthMm: 205, depthMm: 155 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'pon', count: 1, label: 'GPON/EPON' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.16,
+        },
+        {
+          ports: [{ type: 'rj45', count: 4, label: 'LAN' }],
+          rows: 1,
+          align: 'fill',
+        },
+        // 1x FXS RJ-11 tidak direpresentasikan — lihat research §gap-1.
+        {
+          ports: [{ type: 'usb', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
+      ],
+      // V (halaman resmi gl-com.com, label eksplisit); warna derived —
+      // halaman produk dikonfirmasi eksplisit tak punya kolom warna sama sekali.
+      leds: [
+        { label: 'POWER', color: 'green', position: 'left' },
+        { label: 'PON', color: 'green', position: 'left' },
+        { label: 'LOS', color: 'red', position: 'left' },
+        { label: 'LAN1', color: 'green', position: 'left' },
+        { label: 'LAN2', color: 'green', position: 'left' },
+        { label: 'LAN3', color: 'green', position: 'left' },
+        { label: 'LAN4', color: 'green', position: 'left' },
+        { label: 'FXS1', color: 'amber', position: 'left' },
+        { label: '2.4G', color: 'blue', position: 'left' },
+        { label: '5G', color: 'blue', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // adaptor eksternal <18W
+    },
+    // brand.chassis derived (research: putih/abu terang umum, tak ada foto
+    // resmi); accent tidak ditentukan — netral abu.
+    brand: { accent: '#8F8F8B', chassis: '#EDEDED', label: 'GL-COM', badge: 'stripe' },
+  },
+
+  // ── Comtrend GRG-4361 (desktop ONU) ─────────────────────────────────────
+  {
+    slug: 'comtrend-grg-4361',
+    manufacturer: 'Comtrend',
+    model: 'GRG-4361',
+    uHeight: 1, // shelf/desktop di rak NetGeo, bukan RU vendor.
+    // §8.1 V (us.comtrend.com PDF resmi Datasheet-GRG-4361_V1.1, diunduh +
+    // pdftotext langsung): "148mm(L) x 98mm(W) x46mm(H)".
+    chassisMm: { widthMm: 148, depthMm: 98 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'pon', count: 1, label: 'XGS-PON' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.3,
+        },
+        {
+          ports: [{ type: 'rj45', count: 1, label: '10GE LAN' }],
+          rows: 1,
+          align: 'fill',
+        },
+        // 1x FXS RJ-11 tidak direpresentasikan — lihat research §gap-1.
+      ],
+      // V (dua versi datasheet, V1.1 & V3.0, cocok identik); warna
+      // UNVERIFIED di kedua versi — derived. Label "GPON" dipertahankan apa
+      // adanya walau device ini XGS-PON — anomali penamaan vendor sendiri,
+      // tidak dikoreksi (lihat research/3d-device-specs-onu.md §3).
+      leds: [
+        { label: 'Power', color: 'green', position: 'left' },
+        { label: 'GPON', color: 'green', position: 'left' },
+        { label: '10GLAN', color: 'green', position: 'left' },
+        { label: 'Phone', color: 'amber', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // adaptor eksternal 12VDC/1.0A
+    },
+    brand: { accent: '#8C8C88', chassis: '#F0F0EE', label: 'Comtrend', badge: 'stripe' },
+  },
+
+  // ── Hitron Technologies NOVA2208 (MDU ONU, rack-or-wall shelf) ──────────
+  {
+    slug: 'hitron-nova2208',
+    manufacturer: 'Hitron Technologies',
+    model: 'NOVA2208',
+    // uHeight 1 = penempatan shelf/rak-parsial di NetGeo, BUKAN klaim RU
+    // literal vendor (vendor tak pernah sebut "1U", tinggi 44.5mm≈1U
+    // kebetulan matematis). PERINGATAN: lebar chassis 250mm — device ini
+    // TIDAK mengisi lebar rak 19" penuh (482.6mm), hanya ~52%. Vendor
+    // menyatakan "Rack- and wall-mounting options" (V) tapi lewat
+    // bracket/shelf parsial, bukan chassis 19" full-width seperti device
+    // OLT rackmount lain di pack ini.
+    uHeight: 1,
+    // §8.1 V (us.hitrontech.com/wp-content/uploads/2023/10/DS-NOVA2208.pdf,
+    // diunduh + pdftotext langsung): "Dimensions: 250mm(W)x44.5mm(H)x300mm(D)".
+    chassisMm: { widthMm: 250, depthMm: 300 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'pon', count: 1, label: '10G-EPON/XG-PON/XGS-PON selectable' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.14,
+        },
+        {
+          ports: [{ type: 'rj45', count: 1, label: 'Uplink 1/2.5/5/10GBASE-T' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
+        {
+          ports: [{ type: 'rj45', count: 8, label: 'LAN 100M/1G/2.5GBASE-T' }],
+          rows: 2,
+          align: 'fill',
+        },
+        // 8x FXS RJ-11 tidak direpresentasikan — jumlah terbanyak di batch
+        // ini, lihat research §gap-1.
+      ],
+      // V (PDF resmi, bagian "Mechanical") — 4 LED generik tanpa breakdown
+      // per-port. Warna derived (tak ada kolom warna di datasheet).
+      leds: [
+        { label: 'Power', color: 'green', position: 'left' },
+        { label: 'Alarm', color: 'red', position: 'left' },
+        { label: 'Link', color: 'green', position: 'left' },
+        { label: 'Activity', color: 'amber', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'iec-inlet', count: 1 }], // V: PSU internal IEC320-C14, 36W
+    },
+    brand: { accent: '#8A8A86', chassis: '#E8E8E6', label: 'Hitron', badge: 'stripe' },
+  },
+
+  // ── Actiontec XG-99M (desktop/wall ONU) ─────────────────────────────────
+  {
+    slug: 'actiontec-xg-99m',
+    manufacturer: 'Actiontec Electronics',
+    model: 'XG-99M',
+    uHeight: 1, // shelf/desktop-or-wall di rak NetGeo, bukan RU vendor ("Desktop mounting & wall mounting" eksplisit, V).
+    // §8.1 V (PDF resmi via Wayback Machine snapshot 2024-12-03 — URL live
+    // newserv.actiontec.com connection-refused saat diakses langsung, bukan
+    // bukti dokumen hilang): "208mm x 150mm x 35mm(W x D x H)".
+    chassisMm: { widthMm: 208, depthMm: 150 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'pon', count: 1, label: 'XGS-PON' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.2,
+        },
+        {
+          ports: [
+            { type: 'rj45', count: 1, label: '10G Base-T' },
+            { type: 'rj45', count: 1, label: '1G Base-T' },
+          ],
+          rows: 1,
+          align: 'fill',
+        },
+        // Hingga 2x FXS RJ-11 + 1x interface MoCA tidak direpresentasikan —
+        // tidak ada PortType yang cocok untuk keduanya, lihat research §gap-1/§gap-3.
+      ],
+      // V, baru ditemukan sesi riset ini (tidak ada di pass sebelumnya) —
+      // 7 label terbanyak di batch ini. Warna derived (datasheet hanya label).
+      leds: [
+        { label: 'POWER', color: 'green', position: 'left' },
+        { label: 'OPTICAL', color: 'green', position: 'left' },
+        { label: 'LAN', color: 'green', position: 'left' },
+        { label: 'UPDATE', color: 'amber', position: 'left' },
+        { label: 'ALARM', color: 'red', position: 'left' },
+        { label: 'POTS', color: 'green', position: 'left' },
+        { label: 'MOCA', color: 'blue', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // adaptor eksternal +16V, <18W
+    },
+    brand: { accent: '#87877F', chassis: '#EAEAE8', label: 'Actiontec', badge: 'stripe' },
+  },
+
+  // ── Vantiva FXA530Z / platform N670 (desktop/wall ONU) ──────────────────
+  {
+    slug: 'vantiva-fxa530z',
+    manufacturer: 'Vantiva',
+    model: 'FXA530Z (N670)',
+    uHeight: 1, // shelf/desktop-or-wall di rak NetGeo, bukan RU vendor.
+    // §8.1 V(2nd) — konten jelas terbitan Vantiva (footer platform "N670")
+    // tapi hosting mirror distributor amt.com, bukan domain vantiva.com
+    // langsung (pola sama [[3d-device-specs-firewall]] §3/§4): "148mm W x
+    // 105mm D x 40.75mm H".
+    chassisMm: { widthMm: 148, depthMm: 105 },
+    front: {
+      portZones: [
+        {
+          // Data-only, sengaja tanpa WiFi (arsitektur access+WiFi terpisah).
+          ports: [{ type: 'pon', count: 1, label: 'XGS-PON' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.3,
+        },
+        {
+          ports: [{ type: 'rj45', count: 1, label: '10G RJ45 auto-sensing' }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V(2nd) — datasheet: "Front: Power, PON, LAN. Rear: Ethernet
+      // Link/Speed" — device ini punya LED di dua panel berbeda; LED rear
+      // dimodelkan di rear.blocks led-group (lihat pola juniper-qfx5120-48y
+      // di atas). Warna derived (tak ada kolom warna).
+      leds: [
+        { label: 'Power', color: 'green', position: 'left' },
+        { label: 'PON', color: 'green', position: 'left' },
+        { label: 'LAN', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 1 }, // adaptor eksternal 12VDC/1A
+        {
+          type: 'led-group',
+          leds: [{ label: 'Ethernet Link/Speed', color: 'green', position: 'left' }],
+        },
+      ],
+    },
+    brand: { accent: '#84847C', chassis: '#F5F5F3', label: 'Vantiva', badge: 'stripe' },
+  },
+
+  // ── Humax BGW320-500 (AT&T-branded, desktop tower ONU) ──────────────────
+  {
+    slug: 'humax-bgw320-500',
+    // Manufacturer = Humax (dibuat/di-file Humax per FCC grantee O6Z) —
+    // device ini dijual/dipasarkan berbranding AT&T, TIDAK disembunyikan:
+    // lihat datasheet_note pack JSON untuk detail branding AT&T.
+    manufacturer: 'Humax',
+    model: 'BGW320-500',
+    uHeight: 1, // shelf/desktop tower vertikal di rak NetGeo, bukan RU vendor.
+    // §8.1 V(2nd) via FCC filing (dokumen asli Humax dari FCC ID O6ZBGW320,
+    // bukan paraphrase pihak ketiga — didownload via redirect fccid.io ke
+    // mirror PDF manual 30 halaman): lebar 200mm x kedalaman 100mm (tinggi
+    // 188/191mm terpisah).
+    chassisMm: { widthMm: 200, depthMm: 100 },
+    front: {
+      portZones: [
+        {
+          // V: 1x PON (cage SFP/SFP+) + 1x RJ45 WAN — device ini punya dua
+          // opsi uplink fisik berbeda (optik dan tembaga).
+          ports: [
+            { type: 'pon', count: 1, label: 'WAN optical (SFP/SFP+ cage)' },
+            { type: 'rj45', count: 1, label: 'WAN copper' },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.3,
+        },
+        {
+          ports: [
+            { type: 'rj45', count: 3, label: 'LAN 1G' },
+            { type: 'rj45', count: 1, label: 'LAN 2.5/5G' },
+          ],
+          rows: 1,
+          align: 'fill',
+        },
+        // 1x FXS RJ-11 tidak direpresentasikan — lihat research §gap-1.
+        {
+          ports: [{ type: 'usb', count: 1 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+      ],
+      // CATATAN JUJUR: dokumen riset (research/3d-device-specs-onu.md) hanya
+      // menyisakan baris ringkasan untuk SKU ini ("Service/WPS/PowerJack/
+      // Ethernet, warna+state penuh V") — bagian riset detail per-SKU untuk
+      // Humax hilang dari catatan sumber (gap di dokumen sumber itu sendiri,
+      // BUKAN dikarang di sini). 4 label kategori dipakai apa adanya
+      // ("PowerJack" ditafsirkan sbg LED Power di dekat jack) tapi
+      // warna/state SEBENARNYA tidak tersimpan di catatan — ditandai derived
+      // di sini meski catatan sumber mengklaim "penuh V" untuk warna,
+      // karena nilai aktualnya tidak bisa dikutip ulang dari ringkasan saja.
+      leds: [
+        { label: 'Service', color: 'green', position: 'left' },
+        { label: 'WPS', color: 'amber', position: 'left' },
+        { label: 'Power', color: 'green', position: 'left' },
+        { label: 'Ethernet', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }],
+    },
+    // brand.chassis derived — tidak ada foto produk diverifikasi sesi ini
+    // (bagian riset Humax hilang, lihat catatan di atas); netral abu umum.
+    brand: { accent: '#7D7D77', chassis: '#EFEFEC', label: 'Humax', badge: 'stripe' },
+  },
+
+  // ── Askey RTF6105VW (desktop ONU, data paling parsial di batch) ─────────
+  {
+    slug: 'askey-rtf6105vw',
+    manufacturer: 'Askey Computer Corp.',
+    model: 'RTF6105VW',
+    uHeight: 1, // shelf/desktop vertikal (klaim forum komunitas Movistar, V(2nd)/low-confidence) di rak NetGeo — vendor tak sebut RU sama sekali.
+    // §8.1 chassisMm DIHILANGKAN (UNVERIFIED) — 4 jalur pencarian buntu
+    // sesi riset: (1) PDF datasheet resmi askey.com.tw tak punya tabel
+    // dimensi, (2) probe FCC ID grantee H8N pola H8NRTF6105VW 404, (3)
+    // database ANATEL Brazil tak punya entri RTF6105VW spesifik (model
+    // Askey lain ada), (4) forum Movistar hanya deskripsi kualitatif tanpa
+    // angka. Tidak ditebak — preseden barracuda-cloudgen-f400 &
+    // calix-axos-e7-2 di atas. 3D builder pakai fallback generic body size.
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'pon', count: 1, label: '10G EPON atau XGS-PON (selectable UNVERIFIED)' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.2,
+        },
+        {
+          ports: [
+            { type: 'rj45', count: 4, label: '1000 Base-T' },
+            { type: 'rj45', count: 4, label: '2.5G Base-T' },
+          ],
+          rows: 2,
+          align: 'fill',
+        },
+        // 2x FXS RJ-11 tidak direpresentasikan — lihat research §gap-1.
+      ],
+      // LED UNVERIFIED total — datasheet resmi vendor sama sekali tidak
+      // menyebut LED. Satu-satunya isyarat forum Movistar ("4 LED di
+      // depan", tanpa label/warna) TIDAK dipakai sebagai dasar array ini —
+      // pola minimal generik dipakai sebagai gantinya (keputusan leader).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // adaptor eksternal 12VDC/3.5A
+    },
+    // brand: UNVERIFIED total — nol foto produk maupun deskripsi warna dari
+    // sumber manapun (beda dari 7 SKU lain yang setidaknya punya asumsi
+    // "putih/abu consumer CPE umum"). Abu netral placeholder, BUKAN tebakan
+    // warna produk asli — tunggu foto produk untuk final art.
+    brand: { accent: '#707070', chassis: '#707070', label: 'Askey', badge: 'stripe' },
+  },
 ];
 
 // ─── Resolve helpers ──────────────────────────────────────────────────────────

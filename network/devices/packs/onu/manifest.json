@@ -5,7 +5,7 @@
   "categories": [
     "onu"
   ],
-  "device_count": 3,
+  "device_count": 11,
   "enabled_by_default": true,
   "source_note": "Migrated from network/devices/library/onu.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
 }

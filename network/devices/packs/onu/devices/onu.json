@@ -210,6 +210,539 @@
         "pon_class": "GPON Class B+"
       },
       "datasheet_note": "SFU ONU bridge-mode 1xGE; murah; dipasangkan dengan router CPE terpisah."
+    },
+    {
+      "id": "skyworth-gn630v",
+      "display_name": "Skyworth GN630V (ONT GPON, Wi-Fi 6 AX3000)",
+      "vendor": "Skyworth Digital",
+      "vendor_options": [
+        "Skyworth Digital",
+        "Skyworth"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "ont",
+        "gpon",
+        "wifi6",
+        "residential",
+        "hgu"
+      ],
+      "icon": {
+        "name": "ont",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 2488,
+          "pon_standard": "GPON",
+          "role": "uplink"
+        },
+        {
+          "pattern": "lan{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "wlan{n}",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 2402,
+          "wifi_standard": "Wi-Fi 6 (802.11ax), dual-band AX3000"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "single (external adapter)",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "desktop"
+      },
+      "datasheet_note": "GN630V: GPON Class B+ with BOB, optical budget 20km, ITU-T G.984.x/G.988 (en.skyworthdigital.com, V untuk port/LED). chassisMm V(2nd), single-source, belum re-verifiable — lihat deviceTypes.ts. 2x FXS RJ-11 tidak dimodelkan (tak ada PortType voice); shelf/desktop, bukan RU rak."
+    },
+    {
+      "id": "glcom-gl-x822u-mtk",
+      "display_name": "GL-COM GL-X822U-MTK (ONU GPON/EPON dual-mode, Wi-Fi 5)",
+      "vendor": "GL-COM",
+      "vendor_options": [
+        "GL-COM",
+        "Shenzhen GL-COM Technology"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "gpon",
+        "epon",
+        "wifi5",
+        "residential",
+        "hgu",
+        "id-presence"
+      ],
+      "icon": {
+        "name": "ont",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 2488,
+          "pon_standard": "GPON/EPON dual-mode (simultan vs selectable UNVERIFIED)",
+          "role": "uplink"
+        },
+        {
+          "pattern": "lan{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "wlan{n}",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": 866,
+          "wifi_standard": "Wi-Fi 5 (802.11ac), dual-band 300+866Mbps"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 18,
+        "psu": "single (external adapter)",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "desktop"
+      },
+      "datasheet_note": "GL-X822U-MTK: jarak transmisi 0-20km, RX sensitivity -27dBm, suhu operasi -20~+50°C (gl-com.com, V, dibuka langsung). 1x FXS RJ-11 tidak dimodelkan; shelf/desktop, bukan RU rak."
+    },
+    {
+      "id": "comtrend-grg-4361",
+      "display_name": "Comtrend GRG-4361 (ONT XGS-PON, 10GE data-only)",
+      "vendor": "Comtrend",
+      "vendor_options": [
+        "Comtrend Corporation",
+        "Comtrend"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "xgs-pon",
+        "residential",
+        "sfu",
+        "no-wifi"
+      ],
+      "icon": {
+        "name": "onu",
+        "emoji": "🔌"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 9953,
+          "pon_standard": "XGS-PON",
+          "role": "uplink"
+        },
+        {
+          "pattern": "lan0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "single (external adapter)",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "desktop"
+      },
+      "datasheet_note": "GRG-4361: DS/US 9.95328/9.95328 Gbps simetris, Tx 4-7dBm/Rx -28dBm, jarak 20km, ITU-T G.9807.1+G.988 (us.comtrend.com PDF resmi, V). LED vendor berlabel 'GPON' meski device ini XGS-PON — anomali penamaan vendor sendiri, tidak dikoreksi. Rating adapter 12VDC/1.0A (bukan konsumsi terukur). 1x FXS RJ-11 tidak dimodelkan; shelf/desktop, bukan RU rak."
+    },
+    {
+      "id": "hitron-nova2208",
+      "display_name": "Hitron NOVA2208 (MDU ONU, 10G-EPON/XG-PON/XGS-PON selectable)",
+      "vendor": "Hitron Technologies",
+      "vendor_options": [
+        "Hitron Technologies",
+        "Hitron"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "10g-epon",
+        "xg-pon",
+        "xgs-pon",
+        "mdu",
+        "business",
+        "north-america",
+        "docsis-dpoe"
+      ],
+      "icon": {
+        "name": "onu",
+        "emoji": "🔌"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 9953,
+          "pon_standard": "Selectable: 10G-EPON / XG-PON / XGS-PON",
+          "role": "uplink"
+        },
+        {
+          "pattern": "uplink-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 10000
+        },
+        {
+          "pattern": "lan{n}",
+          "count": 8,
+          "type": "eth",
+          "speed_mbps": 2500
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 36,
+        "psu": "single (internal, IEC320-C14)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "rack-or-wall-shelf"
+      },
+      "datasheet_note": "NOVA2208: TX 1270nm/7dBm max, RX 1577nm/-29dBm sensitivity max, DOCSIS DPoE 2.0 compliant (us.hitrontech.com PDF resmi, V). Lebar chassis 250mm — BUKAN 19in full-width, dipasang lewat bracket/shelf parsial (lihat deviceTypes.ts). 8x FXS RJ-11 tidak dimodelkan — jumlah terbanyak di batch ini. Berat: vendor sendiri menulis 'TBD'."
+    },
+    {
+      "id": "actiontec-xg-99m",
+      "display_name": "Actiontec XG-99M (SFU ONT XGS-PON, MoCA)",
+      "vendor": "Actiontec Electronics",
+      "vendor_options": [
+        "Actiontec Electronics",
+        "Actiontec"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "xgs-pon",
+        "sfu",
+        "moca",
+        "openpon",
+        "north-america",
+        "no-wifi"
+      ],
+      "icon": {
+        "name": "onu",
+        "emoji": "🔌"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 9953,
+          "pon_standard": "XGS-PON, ITU-T G.9807 Class N1",
+          "role": "uplink"
+        },
+        {
+          "pattern": "eth10g",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 10000
+        },
+        {
+          "pattern": "eth1g",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 18,
+        "psu": "single (external AC/DC adapter, +16V)",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "desktop-or-wall-mount"
+      },
+      "datasheet_note": "XG-99M: Class N1 (ITU-T G.9807, bukan skema huruf B+/C+/C++ GPON), launch power +4~+9dBm, sensitivity -28dBm, overload -9dBm (newserv.actiontec.com via Wayback Machine snapshot 2024-12-03 — URL live connection-refused, bukan bukti dokumen hilang; V). 2x FXS RJ-11 + 1x interface MoCA tidak dimodelkan — tak ada PortType yang cocok untuk keduanya."
+    },
+    {
+      "id": "vantiva-fxa530z",
+      "display_name": "Vantiva FXA530Z / N670 (ONT XGS-PON, data-only)",
+      "vendor": "Vantiva",
+      "vendor_options": [
+        "Vantiva",
+        "Technicolor"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "xgs-pon",
+        "sfu",
+        "no-wifi",
+        "bbf247",
+        "openpon-style",
+        "eu-global"
+      ],
+      "icon": {
+        "name": "onu",
+        "emoji": "🔌"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 9953,
+          "pon_standard": "XGS-PON (ITU-T G.9807.1)",
+          "role": "uplink"
+        },
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 12,
+        "psu": "single (external adapter)",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "desktop-or-wall-mount"
+      },
+      "datasheet_note": "FXA530Z (platform N670): DS 1577nm/-8 to -28dBm, US 1270nm/+4 to +9dBm, BBF.247 certified, OMCI ITU-T G.984.4+G.988, AES-128 (amt.com distributor mirror PDF resmi Vantiva, V(2nd) — bukan domain vantiva.com langsung). Nama rebrand Technicolor→Vantiva efektif 27 Sep 2022. LED di dua panel berbeda (depan: Power/PON/LAN; belakang: Ethernet Link/Speed) — lihat deviceTypes.ts."
+    },
+    {
+      "id": "humax-bgw320-500",
+      "display_name": "Humax BGW320-500 (AT&T-branded residential gateway ONT)",
+      "vendor": "Humax",
+      "vendor_options": [
+        "Humax"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "residential",
+        "hgu",
+        "att-branded"
+      ],
+      "icon": {
+        "name": "onu",
+        "emoji": "🔌"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": null,
+          "pon_standard": "UNVERIFIED (jenis PON tidak tercatat di ringkasan sumber; hanya disebut 'PON, cage SFP/SFP+')",
+          "role": "uplink"
+        },
+        {
+          "pattern": "wan-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": null
+        },
+        {
+          "pattern": "lan{n}",
+          "count": 3,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "lan-multigig0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 2500
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "single (external adapter)",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "desktop"
+      },
+      "datasheet_note": "BGW320-500: dibuat/di-file Humax (FCC grantee O6Z), dipasarkan berbranding AT&T — branding disebutkan apa adanya, tidak disembunyikan. Chassis 200x100mm, tinggi 188/191mm (via FCC filing PDF manual, dokumen asli Humax, V(2nd)). CATATAN GAP SUMBER: bagian riset detail per-SKU untuk device ini hilang dari catatan riset (hanya baris ringkasan tersisa) — jenis PON, speed per-port WAN, dan warna LED TIDAK bisa dikutip presisi; ditandai UNVERIFIED/null apa adanya, bukan ditebak. LAN 2.5/5G port ambigu di sumber (dicatat 2500 sbg batas bawah). 1x FXS RJ-11 + 1x USB tidak dimodelkan."
+    },
+    {
+      "id": "askey-rtf6105vw",
+      "display_name": "Askey RTF6105VW (HGU ONT, 10G EPON/XGS-PON selectable)",
+      "vendor": "Askey Computer Corp.",
+      "vendor_options": [
+        "Askey Computer Corp.",
+        "Askey"
+      ],
+      "kind": "host",
+      "subcategory": "onu",
+      "tags": [
+        "ftth",
+        "10g-epon",
+        "xgs-pon",
+        "wifi5",
+        "hgu",
+        "movistar",
+        "spain-latam"
+      ],
+      "icon": {
+        "name": "ont",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ont-firmware",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "pon0",
+          "count": 1,
+          "type": "gpon",
+          "speed_mbps": 9953,
+          "pon_standard": "10G EPON atau XGS-PON (simultan/selectable UNVERIFIED)",
+          "role": "uplink"
+        },
+        {
+          "pattern": "lan{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "lan25g{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 2500
+        },
+        {
+          "pattern": "wlan{n}",
+          "count": 1,
+          "type": "wifi",
+          "speed_mbps": null,
+          "wifi_standard": "802.11n 4x4 (2.4GHz) + 802.11ac 8x8 (5GHz) saat datasheet diterbitkan; upgrade ke 802.11ax 'soon' menurut vendor, belum dikonfirmasi shipping"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 42,
+        "psu": "single (external adapter)",
+        "feed": "AC-adapter"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "desktop"
+      },
+      "datasheet_note": "RTF6105VW: agregat throughput 'up to 4Gbps Ethernet + 2.5Gbps over ODN' (angka marketing, bukan per-port). Anomali suhu operasi vendor '-50°C to 40°C' dicatat apa adanya, tidak dikoreksi (askey.com.tw PDF resmi, V untuk port/power). chassisMm dan LED TIDAK terverifikasi sama sekali — 4 jalur pencarian buntu, lihat deviceTypes.ts. 2x FXS RJ-11 tidak dimodelkan."
     }
   ]
 }
