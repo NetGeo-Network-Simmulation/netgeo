@@ -1,7 +1,7 @@
 {
   "$schema": "netgeo.device.v2",
   "category": "wireless-ap",
-  "_notes": "Access Point WLAN. port 'wifi' = radio (speed_mbps = PHY rate agregat maks). Uplink eth/sfp ke switch (umumnya PoE-powered). Migrated from network/devices/library/wireless-ap.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'wireless-ap:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none.",
+  "_notes": "Access Point WLAN. port 'wifi' = radio (speed_mbps = PHY rate agregat maks). Uplink eth/sfp ke switch (umumnya PoE-powered). Migrated from network/devices/library/wireless-ap.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'wireless-ap:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none. Batch 2026-09-06 (research/3d-device-specs-wireless-ap.md): 7 SKU ceiling/wall-mount, semua V, physical.ru=1 = penempatan shelf di rak NetGeo (bukan RU vendor, sama seperti chassisMm/uHeight di deviceTypes.ts).",
   "devices": [
     {
       "id": "ubiquiti-u6-pro-wifi6",
@@ -285,6 +285,412 @@
         "form_factor": "ceiling-mount"
       },
       "datasheet_note": "cAP ax: Wi-Fi 6 budget, CAPsMAN-managed; cocok deployment ISP/hotspot."
+    },
+    {
+      "id": "grandstream-gwn7660",
+      "display_name": "Grandstream GWN7660 (Wi-Fi 6)",
+      "vendor": "Grandstream",
+      "vendor_options": [
+        "Grandstream"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi-ap",
+      "tags": [
+        "wireless-ap",
+        "wifi6",
+        "802.11ax",
+        "enterprise",
+        "ceiling-mount",
+        "poe-powered"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "net-poe",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": true,
+          "role": "uplink"
+        },
+        {
+          "pattern": "net",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": false,
+          "role": "downlink"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 9,
+        "psu": "PoE-powered (802.3af/802.3at)",
+        "feed": "PoE"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "ceiling-mount"
+      },
+      "wifi_standard": "Wi-Fi 6 (802.11ax)",
+      "radios": "2x2:2 dual-band (2.4GHz + 5GHz), MU-MIMO DL/UL OFDMA",
+      "datasheet_note": "GWN7660: 1.77Gbps PHY agregat, 500+ klien konkuren, controller-less embedded web UI ATAU GWN.Cloud (gratis, unlimited AP) ATAU GWN Manager on-prem (hingga 3.000 AP) — 3 mode manajemen (grandstream.com datasheet+manual resmi, V)."
+    },
+    {
+      "id": "engenius-ecw230",
+      "display_name": "EnGenius ECW230 (Wi-Fi 6)",
+      "vendor": "EnGenius",
+      "vendor_options": [
+        "EnGenius"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi-ap",
+      "tags": [
+        "wireless-ap",
+        "wifi6",
+        "802.11ax",
+        "enterprise",
+        "ceiling-mount",
+        "cloud-managed",
+        "poe-powered"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 2500,
+          "poe": true,
+          "role": "uplink"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "PoE-powered (802.3at) atau 12VDC/2A adapter opsional",
+        "feed": "PoE-or-DC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "ceiling-mount"
+      },
+      "wifi_standard": "Wi-Fi 6 (802.11ax)",
+      "radios": "4x4:4 dual-band (2.4GHz + 5GHz), PHY hingga 4.8Gbps agregat (angka agregat marketing — bukan throughput riil)",
+      "datasheet_note": "ECW230: EnGenius Cloud management, tier Basic gratis tanpa lisensi per-AP, tier Pro US$50/tahun/perangkat; antena internal omni-directional 4x 2.4GHz + 4x 5GHz 6dBi (engeniustech.com PDF resmi, V)."
+    },
+    {
+      "id": "araknis-an-520-ap-i",
+      "display_name": "Araknis Networks AN-520-AP-I (Wi-Fi 6)",
+      "vendor": "Araknis Networks",
+      "vendor_options": [
+        "Araknis Networks"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi-ap",
+      "tags": [
+        "wireless-ap",
+        "wifi6",
+        "802.11ax",
+        "av-integrator",
+        "ceiling-mount",
+        "poe-powered"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 2500,
+          "poe": true,
+          "role": "uplink"
+        },
+        {
+          "pattern": "eth1",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": false,
+          "role": "downlink"
+        }
+      ],
+      "power": {
+        "typical_w": 14.45,
+        "max_w": 15.28,
+        "psu": "PoE (802.3af/at) atau DC 12V/3A adapter",
+        "feed": "PoE-or-DC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "ceiling-mount"
+      },
+      "wifi_standard": "Wi-Fi 6 (802.11ax)",
+      "radios": "2x2 SU/MU-MIMO dual-band; measured throughput 2.4GHz 425Mbps / 5GHz 1700Mbps (angka 'measured' bukan PHY teoretis)",
+      "datasheet_note": "AN-520-AP-I: hingga 254 klien/AP, 8 SSID/AP, dikelola via OvrC. Power consumption breakdown per-mode (802.3at full=15.28W, 802.3af dgn radio 2.4GHz 1x1+port kedua mati=12.26W) (snapav.com PDF resmi, V)."
+    },
+    {
+      "id": "cambium-xv3-8",
+      "display_name": "Cambium Networks XV3-8 (Wi-Fi 6)",
+      "vendor": "Cambium Networks",
+      "vendor_options": [
+        "Cambium Networks"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi-ap",
+      "tags": [
+        "wireless-ap",
+        "wifi6",
+        "802.11ax",
+        "enterprise",
+        "ceiling-mount",
+        "tri-radio",
+        "poe-powered"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 5000,
+          "poe": true,
+          "role": "uplink"
+        },
+        {
+          "pattern": "eth1",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": false,
+          "role": "downlink"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 35,
+        "psu": "PoE (802.3bt, 35W maks) atau 802.3at (USB+BT nonaktif) atau 12VDC adapter",
+        "feed": "PoE-or-DC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "ceiling-mount"
+      },
+      "wifi_standard": "Wi-Fi 6 (802.11ax)",
+      "radios": "5GHz 8x8 SDR (atau dual 4x4) + 2.4GHz 4x4 + radio scan dedicated 1x1 (tri-radio) + BLE 4.1; PHY 5GHz 4.804Gbps / 2.4GHz 1.147Gbps",
+      "datasheet_note": "XV3-8: dikelola cnMaestro (cloud/on-prem/standalone AP, gratis termasuk harga unit) atau XMS-Cloud. Mount options: wall, ceiling T-bar dengan locking bracket, ceiling tile plate (brandcentral.cambiumnetworks.com PDF resmi, V)."
+    },
+    {
+      "id": "hikvision-ds-3wap622e-si",
+      "display_name": "Hikvision DS-3WAP622E-SI (Wi-Fi 6)",
+      "vendor": "Hikvision",
+      "vendor_options": [
+        "Hikvision"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi-ap",
+      "tags": [
+        "wireless-ap",
+        "wifi6",
+        "802.11ax",
+        "enterprise",
+        "ceiling-mount",
+        "poe-powered",
+        "china"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 2500,
+          "poe": true,
+          "role": "uplink"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 13.5,
+        "psu": "PoE (802.3af/at) atau DC 12V/1.5A adapter",
+        "feed": "PoE-or-DC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "ceiling-mount"
+      },
+      "wifi_standard": "Wi-Fi 6 (802.11ax)",
+      "radios": "2x2 MU-MIMO dual-band (mengoreksi klaim marketing 'four-flow'/4x4 di halaman produk)",
+      "datasheet_note": "DS-3WAP622E-SI: 'centralized AC management' — wajib access controller (AC) terpusat untuk upgrade firmware, bukan cloud/app consumer-style; tidak ada mode standalone murni yang disebutkan (assets.hikvision.com PDF resmi via arsip Wayback, V)."
+    },
+    {
+      "id": "peplink-ap-one-ax",
+      "display_name": "Peplink (Pepwave) AP One AX (Wi-Fi 6)",
+      "vendor": "Peplink",
+      "vendor_options": [
+        "Peplink"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi-ap",
+      "tags": [
+        "wireless-ap",
+        "wifi6",
+        "802.11ax",
+        "enterprise",
+        "ceiling-mount",
+        "poe-powered"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 2500,
+          "poe": true,
+          "role": "uplink"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 23,
+        "psu": "PoE (802.3at, injector terpisah) atau AC adapter 12V/2.5A",
+        "feed": "PoE-or-DC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "ceiling-mount"
+      },
+      "wifi_standard": "Wi-Fi 6 (802.11ax)",
+      "radios": "4x4 MU-MIMO dual-band; PHY 2.4GHz 1.148Gbps / 5GHz 2.4Gbps, channel width hingga 80MHz",
+      "datasheet_note": "AP One AX: dikelola InControl2 (cloud, disertakan gratis dengan pembelian unit) ATAU Peplink AP Controller (opsi terpisah, bentuk fisik/rackmount TIDAK diverifikasi). 256 klien rekomendasi/radio, 16 SSID/radio (download.peplink.com PDF+manual resmi, V)."
+    },
+    {
+      "id": "tenda-i27",
+      "display_name": "Tenda i27 (Wi-Fi 6)",
+      "vendor": "Tenda",
+      "vendor_options": [
+        "Tenda"
+      ],
+      "kind": "ap",
+      "subcategory": "wifi-ap",
+      "tags": [
+        "wireless-ap",
+        "wifi6",
+        "802.11ax",
+        "smb",
+        "ceiling-mount",
+        "poe-powered",
+        "china"
+      ],
+      "icon": {
+        "name": "ap-wifi",
+        "emoji": "📶"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": true,
+          "role": "uplink"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 14.8,
+        "psu": "PoE (802.3af) atau 48V/0.8A Passive PoE",
+        "feed": "PoE"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "ceiling-mount"
+      },
+      "wifi_standard": "Wi-Fi 6 (802.11ax)",
+      "radios": "dual-band 2.4GHz/5GHz, 2x antena 4dBi, hingga 256 klien maks/60 direkomendasikan",
+      "datasheet_note": "i27: dikelola Tenda CloudFi (cloud, gratis) atau AC controller hardware terpisah (static.tenda.com.cn PDF resmi, V)."
     }
   ]
 }
