@@ -111,7 +111,7 @@ export const MEDIA: Record<string, MediaSpec> = {
   pwrB: { label: 'Power C13/C14 · feed B', jacket: 0xc0392b, boot: 0xc0392b, r: 0.0038 },
 };
 
-export type PortType = 'rj45' | 'sfp28' | 'qsfp28' | 'bay' | 'lc' | 'pon' | 'mpo';
+export type PortType = 'rj45' | 'sfp28' | 'qsfp28' | 'bay' | 'lc' | 'pon' | 'mpo' | 'fxs';
 export type DeviceKind = 'odf' | 'patch' | 'duct' | 'switch' | 'fw' | 'server' | 'olt';
 
 export interface DeviceDef {
@@ -508,9 +508,11 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   // hit's `instanceId` back to a real port — see the portMap stashed on the
   // flushed mesh below.
   const cageInstances: Record<CageFamily, { pos: THREE.Vector3; dev: string; port: number }[]> = {
-    'cage-sfp': [], 'cage-qsfp': [],
+    'cage-sfp': [], 'cage-qsfp': [], 'cage-rj11': [],
   };
-  const CAGE_FAM: Record<'sfp28' | 'qsfp28', CageFamily> = { sfp28: 'cage-sfp', qsfp28: 'cage-qsfp' };
+  const CAGE_FAM: Record<'sfp28' | 'qsfp28' | 'fxs', CageFamily> = {
+    sfp28: 'cage-sfp', qsfp28: 'cage-qsfp', fxs: 'cage-rj11',
+  };
   // Every cage is authored with its length along local Y, origin at the
   // front mouth, body extending -Y into the chassis (build_assets.py header
   // comment). Devices always face +Z (portRefs sit in front of faceZ, see
@@ -962,14 +964,20 @@ export function buildScene(opts: BuildOptions): BuiltScene {
         lc: { w: Math.min(p.w, 0.0092), h: h * 0.17 },
         pon: { w: Math.min(p.w, 0.0088), h: h * 0.16 },
         mpo: { w: Math.min(p.w, 0.0135), h: h * 0.15 },
+        // RJ-11 6P voice jack — narrower/shorter than the 8P8C rj45 row
+        // above by the real opening ratio (9.85/11.68 width, 6.60/8.75
+        // height; see tools/blender/build_assets.py build_rj11_cage() for
+        // the sourced numbers), so it reads as a visibly smaller connector
+        // even in the pre-asset-load fallback box.
+        fxs: { w: Math.min(p.w, 0.0105), h: h * 0.226 },
       };
       const geo = geoms[p.ptype] ?? { w: p.w, h: h * 0.28 };
       const pw = geo.w, ph = geo.h;
-      // NG-PH3D 3b: real SFP/QSFP cage geometry, once loaded, replaces the
-      // procedural box+lip with a queued InstancedMesh transform — no
+      // NG-PH3D 3b: real SFP/QSFP/RJ11 cage geometry, once loaded, replaces
+      // the procedural box+lip with a queued InstancedMesh transform — no
       // per-port mesh at all, so this branch adds nothing to `g` and skips
       // the box-cage fallback below entirely.
-      const cageFam = (p.ptype === 'sfp28' || p.ptype === 'qsfp28') ? CAGE_FAM[p.ptype] : undefined;
+      const cageFam = (p.ptype === 'sfp28' || p.ptype === 'qsfp28' || p.ptype === 'fxs') ? CAGE_FAM[p.ptype] : undefined;
       const cageGeo = cageFam ? getBootGeometry(cageFam) : undefined;
       let cage: THREE.Mesh | undefined;
       if (cageFam && cageGeo) {
@@ -2033,7 +2041,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   // enough that a packed SFP/QSFP row caught the key light as one continuous
   // hot (near-white) band instead of reading as individual metal cages.
   const cageMat = track(mat('cage-instanced', 0x6a6d72, { roughness: 0.62, metalness: 0.35 }));
-  for (const fam of ['cage-sfp', 'cage-qsfp'] as CageFamily[]) {
+  for (const fam of ['cage-sfp', 'cage-qsfp', 'cage-rj11'] as CageFamily[]) {
     const list = cageInstances[fam];
     if (!list.length) continue;
     const geo = getBootGeometry(fam)!;

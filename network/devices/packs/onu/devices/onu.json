@@ -264,6 +264,11 @@
           "type": "wifi",
           "speed_mbps": 2402,
           "wifi_standard": "Wi-Fi 6 (802.11ax), dual-band AX3000"
+        },
+        {
+          "pattern": "fxs{n}",
+          "count": 2,
+          "type": "voice"
         }
       ],
       "power": {
@@ -276,7 +281,7 @@
         "ru": 1,
         "form_factor": "desktop"
       },
-      "datasheet_note": "GN630V: GPON Class B+ with BOB, optical budget 20km, ITU-T G.984.x/G.988 (en.skyworthdigital.com, V untuk port/LED). chassisMm V(2nd), single-source, belum re-verifiable — lihat deviceTypes.ts. 2x FXS RJ-11 tidak dimodelkan (tak ada PortType voice); shelf/desktop, bukan RU rak."
+      "datasheet_note": "GN630V: GPON Class B+ with BOB, optical budget 20km, ITU-T G.984.x/G.988 (en.skyworthdigital.com, V untuk port/LED). chassisMm V(2nd), single-source, belum re-verifiable — lihat deviceTypes.ts. 2x FXS RJ-11 (voice) dimodelkan sbg PortType/pack-type baru; shelf/desktop, bukan RU rak."
     },
     {
       "id": "glcom-gl-x822u-mtk",
@@ -332,6 +337,11 @@
           "type": "wifi",
           "speed_mbps": 866,
           "wifi_standard": "Wi-Fi 5 (802.11ac), dual-band 300+866Mbps"
+        },
+        {
+          "pattern": "fxs0",
+          "count": 1,
+          "type": "voice"
         }
       ],
       "power": {
@@ -344,7 +354,7 @@
         "ru": 1,
         "form_factor": "desktop"
       },
-      "datasheet_note": "GL-X822U-MTK: jarak transmisi 0-20km, RX sensitivity -27dBm, suhu operasi -20~+50°C (gl-com.com, V, dibuka langsung). 1x FXS RJ-11 tidak dimodelkan; shelf/desktop, bukan RU rak."
+      "datasheet_note": "GL-X822U-MTK: jarak transmisi 0-20km, RX sensitivity -27dBm, suhu operasi -20~+50°C (gl-com.com, V, dibuka langsung). 1x FXS RJ-11 (voice) dimodelkan sbg PortType/pack-type baru; shelf/desktop, bukan RU rak."
     },
     {
       "id": "comtrend-grg-4361",
@@ -391,6 +401,11 @@
           "count": 1,
           "type": "eth",
           "speed_mbps": 10000
+        },
+        {
+          "pattern": "fxs0",
+          "count": 1,
+          "type": "voice"
         }
       ],
       "power": {
@@ -403,7 +418,7 @@
         "ru": 1,
         "form_factor": "desktop"
       },
-      "datasheet_note": "GRG-4361: DS/US 9.95328/9.95328 Gbps simetris, Tx 4-7dBm/Rx -28dBm, jarak 20km, ITU-T G.9807.1+G.988 (us.comtrend.com PDF resmi, V). LED vendor berlabel 'GPON' meski device ini XGS-PON — anomali penamaan vendor sendiri, tidak dikoreksi. Rating adapter 12VDC/1.0A (bukan konsumsi terukur). 1x FXS RJ-11 tidak dimodelkan; shelf/desktop, bukan RU rak."
+      "datasheet_note": "GRG-4361: DS/US 9.95328/9.95328 Gbps simetris, Tx 4-7dBm/Rx -28dBm, jarak 20km, ITU-T G.9807.1+G.988 (us.comtrend.com PDF resmi, V). LED vendor berlabel 'GPON' meski device ini XGS-PON — anomali penamaan vendor sendiri, tidak dikoreksi. Rating adapter 12VDC/1.0A (bukan konsumsi terukur). 1x FXS RJ-11 (voice) dimodelkan sbg PortType/pack-type baru; shelf/desktop, bukan RU rak."
     },
     {
       "id": "hitron-nova2208",
@@ -459,6 +474,11 @@
           "count": 8,
           "type": "eth",
           "speed_mbps": 2500
+        },
+        {
+          "pattern": "fxs{n}",
+          "count": 8,
+          "type": "voice"
         }
       ],
       "power": {
@@ -471,7 +491,7 @@
         "ru": 1,
         "form_factor": "rack-or-wall-shelf"
       },
-      "datasheet_note": "NOVA2208: TX 1270nm/7dBm max, RX 1577nm/-29dBm sensitivity max, DOCSIS DPoE 2.0 compliant (us.hitrontech.com PDF resmi, V). Lebar chassis 250mm — BUKAN 19in full-width, dipasang lewat bracket/shelf parsial (lihat deviceTypes.ts). 8x FXS RJ-11 tidak dimodelkan — jumlah terbanyak di batch ini. Berat: vendor sendiri menulis 'TBD'."
+      "datasheet_note": "NOVA2208: TX 1270nm/7dBm max, RX 1577nm/-29dBm sensitivity max, DOCSIS DPoE 2.0 compliant (us.hitrontech.com PDF resmi, V). Lebar chassis 250mm — BUKAN 19in full-width, dipasang lewat bracket/shelf parsial (lihat deviceTypes.ts). 8x FXS RJ-11 (voice) dimodelkan sbg PortType/pack-type baru — jumlah terbanyak di batch ini. Berat: vendor sendiri menulis 'TBD'."
     },
     {
       "id": "actiontec-xg-99m",
@@ -526,6 +546,11 @@
           "count": 1,
           "type": "eth",
           "speed_mbps": 1000
+        },
+        {
+          "pattern": "fxs{n}",
+          "count": 2,
+          "type": "voice"
         }
       ],
       "power": {
@@ -538,7 +563,7 @@
         "ru": 1,
         "form_factor": "desktop-or-wall-mount"
       },
-      "datasheet_note": "XG-99M: Class N1 (ITU-T G.9807, bukan skema huruf B+/C+/C++ GPON), launch power +4~+9dBm, sensitivity -28dBm, overload -9dBm (newserv.actiontec.com via Wayback Machine snapshot 2024-12-03 — URL live connection-refused, bukan bukti dokumen hilang; V). 2x FXS RJ-11 + 1x interface MoCA tidak dimodelkan — tak ada PortType yang cocok untuk keduanya."
+      "datasheet_note": "XG-99M: Class N1 (ITU-T G.9807, bukan skema huruf B+/C+/C++ GPON), launch power +4~+9dBm, sensitivity -28dBm, overload -9dBm (newserv.actiontec.com via Wayback Machine snapshot 2024-12-03 — URL live connection-refused, bukan bukti dokumen hilang; V). 2x FXS RJ-11 (voice) dimodelkan sbg PortType/pack-type baru; 1x interface MoCA masih tidak dimodelkan — tak ada PortType yang cocok."
     },
     {
       "id": "vantiva-fxa530z",
@@ -656,6 +681,11 @@
           "count": 1,
           "type": "eth",
           "speed_mbps": 2500
+        },
+        {
+          "pattern": "fxs0",
+          "count": 1,
+          "type": "voice"
         }
       ],
       "power": {
@@ -668,7 +698,7 @@
         "ru": 1,
         "form_factor": "desktop"
       },
-      "datasheet_note": "BGW320-500: dibuat/di-file Humax (FCC grantee O6Z), dipasarkan berbranding AT&T — branding disebutkan apa adanya, tidak disembunyikan. Chassis 200x100mm, tinggi 188/191mm (via FCC filing PDF manual, dokumen asli Humax, V(2nd)). CATATAN GAP SUMBER: bagian riset detail per-SKU untuk device ini hilang dari catatan riset (hanya baris ringkasan tersisa) — jenis PON, speed per-port WAN, dan warna LED TIDAK bisa dikutip presisi; ditandai UNVERIFIED/null apa adanya, bukan ditebak. LAN 2.5/5G port ambigu di sumber (dicatat 2500 sbg batas bawah). 1x FXS RJ-11 + 1x USB tidak dimodelkan."
+      "datasheet_note": "BGW320-500: dibuat/di-file Humax (FCC grantee O6Z), dipasarkan berbranding AT&T — branding disebutkan apa adanya, tidak disembunyikan. Chassis 200x100mm, tinggi 188/191mm (via FCC filing PDF manual, dokumen asli Humax, V(2nd)). CATATAN GAP SUMBER: bagian riset detail per-SKU untuk device ini hilang dari catatan riset (hanya baris ringkasan tersisa) — jenis PON, speed per-port WAN, dan warna LED TIDAK bisa dikutip presisi; ditandai UNVERIFIED/null apa adanya, bukan ditebak. LAN 2.5/5G port ambigu di sumber (dicatat 2500 sbg batas bawah). 1x FXS RJ-11 (voice) dimodelkan sbg PortType/pack-type baru; 1x USB belum dimodelkan."
     },
     {
       "id": "askey-rtf6105vw",
@@ -730,6 +760,11 @@
           "type": "wifi",
           "speed_mbps": null,
           "wifi_standard": "802.11n 4x4 (2.4GHz) + 802.11ac 8x8 (5GHz) saat datasheet diterbitkan; upgrade ke 802.11ax 'soon' menurut vendor, belum dikonfirmasi shipping"
+        },
+        {
+          "pattern": "fxs{n}",
+          "count": 2,
+          "type": "voice"
         }
       ],
       "power": {
@@ -742,7 +777,7 @@
         "ru": 1,
         "form_factor": "desktop"
       },
-      "datasheet_note": "RTF6105VW: agregat throughput 'up to 4Gbps Ethernet + 2.5Gbps over ODN' (angka marketing, bukan per-port). Anomali suhu operasi vendor '-50°C to 40°C' dicatat apa adanya, tidak dikoreksi (askey.com.tw PDF resmi, V untuk port/power). chassisMm dan LED TIDAK terverifikasi sama sekali — 4 jalur pencarian buntu, lihat deviceTypes.ts. 2x FXS RJ-11 tidak dimodelkan."
+      "datasheet_note": "RTF6105VW: agregat throughput 'up to 4Gbps Ethernet + 2.5Gbps over ODN' (angka marketing, bukan per-port). Anomali suhu operasi vendor '-50°C to 40°C' dicatat apa adanya, tidak dikoreksi (askey.com.tw PDF resmi, V untuk port/power). chassisMm dan LED TIDAK terverifikasi sama sekali — 4 jalur pencarian buntu, lihat deviceTypes.ts. 2x FXS RJ-11 (voice) dimodelkan sbg PortType/pack-type baru."
     }
   ]
 }

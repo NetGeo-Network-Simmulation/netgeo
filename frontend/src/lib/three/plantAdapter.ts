@@ -44,8 +44,11 @@ const KIND_MAP: Partial<Record<NodeKind, DeviceKind>> = {
   olt: 'olt',
 };
 
-/** Catalog port type → rack3d's coarser port-type set. */
-const PTYPE_MAP: Record<CatalogPortType, PortType> = {
+/** Catalog port type → rack3d's coarser port-type set. Exported for direct
+ *  unit testing (plantAdapter.ptypeMap.test.ts) — `fxs` (RJ-11 voice) must
+ *  never collapse into 'rj45' (physically a different, smaller connector;
+ *  keputusan Surya 2026-09-06). */
+export const PTYPE_MAP: Record<CatalogPortType, PortType> = {
   rj45: 'rj45',
   'console-rj45': 'rj45',
   'mgmt-rj45': 'rj45',
@@ -58,6 +61,7 @@ const PTYPE_MAP: Record<CatalogPortType, PortType> = {
   usb: 'rj45',
   'drive-sff': 'bay',
   'drive-lff': 'bay',
+  fxs: 'fxs',
 };
 
 /** Backend `CableMedia` (9 values) → rack3d `MEDIA` key (22-PLANT-3D-PLAN §4.P1.a). */

@@ -26,7 +26,7 @@ from pathlib import Path
 
 PACKS = Path(__file__).resolve().parents[1] / "network" / "devices" / "packs"
 
-_PORT_TYPES = {"eth", "sfp", "sfp+", "sfp28", "qsfp", "wifi", "gpon", "serial", "console", "xfp"}
+_PORT_TYPES = {"eth", "sfp", "sfp+", "sfp28", "qsfp", "wifi", "gpon", "serial", "console", "xfp", "voice"}
 
 
 def _check_device(pack_id: str, fname: str, dev: dict, findings: list[str]) -> None:

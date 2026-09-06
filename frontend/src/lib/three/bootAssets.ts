@@ -1,7 +1,7 @@
 /**
  * Loader for the Blender-authored connector assets (tools/blender/
  * build_assets.py -> frontend/public/3d/*.glb): cable-end boots (rj45/lc)
- * and device-faceplate port cages (sfp/qsfp). Kept out of rack3d.ts so
+ * and device-faceplate port cages (sfp/qsfp/rj11). Kept out of rack3d.ts so
  * buildScene() itself never touches the network/filesystem — it stays a
  * pure, synchronous scene builder the rest of the app (and every existing
  * test) can keep calling the way it already does. A host component loads
@@ -14,7 +14,7 @@ import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js'
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 export type BootFamily = 'rj45' | 'lc';
-export type CageFamily = 'cage-sfp' | 'cage-qsfp';
+export type CageFamily = 'cage-sfp' | 'cage-qsfp' | 'cage-rj11';
 export type AssetFamily = BootFamily | CageFamily;
 
 const URLS: Record<AssetFamily, string> = {
@@ -22,6 +22,7 @@ const URLS: Record<AssetFamily, string> = {
   lc: '/3d/boot-lc.glb',
   'cage-sfp': '/3d/cage-sfp.glb',
   'cage-qsfp': '/3d/cage-qsfp.glb',
+  'cage-rj11': '/3d/cage-rj11.glb',
 };
 
 const cache: Partial<Record<AssetFamily, THREE.BufferGeometry>> = {};

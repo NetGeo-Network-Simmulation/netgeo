@@ -30,7 +30,12 @@ export type PortType =
   | 'mgmt-rj45'
   | 'usb'
   | 'drive-sff'
-  | 'drive-lff';
+  | 'drive-lff'
+  // RJ-11/RJ-14 (6P) analog voice/FXS jack — physically a 6-position modular
+  // connector, NOT an 8-position RJ45 (research/3d-device-specs-onu.md
+  // §gap-1, keputusan Surya 2026-09-06): must render + map distinctly, never
+  // collapse into 'rj45'.
+  | 'fxs';
 
 export interface PortSpec {
   type: PortType;
@@ -1458,8 +1463,14 @@ export const DEVICE_TYPES: DeviceType[] = [
           rows: 1,
           align: 'fill',
         },
-        // 2x FXS RJ-11 (voice) tidak direpresentasikan — tidak ada PortType
-        // yang cocok (konektor RJ-11 beda fisik dari RJ-45), lihat research §gap-1.
+        // 2x FXS RJ-11 (voice) — research/3d-device-specs-onu.md §1/§gap-1,
+        // en.skyworthdigital.com (V).
+        {
+          ports: [{ type: 'fxs', count: 2, label: 'FXS' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
         {
           ports: [{ type: 'usb', count: 1 }],
           rows: 1,
@@ -1513,7 +1524,14 @@ export const DEVICE_TYPES: DeviceType[] = [
           rows: 1,
           align: 'fill',
         },
-        // 1x FXS RJ-11 tidak direpresentasikan — lihat research §gap-1.
+        // 1x FXS RJ-11 — research/3d-device-specs-onu.md §2/§gap-1,
+        // gl-com.com (V).
+        {
+          ports: [{ type: 'fxs', count: 1, label: 'FXS' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.06,
+        },
         {
           ports: [{ type: 'usb', count: 2 }],
           rows: 1,
@@ -1566,7 +1584,14 @@ export const DEVICE_TYPES: DeviceType[] = [
           rows: 1,
           align: 'fill',
         },
-        // 1x FXS RJ-11 tidak direpresentasikan — lihat research §gap-1.
+        // 1x FXS RJ-11 — research/3d-device-specs-onu.md §3/§gap-1,
+        // us.comtrend.com PDF resmi (V).
+        {
+          ports: [{ type: 'fxs', count: 1, label: 'FXS' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.15,
+        },
       ],
       // V (dua versi datasheet, V1.1 & V3.0, cocok identik); warna
       // UNVERIFIED di kedua versi — derived. Label "GPON" dipertahankan apa
@@ -1620,8 +1645,14 @@ export const DEVICE_TYPES: DeviceType[] = [
           rows: 2,
           align: 'fill',
         },
-        // 8x FXS RJ-11 tidak direpresentasikan — jumlah terbanyak di batch
-        // ini, lihat research §gap-1.
+        // 8x FXS RJ-11 — jumlah terbanyak di batch ini — research/
+        // 3d-device-specs-onu.md §4/§gap-1, us.hitrontech.com PDF resmi (V).
+        {
+          ports: [{ type: 'fxs', count: 8, label: 'FXS' }],
+          rows: 2,
+          align: 'right',
+          widthFraction: 0.22,
+        },
       ],
       // V (PDF resmi, bagian "Mechanical") — 4 LED generik tanpa breakdown
       // per-port. Warna derived (tak ada kolom warna di datasheet).
@@ -1664,8 +1695,15 @@ export const DEVICE_TYPES: DeviceType[] = [
           rows: 1,
           align: 'fill',
         },
-        // Hingga 2x FXS RJ-11 + 1x interface MoCA tidak direpresentasikan —
-        // tidak ada PortType yang cocok untuk keduanya, lihat research §gap-1/§gap-3.
+        // Hingga 2x FXS RJ-11 — research/3d-device-specs-onu.md §6/§gap-1,
+        // PDF resmi via Wayback Machine (V). 1x interface MoCA masih tidak
+        // direpresentasikan — tidak ada PortType yang cocok (§gap-3).
+        {
+          ports: [{ type: 'fxs', count: 2, label: 'FXS' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.12,
+        },
       ],
       // V, baru ditemukan sesi riset ini (tidak ada di pass sebelumnya) —
       // 7 label terbanyak di batch ini. Warna derived (datasheet hanya label).
@@ -1768,7 +1806,14 @@ export const DEVICE_TYPES: DeviceType[] = [
           rows: 1,
           align: 'fill',
         },
-        // 1x FXS RJ-11 tidak direpresentasikan — lihat research §gap-1.
+        // 1x FXS RJ-11 — research/3d-device-specs-onu.md §7/§gap-1, FCC
+        // filing O6ZBGW320 (V(2nd)).
+        {
+          ports: [{ type: 'fxs', count: 1, label: 'FXS' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.06,
+        },
         {
           ports: [{ type: 'usb', count: 1 }],
           rows: 1,
@@ -1829,7 +1874,14 @@ export const DEVICE_TYPES: DeviceType[] = [
           rows: 2,
           align: 'fill',
         },
-        // 2x FXS RJ-11 tidak direpresentasikan — lihat research §gap-1.
+        // 2x FXS RJ-11 — research/3d-device-specs-onu.md §8/§gap-1,
+        // askey.com.tw PDF resmi (V).
+        {
+          ports: [{ type: 'fxs', count: 2, label: 'FXS' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.12,
+        },
       ],
       // LED UNVERIFIED total — datasheet resmi vendor sama sekali tidak
       // menyebut LED. Satu-satunya isyarat forum Movistar ("4 LED di
@@ -2268,6 +2320,7 @@ const PACK_PORT_TYPE_MAP: Partial<Record<string, PortType>> = {
   sfp28: 'sfp28',
   qsfp: 'qsfp28',
   gpon: 'pon',
+  voice: 'fxs', // RJ-11 FXS/POTS line, added for the ONU voice-port batch
 };
 
 /** Build a real DeviceType from a pack-sourced /api/device-types entry
