@@ -28,7 +28,7 @@ _REAL_PACKS = {
     "wireless-ap": 4,
     "optical-transport": 7,
     "cell-site": 3,
-    "servers": 3,
+    "servers": 9,
 }
 
 

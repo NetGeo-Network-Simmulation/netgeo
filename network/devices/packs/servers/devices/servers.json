@@ -183,6 +183,343 @@
         "form_factor": "2U-rackmount"
       },
       "datasheet_note": "Compute/hypervisor node untuk NFV & host emulasi NOS skala besar."
+    },
+    {
+      "id": "lenovo-sr650-v4",
+      "display_name": "Lenovo ThinkSystem SR650 V4 (2U Rack Server)",
+      "vendor": "Lenovo",
+      "vendor_options": [
+        "Lenovo"
+      ],
+      "kind": "server",
+      "subcategory": "bare-metal",
+      "tags": [
+        "server",
+        "compute",
+        "datacenter",
+        "vm-host",
+        "rack-2u"
+      ],
+      "icon": {
+        "name": "server",
+        "emoji": "🖥️"
+      },
+      "nos": [
+        "linux",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "redundant (dual, hot-swap)",
+        "feed": "AC-or-DC (dual redundant, model tergantung PSU)"
+      },
+      "physical": {
+        "ru": 2,
+        "form_factor": "2U-rackmount"
+      },
+      "datasheet_note": "SR650 V4: 2x Intel Xeon 6 (hingga 86 core/350W TDP), hingga 32x TruDDR5 RDIMM/8TB, hingga 10x PCIe Gen5 + 2x OCP 3.0 slot modular (pubs.lenovo.com, V). Power watt UNVERIFIED (datasheet hanya sebut 'multiple wattages Platinum/Titanium')."
+    },
+    {
+      "id": "inspur-nf5280m5",
+      "display_name": "Inspur NF5280M5 (2U Rack Server)",
+      "vendor": "Inspur",
+      "vendor_options": [
+        "Inspur"
+      ],
+      "kind": "server",
+      "subcategory": "bare-metal",
+      "tags": [
+        "server",
+        "compute",
+        "datacenter",
+        "gpu-capable",
+        "rack-2u"
+      ],
+      "icon": {
+        "name": "server",
+        "emoji": "🖥️"
+      },
+      "nos": [
+        "linux",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        },
+        {
+          "pattern": "ocp-nic{n}",
+          "count": 2,
+          "type": "eth",
+          "speed_mbps": 25000,
+          "role": "data-nic"
+        },
+        {
+          "pattern": "phy-nic{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 10000,
+          "role": "data-nic"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "redundant (1+1, single or dual option)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 2,
+        "form_factor": "2U-rackmount"
+      },
+      "datasheet_note": "NF5280M5: dual-socket Xeon Scalable, hingga 4x dual-width GPU atau 8x single-width GPU, 9x PCIe3.0 + 1x OCP/PHY slot (inspur.com PDF resmi, V). Power watt UNVERIFIED (PDF hanya sebut 'Single/Dual PSU 1+1 redundant' tanpa angka watt)."
+    },
+    {
+      "id": "qct-quantagrid-d52bq-2u",
+      "display_name": "QCT QuantaGrid D52BQ-2U (2U Rack Server)",
+      "vendor": "QCT",
+      "vendor_options": [
+        "QCT"
+      ],
+      "kind": "server",
+      "subcategory": "bare-metal",
+      "tags": [
+        "server",
+        "compute",
+        "datacenter",
+        "hyperconverged-capable",
+        "rack-2u"
+      ],
+      "icon": {
+        "name": "server",
+        "emoji": "🖥️"
+      },
+      "nos": [
+        "linux",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        },
+        {
+          "pattern": "nic-10g{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 10000,
+          "role": "data-nic"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 1200,
+        "psu": "redundant (1+1 hot-plug, 800W/1200W Platinum/Titanium)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 2,
+        "form_factor": "2U-rackmount"
+      },
+      "datasheet_note": "D52BQ-2U: dual Intel Xeon Scalable (TDP 205W), 24 DIMM slot hingga 3TB DDR4-2666, hingga 10 slot ekspansi PCIe Gen3; NIC 10G RJ45 mezzanine OCP opsional, bukan bawaan wajib (qct.io + PDF datasheet resmi identik, V)."
+    },
+    {
+      "id": "wiwynn-sv300g3",
+      "display_name": "Wiwynn SV300G3 (1U Rack Server)",
+      "vendor": "Wiwynn",
+      "vendor_options": [
+        "Wiwynn"
+      ],
+      "kind": "server",
+      "subcategory": "bare-metal",
+      "tags": [
+        "server",
+        "compute",
+        "datacenter",
+        "odm-hyperscale",
+        "rack-1u",
+        "white-box"
+      ],
+      "icon": {
+        "name": "server",
+        "emoji": "🖥️"
+      },
+      "nos": [
+        "linux",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        },
+        {
+          "pattern": "eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "data-nic"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 1600,
+        "psu": "redundant (1+1, 800W)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-rackmount"
+      },
+      "datasheet_note": "SV300G3: 2x PCIe x16 full-height + 2x PCIe x16 mezzanine slot, 2x OCP v2.0 NIC mezzanine slot opsional, M.2 PCIe 3.0 x4 (wiwynn.com, V). max_w derived dari 2x800W PSU rating, bukan konsumsi terukur."
+    },
+    {
+      "id": "pure-flasharray-x70-r5",
+      "display_name": "Pure Storage FlashArray//X70 R5 (3U All-Flash SAN)",
+      "vendor": "Pure Storage",
+      "vendor_options": [
+        "Pure Storage"
+      ],
+      "kind": "server",
+      "subcategory": "all-flash-san",
+      "tags": [
+        "storage",
+        "san",
+        "all-flash",
+        "nvme",
+        "nvme-of",
+        "datacenter",
+        "rebrand-2026-everpure"
+      ],
+      "icon": {
+        "name": "storage-array",
+        "emoji": "💾"
+      },
+      "nos": [
+        "purity",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "mgmt-eth{n}",
+          "count": 2,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        },
+        {
+          "pattern": "ct{n}-eth{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 10000,
+          "role": "data-nic"
+        }
+      ],
+      "power": {
+        "typical_w": 1370,
+        "max_w": 1616,
+        "psu": "redundant (2x IEC60320-C20 inlet)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 3,
+        "form_factor": "3U-rackmount (scale-out hingga 9U dengan DirectFlash Shelf eksternal)"
+      },
+      "datasheet_note": "FlashArray//X70 R5: hingga 2,5PB/2,2PiB effective capacity, hingga 658TB raw, NVMe-oF (FC/RoCE/TCP), 99,9999% availability (everpuredata.com PDF resmi + netboxlabs.com CC0, V + V(2nd) terkorroborasi). Host port FC/Ethernet 10-100G data path utama bersifat modular (kartu HBA), tidak dienumerasi. Rebrand Pure Storage->Everpure efektif 23 Feb 2026."
+    },
+    {
+      "id": "hitachi-vsp-one-block",
+      "display_name": "Hitachi Vantara VSP One Block 24/26/28 (2U All-Flash SAN)",
+      "vendor": "Hitachi Vantara",
+      "vendor_options": [
+        "Hitachi Vantara"
+      ],
+      "kind": "server",
+      "subcategory": "all-flash-san",
+      "tags": [
+        "storage",
+        "san",
+        "all-flash",
+        "nvme",
+        "block-storage",
+        "datacenter",
+        "enterprise"
+      ],
+      "icon": {
+        "name": "storage-array",
+        "emoji": "💾"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "redundant (dual controller symmetric active-active)",
+        "feed": "AC"
+      },
+      "physical": {
+        "ru": 2,
+        "form_factor": "2U-rackmount"
+      },
+      "datasheet_note": "VSP One Block 24/26/28: 3,96PBe dalam 2U, hingga 32x FC host port (Gen 7 Fibre Channel, TIDAK dienumerasi di ports[] karena belum ada tipe port 'fc' di kosakata pack), scale-out hingga 65 node, 256GB/s Fibre bandwidth, jaminan 100% Data Availability + 4:1 data reduction (hitachivantara.com PDF resmi x2, V). chassisMm, front bay count, dan LED tidak terverifikasi -- lihat deviceTypes.ts untuk rincian."
     }
   ]
 }
