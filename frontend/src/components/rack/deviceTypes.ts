@@ -1846,6 +1846,244 @@ export const DEVICE_TYPES: DeviceType[] = [
     // warna produk asli — tunggu foto produk untuk final art.
     brand: { accent: '#707070', chassis: '#707070', label: 'Askey', badge: 'stripe' },
   },
+
+  // ── Padtec Combiner 10Gb/s ODU-XC 8x2 G.709 (1U standalone OTN muxponder) ──
+  {
+    slug: 'padtec-combiner-10g-odu-xc',
+    manufacturer: 'Padtec',
+    model: 'Combiner 10Gb/s ODU-XC 8x2 G.709',
+    uHeight: 1,
+    // §8.1 V (manual teknis resmi Padtec REV 8, via filing regulator ANATEL
+    // Brasil): "Largura [mm] 1U: 440", "Profundidade [mm] 1U: 242,4" — bukan
+    // 482.6mm (19in penuh), jadi kemungkinan besar lebar body chassis asli.
+    chassisMm: { widthMm: 440, depthMm: 242.4 },
+    front: {
+      portZones: [
+        {
+          // V jenis/jumlah (§4.2.7/4.2.8 manual); urutan kiri-kanan
+          // UNVERIFIED (diagram panel depan tak ter-parse teks).
+          ports: [{ type: 'sfp', count: 8, label: 'Client 1-8' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          // V: 2x network OTU2 tunable C/L-band. Aproksimasi eksplisit ke
+          // sfp+ — manual sebut modul bisa SFP atau XFP, kosakata target tak
+          // punya XFP terpisah.
+          ports: [{ type: 'sfp+', count: 2, label: 'OTU2 network' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.16,
+        },
+        {
+          // interpretasi kami: port "GL" (Gerencia Local) -> console, BUKAN
+          // label vendor eksplisit "console".
+          ports: [{ type: 'console-rj45', count: 1, label: 'GL' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.07,
+        },
+        {
+          // interpretasi kami: port "DCN" (remote mgmt network) -> mgmt,
+          // BUKAN label vendor eksplisit "mgmt".
+          ports: [{ type: 'mgmt-rj45', count: 1, label: 'DCN' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.07,
+        },
+      ],
+      // V label+warna eksplisit (§4.2.11 manual) — satu-satunya SKU batch
+      // ini dgn LED nama asli lengkap. Jumlah presisi LOS/LASEROFF OTU2
+      // UNVERIFIED (1 gabungan atau 2 terpisah per port network) — grup jadi
+      // satu label range spt konvensi LAN1-4 di entri lain.
+      leds: [
+        { label: 'POWER', color: 'green', position: 'left' },
+        { label: 'LOS OTU2 1-2', color: 'red', position: 'left' },
+        { label: 'LASER OFF OTU2 1-2', color: 'red', position: 'left' },
+        { label: 'LOS Client 1-8', color: 'red', position: 'left' },
+        { label: 'LASEROFF Client 1-8', color: 'red', position: 'left' },
+      ],
+    },
+    rear: {
+      // V (§4.2.9): -48VDC nominal (min -60V, maks -36V), single DC
+      // terminal feed di belakang — tak ada redundansi disebutkan.
+      blocks: [{ type: 'psu-slot', count: 1 }],
+    },
+    // brand: UNVERIFIED total — manual teknis berisi diagram/teks, tanpa foto
+    // produk berwarna yang berhasil diperiksa. Abu netral placeholder.
+    brand: { accent: '#707070', chassis: '#707070', label: 'Padtec', badge: 'stripe' },
+  },
+
+  // ── Ekinops EKINOPS360 C200HC (modular DWDM/OTN chassis, 2RU) ───────────
+  {
+    slug: 'ekinops-ekinops360-c200hc',
+    manufacturer: 'Ekinops',
+    model: 'EKINOPS360 C200HC',
+    uHeight: 2,
+    // §8.1 V (datasheet resmi V.12, 10/2025, via Wayback Machine — ekinops.com
+    // 403 semua path langsung): "Width 442mm", "Depth 269mm (DC version)".
+    // Bukan 482.6mm, jadi kemungkinan besar lebar body asli. Varian AC punya
+    // depth beda (442mm) — tidak dimodelkan, SKU ini pakai versi DC.
+    chassisMm: { widthMm: 442, depthMm: 269 },
+    front: {
+      // UNVERIFIED total, sengaja dibiarkan minimal — chassis modular murni
+      // (6 slot service/photonic + 1 slot manajemen "any card-any slot"),
+      // datasheet kartu manajemen PM_MNGT4-2 tak ditemukan (nol snapshot
+      // Wayback). Foto produk resmi kualitatif menunjukkan kemungkinan
+      // RJ45+USB di kartu manajemen TAPI riset eksplisit menandai itu TIDAK
+      // dipakai sbg dasar PortSpec presisi — jangan mengarang jumlah/jenis.
+      portZones: [
+        {
+          ports: [{ type: 'mgmt-rj45', count: 1, label: 'MGMT (kartu PM_MNGT4-2, UNVERIFIED)' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.12,
+        },
+      ],
+      // UNVERIFIED — foto hanya beri indikator hijau tanpa label terbaca;
+      // pola minimal generik dipakai (keputusan leader).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: {
+      // V (tabel FEATURES datasheet): -48VDC atau opsi AC, 60W/72W kosong,
+      // maks 500W. Redundansi PSU UNVERIFIED — pakai 1 sbg default minimal
+      // alih-alih menebak.
+      blocks: [{ type: 'psu-slot', count: 1 }],
+    },
+    // brand: derived dari foto produk resmi (Wayback) — body silver/abu
+    // metalik anodized, aksen biru logo "EKINOPS" pada handle ejector kartu.
+    brand: { accent: '#1B5FA8', chassis: '#B7BBC0', label: 'Ekinops', badge: 'stripe' },
+  },
+
+  // ── Fujitsu / 1Finity Americas 1FINITY T310 (transport blade, 1U) ───────
+  {
+    slug: 'fujitsu-1finity-t310',
+    manufacturer: 'Fujitsu',
+    model: '1FINITY T310',
+    uHeight: 1,
+    // §8.1 chassisMm DIHILANGKAN — satu-satunya angka lebar (483mm) adalah
+    // "Dimensions H×W×D: 1.75 × 19 × 17.72in (44.4×483×450mm)", TAPI datasheet
+    // resmi (via Wayback, snapshot 2021-02-28) SENDIRI eksplisit menyatakan
+    // "W = 19in or 23in with mounting rails" — itu faceplate/rail, bukan body
+    // (preseden Barracuda/Calix/DZS/Iskratel/Askey: field kosong lebih baik
+    // drpd angka yang dibantah sumbernya sendiri). Depth 450mm juga
+    // bersyarat ("<23.6in/600mm with fiber management"). 3D builder pakai
+    // fallback generic body size.
+    front: {
+      portZones: [
+        {
+          // V jumlah/jenis (tabel "Line Optics"); form factor asli 2x
+          // CFP2-ACO coherent — dipetakan qsfp28 sbg aproksimasi eksplisit,
+          // CFP2 tak ada di union PortType. Urutan kiri-kanan UNVERIFIED.
+          ports: [{ type: 'qsfp28', count: 2, label: 'Network (CFP2-ACO, aproksimasi)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+        {
+          // V: 20x client 10GbE/OC-192/OTU2/OTU2e, SFP+ SR/LR/ER.
+          ports: [{ type: 'sfp+', count: 20, label: 'Client' }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          // V: "Local Management Port (LMP): 1x 10/100Mbps Ethernet RJ-45".
+          ports: [{ type: 'mgmt-rj45', count: 1, label: 'LMP' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.07,
+        },
+        {
+          // V: "Management Port (LCN): 2x GbE SFP" — dipetakan sfp generik
+          // meski fungsinya manajemen (bentuk fisik SFP).
+          ports: [{ type: 'sfp', count: 2, label: 'LCN' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.09,
+        },
+      ],
+      // V untuk kategori nama (tabel "Base System": "Front LEDs: System
+      // Status, Alarm Severity, and Port"), UNVERIFIED untuk rincian
+      // jumlah/warna per kategori.
+      leds: [
+        { label: 'System Status', color: 'green', position: 'left' },
+        { label: 'Alarm Severity', color: 'red', position: 'left' },
+        { label: 'Port', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      // V (tabel Power): -48VDC nominal (-40V..-57V), dual-feed fixed DC PSU,
+      // konsumsi 224W typical (satu-satunya SKU batch ini dgn angka typical
+      // eksplisit terpisah dari maks).
+      blocks: [{ type: 'psu-slot', count: 2 }],
+    },
+    // brand: UNVERIFIED total — datasheet PDF hanya diagram garis/ilustrasi
+    // hitam-putih, tanpa foto produk berwarna.
+    brand: { accent: '#707070', chassis: '#707070', label: 'Fujitsu', badge: 'stripe' },
+  },
+
+  // ── Adtran (eks-ADVA) FSP 3000 CloudConnect SH1R (modular OTN shelf, 1U) ─
+  {
+    slug: 'adtran-fsp3000-cloudconnect-sh1r',
+    manufacturer: 'Adtran',
+    model: 'FSP 3000 CloudConnect SH1R',
+    uHeight: 1,
+    // §8.1 V, DENGAN catatan resmi vendor: tabel "Dimensions (W x D x H):
+    // 430mm x 540mm* x 1RU" — tanda bintang (*) di datasheet berarti "With
+    // front cover" (footnote eksplisit halaman sama), jadi 540mm TERMASUK
+    // front cover, bukan body polos-tanpa-cover. Lebar 430mm bukan 482.6mm,
+    // jadi kemungkinan besar lebar body asli. Sumber: techgardens.com mirror
+    // datasheet resmi ADVA 2017 (V(2nd), kop surat ADVA verbatim).
+    chassisMm: { widthMm: 430, depthMm: 540 },
+    front: {
+      portZones: [
+        {
+          // V: kartu "Software-defined 400G transponder" (representatif, 1
+          // dari 2 slot traffic) — 4x client 100GbE/OTU4 QSFP28.
+          ports: [{ type: 'qsfp28', count: 4, label: 'Client (kartu 400G transponder)' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.24,
+        },
+        {
+          // V jumlah; form factor pluggable UNVERIFIED utk sisi network kartu
+          // ini (beda dari kartu lain yg eksplisit sebut QSFP28) — dipetakan
+          // qsfp28 sbg estimasi konsisten kelas kecepatan.
+          ports: [{ type: 'qsfp28', count: 2, label: 'Network DWDM (form factor UNVERIFIED)' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.13,
+        },
+        {
+          // V level platform; jumlah presisi per shelf UNVERIFIED (2 slot
+          // manajemen redundan bisa berarti port ini 1x atau 2x).
+          ports: [{ type: 'mgmt-rj45', count: 1, label: 'Mgmt (GUI/CLI/SNMP)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+        {
+          ports: [{ type: 'console-rj45', count: 1, label: 'Serial CLI' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.07,
+        },
+      ],
+      // UNVERIFIED total — datasheet 5 halaman (teknis+platform) sama sekali
+      // tak sebut kata "LED"/"indicator". Pola minimal generik (keputusan
+      // leader).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: {
+      // V (shelf SH1R spesifik): "Typical/maximum power: 380W/460W", AC/DC
+      // redundant PSU.
+      blocks: [{ type: 'psu-slot', count: 2 }],
+    },
+    // brand: UNVERIFIED total — tak ada foto produk berwarna diperiksa sesi
+    // ini (produk legacy ADVA, warna korporat aktual belum dipastikan sama
+    // dgn brand Adtran router lain di pack OLT).
+    brand: { accent: '#707070', chassis: '#707070', label: 'Adtran', badge: 'stripe' },
+  },
 ];
 
 // ─── Resolve helpers ──────────────────────────────────────────────────────────

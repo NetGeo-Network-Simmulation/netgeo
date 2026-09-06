@@ -26,7 +26,7 @@ _REAL_PACKS = {
     "firewalls": 11,
     "onu": 11,
     "wireless-ap": 4,
-    "optical-transport": 3,
+    "optical-transport": 7,
     "cell-site": 3,
     "servers": 3,
 }
