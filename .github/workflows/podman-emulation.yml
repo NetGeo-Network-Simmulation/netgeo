@@ -1,17 +1,15 @@
 # =============================================================================
-# NetGeo CI — Podman emulation smoke test (N-2b, non-blocking)
+# NetGeo CI — Podman emulation smoke test (N-2b, required merge gate)
 # =============================================================================
 # Runs the `podman`-marked tests (real FRR container spawn/destroy via
 # rootless podman) on a genuine ubuntu-latest GitHub Actions runner, not just
 # Surya's dev machine.
 #
-# NON-BLOCKING BY DESIGN: `continue-on-error: true` below, and this job is
-# NOT added to any branch-protection required-checks list. Rootless podman
-# on a GitHub-hosted runner (systemd --user session vs a manually started
-# `podman system service`) has never been exercised in this project before —
-# per the N-2b plan (nos-emulation-track-plan.md), it may only become a
-# required merge gate after it has gone green three runs in a row. A flaky
-# CI gate is more expensive than one that's still being proven out.
+# MERGE GATE: this job is a required status check in `main`'s branch
+# protection (`["test","build","podman-smoke"]`, strict). It went green three
+# runs in a row per the N-2b plan (nos-emulation-track-plan.md), the bar that
+# plan set for promoting it out of non-blocking status — so a failure here now
+# blocks merging, same as `test`/`build`.
 name: podman-emulation-ci
 
 on:
@@ -21,7 +19,6 @@ on:
 jobs:
   podman-smoke:
     runs-on: ubuntu-latest
-    continue-on-error: true # see header — not proven stable yet, not a merge gate
 
     steps:
       - uses: actions/checkout@v4
