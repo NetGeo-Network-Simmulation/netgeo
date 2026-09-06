@@ -2470,6 +2470,312 @@ export const DEVICE_TYPES: DeviceType[] = [
     // dgn brand Adtran router lain di pack OLT).
     brand: { accent: '#707070', chassis: '#707070', label: 'Adtran', badge: 'stripe' },
   },
+
+  // ── Batch wireless-AP (Sesi riset 2026-09-06, research/3d-device-specs-wireless-ap.md) ──
+  // Semua 7 SKU: ceiling/wall-mount, BUKAN rackmount. uHeight: 1 adalah
+  // penempatan shelf di rak NetGeo (keputusan leader), bukan RU vendor.
+  // Tak satu pun dari 7 SKU ini punya konektor antena eksternal (semua
+  // internal built-in) — gap kosakata RP-SMA/N-type dari research tidak
+  // terpakai batch ini.
+
+  // ── Grandstream Networks GWN7660 ─────────────────────────────────────────
+  {
+    slug: 'grandstream-gwn7660',
+    manufacturer: 'Grandstream Networks',
+    model: 'GWN7660',
+    uHeight: 1,
+    // §8.1 V (grandstream.com datasheet resmi GWN7660 rev 3.2023.05,
+    // pdftotext): "Unit Dimension: 180.4mmx180.4mmx40.8mm" — device bundar,
+    // vendor memberi W=D identik (bukan diameter tunggal eksplisit, tapi
+    // bentuk bundar dikonfirmasi dari foto produk resmi).
+    chassisMm: { widthMm: 180.4, depthMm: 180.4 },
+    front: {
+      portZones: [
+        {
+          // V, user manual resmi Table 14: "NET/PoE" 10/100/1000Mbps,
+          // menerima PoE/PoE+ 802.3af/at.
+          ports: [{ type: 'rj45', count: 1, label: 'NET/PoE', poe: true }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.4,
+        },
+        {
+          // V: "NET" 10/100/1000Mbps ke router/AP lain, bukan PoE-in.
+          ports: [{ type: 'rj45', count: 1, label: 'NET' }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V (user manual Table 15 "LED Patterns", family-wide GWN76XX): 3
+      // tri-color LED (device tracking/status), pattern lengkap: OFF ·
+      // blinking green (FW update) · solid green (update sukses) ·
+      // blinking red (factory reset) · solid red (update gagal) · solid
+      // purple (belum diprovisioning) · blinking blue (provisioning) ·
+      // solid blue (provisioned) · blinking white (locate AP) · yellow
+      // (mesh disconnect). `Led.color` skema ini tak punya 'purple'/
+      // 'yellow' — 3 entri di bawah dipetakan ke warna steady-state normal
+      // (blue = provisioned/operasional), bukan tebakan data baru.
+      leds: [
+        { label: 'Status 1 (multi-warna, lihat komentar)', color: 'blue', position: 'left' },
+        { label: 'Status 2 (multi-warna, lihat komentar)', color: 'blue', position: 'left' },
+        { label: 'Status 3 (multi-warna, lihat komentar)', color: 'blue', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // PoE-in via NET/PoE, tanpa PSU/AC input terpisah
+    },
+    // brand: derived, low-confidence — tak ada inspeksi foto produk detail
+    // sesi riset ini; AP ceiling putih polos khas kelas ini.
+    brand: { accent: '#C7C7C5', chassis: '#F2F2F0', label: 'Grandstream', badge: 'stripe' },
+  },
+
+  // ── EnGenius Technologies ECW230 ─────────────────────────────────────────
+  {
+    slug: 'engenius-ecw230',
+    manufacturer: 'EnGenius',
+    model: 'ECW230',
+    uHeight: 1,
+    // §8.1 V, dari PDF resmi engeniustech.com/.../ECW230-Datasheet.pdf (doc
+    // v1.1 09212023): "Dimensions: 205 x 205 x 33.2 mm". Catatan diskrepansi
+    // jujur: halaman toko resmi store.engeniustech.com menyebut 210x210mm
+    // (height identik 33.2mm) — PDF datasheet dipakai sbg acuan (dokumen
+    // teknis versi-terkontrol vs halaman marketing), diskrepansi 5mm dicatat
+    // apa adanya, bukan dirujuk ganda.
+    chassisMm: { widthMm: 205, depthMm: 205 },
+    front: {
+      portZones: [
+        {
+          // V, PDF resmi "Physical Interfaces": satu-satunya port jaringan,
+          // 2.5GbE, menerima PoE+ 802.3at.
+          ports: [{ type: 'rj45', count: 1, label: '2.5GE (PoE+)', poe: true }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V nama LED (PDF resmi daftar "LED indicators": Power/LAN/2.4GHz/
+      // 5GHz, 4 LED terpisah) — warna/pola nyala per-LED TIDAK dirinci di
+      // datasheet ini (gap, bukan ditebak). Warna 'white' di bawah adalah
+      // placeholder UNVERIFIED, konsisten pola batch server (Inspur/QCT UID).
+      leds: [
+        { label: 'Power', color: 'white', position: 'left' },
+        { label: 'LAN', color: 'white', position: 'left' },
+        { label: '2.4GHz', color: 'white', position: 'left' },
+        { label: '5GHz', color: 'white', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // PoE-in atau adapter 12VDC/2A opsional
+    },
+    // brand: derived, low-confidence — tak ada inspeksi foto produk detail
+    // sesi riset ini.
+    brand: { accent: '#C7C7C5', chassis: '#F5F5F3', label: 'EnGenius', badge: 'stripe' },
+  },
+
+  // ── Araknis Networks (Snap One) AN-520-AP-I ──────────────────────────────
+  {
+    slug: 'araknis-an-520-ap-i',
+    manufacturer: 'Araknis Networks',
+    model: 'AN-520-AP-I',
+    uHeight: 1,
+    // §8.1 V, datasheet resmi snapav.com AN-520-AP-I_Datasheet_Final.pdf:
+    // "Physical Size: 7.33in x 7.33in x 1.56in — 18.61cm x 18.61cm x 3.95cm"
+    // (device bundar, diameter). Mapping W=D=186.1mm apa adanya.
+    chassisMm: { widthMm: 186.1, depthMm: 186.1 },
+    front: {
+      portZones: [
+        {
+          // V, datasheet: "2.5G BASE-T Ethernet". PoE 802.3af/at diterima
+          // pada "salah satu" RJ45 — datasheet tak merinci port persis mana,
+          // dipetakan ke port 2.5G ini sbg asumsi paling umum (uplink lebih
+          // cepat = PoE-in), bukan klaim vendor eksplisit per-port.
+          ports: [{ type: 'rj45', count: 1, label: '2.5G BASE-T', poe: true }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.5,
+        },
+        {
+          ports: [{ type: 'rj45', count: 1, label: '1G BASE-T' }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // LED — V UNTUK MODEL SIBLING OUTDOOR AN-520-AP-O (installation guide
+      // resmi help.snapone.com), TIDAK dikonfirmasi identik untuk AN-520-AP-I
+      // (indoor) karena installation guide -I sendiri gagal diakses sesi
+      // riset. Dicatat apa adanya, bukan diklaim identik. State "heater
+      // aktif" pada sumber -O sengaja dihilangkan (spesifik outdoor, -I tak
+      // punya heater).
+      leds: [
+        { label: 'Power (dari sibling -O, lihat komentar)', color: 'blue', position: 'left' },
+        { label: 'Radio 2.4/5GHz (dari sibling -O, lihat komentar)', color: 'blue', position: 'left' },
+        { label: 'LAN1/LAN2 (dari sibling -O, lihat komentar)', color: 'blue', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // PoE 802.3af/at atau DC 12V/3A adapter
+    },
+    // brand: derived, low-confidence — tak ada inspeksi foto produk detail
+    // sesi riset ini.
+    brand: { accent: '#C7C7C5', chassis: '#F0F0EE', label: 'Araknis Networks', badge: 'stripe' },
+  },
+
+  // ── Cambium Networks XV3-8 ────────────────────────────────────────────────
+  {
+    slug: 'cambium-xv3-8',
+    manufacturer: 'Cambium Networks',
+    model: 'XV3-8',
+    uHeight: 1,
+    // §8.1 V, PDF resmi brandcentral.cambiumnetworks.com XV3-8 Data Sheet:
+    // "Dimensions: 235 mm x 235 mm x 42 mm". Dua angka identik (235x235) —
+    // kemungkinan body persegi (bukan bundar spt Grandstream/EnGenius/
+    // Araknis di atas), bentuk fisik pasti belum dikonfirmasi lewat foto.
+    chassisMm: { widthMm: 235, depthMm: 235 },
+    front: {
+      portZones: [
+        {
+          // V, PDF resmi: "IEEE 802.3bz 100/1000/2500/5000 Mbps" — dicatat
+          // apa adanya dari sumber (802.3bz standar resminya mentok 2.5/5G,
+          // tapi PDF menyebut rentang hingga 5000Mbps).
+          ports: [{ type: 'rj45', count: 1, label: '802.3bz multi-gig', poe: true }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.4,
+        },
+        {
+          ports: [{ type: 'rj45', count: 1, label: '802.3 GbE' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.35,
+        },
+        {
+          ports: [{ type: 'usb', count: 1, label: 'USB 3.0' }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V nama saja ("Multi-color status LEDs") — jumlah/pola warna per-
+      // status TIDAK dirinci, gap sama dgn QCT/Inspur di batch server. Warna
+      // 'white' = placeholder UNVERIFIED.
+      leds: [{ label: 'Status (multi-color, nama saja)', color: 'white', position: 'left' }],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // PoE 802.3bt (35W maks) / 802.3at / 12VDC adapter
+    },
+    // brand: derived, low-confidence — aksen teal khas logo Cambium
+    // (#00A99D), body putih polos, belum dikonfirmasi ke foto produk aktual.
+    brand: { accent: '#00A99D', chassis: '#F4F4F2', label: 'Cambium Networks', badge: 'stripe' },
+  },
+
+  // ── Hikvision DS-3WAP622E-SI ──────────────────────────────────────────────
+  {
+    slug: 'hikvision-ds-3wap622e-si',
+    manufacturer: 'Hikvision',
+    model: 'DS-3WAP622E-SI',
+    uHeight: 1,
+    // §8.1 V, datasheet resmi via arsip Wayback Machine (assets.hikvision.com,
+    // akses langsung 403/S3 AccessDenied — konten tetap terbitan Hikvision):
+    // "Product Dimensions (W x H x D): 220 mm x 220 mm x 39 mm".
+    chassisMm: { widthMm: 220, depthMm: 220 },
+    front: {
+      portZones: [
+        {
+          // V, datasheet resmi: satu-satunya port jaringan, 2.5GbE, PoE
+          // 802.3af/at input (atau DC 12V/1.5A alternatif).
+          ports: [{ type: 'rj45', count: 1, label: '2.5GE uplink', poe: true }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V palet warna saja: "LED Indicator: Yellow/green/blue for different
+      // working states, flashing mode" — jumlah LED fisik & pemetaan warna-
+      // ke-state TIDAK dirinci (lebih generik dari tabel Grandstream/Araknis
+      // di atas). 'yellow' tak ada di enum `Led.color` skema ini — direpre-
+      // sentasikan dgn 'green' (salah satu dari 3 warna nyata palet vendor,
+      // bukan warna baru), palet lengkap dicatat di komentar ini.
+      leds: [{ label: 'Status (palet kuning/hijau/biru, pola tak dirinci)', color: 'green', position: 'left' }],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // PoE 802.3af/at atau DC 12V/1.5A adapter
+    },
+    // brand: derived, low-confidence — tak ada inspeksi foto produk detail
+    // sesi riset ini.
+    brand: { accent: '#C7C7C5', chassis: '#F3F3F1', label: 'Hikvision', badge: 'stripe' },
+  },
+
+  // ── Peplink (Pepwave) AP One AX ───────────────────────────────────────────
+  {
+    slug: 'peplink-ap-one-ax',
+    manufacturer: 'Peplink',
+    model: 'AP One AX',
+    uHeight: 1,
+    // §8.1 V, datasheet resmi download.peplink.com/resources/
+    // pepwave_ap_one_ax_datasheet.pdf: "Dimensions: 8.1 x 8.1 x 1.3 inches —
+    // 205 x 205 x 32 mm".
+    chassisMm: { widthMm: 205, depthMm: 205 },
+    front: {
+      portZones: [
+        {
+          // V, datasheet resmi: satu-satunya port jaringan, 2.5GbE,
+          // menerima PoE 802.3at (injector dijual terpisah) atau DC jack
+          // 12V alternatif.
+          ports: [{ type: 'rj45', count: 1, label: '2.5GE (PoE 802.3at via injector)', poe: true }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V label+warna lengkap per-LED, user manual resmi v3.9.0 bagian
+      // "4.3 AP One AX" (tabel spesifik model ini, bukan digeneralisasi dari
+      // model AP One lain di dokumen yang sama) — satu-satunya LED table
+      // "full V" di batch ini selain Grandstream.
+      leds: [
+        { label: 'Power', color: 'blue', position: 'left' },
+        { label: 'Status', color: 'blue', position: 'left' },
+        { label: 'Ethernet Port', color: 'blue', position: 'left' },
+        { label: 'Wi-Fi', color: 'blue', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // PoE 802.3at (injector terpisah) atau AC adapter 12V/2.5A
+    },
+    // brand: derived, low-confidence — tak ada inspeksi foto produk detail
+    // sesi riset ini.
+    brand: { accent: '#C7C7C5', chassis: '#F2F2F0', label: 'Peplink', badge: 'stripe' },
+  },
+
+  // ── Tenda i27 ─────────────────────────────────────────────────────────────
+  {
+    slug: 'tenda-i27',
+    manufacturer: 'Tenda',
+    model: 'i27',
+    uHeight: 1,
+    // §8.1 V, datasheet resmi static.tenda.com.cn/.../i27V1.0_Datasheet.pdf:
+    // "Dimension: φ176*43.5mm" — vendor memberi DIAMETER eksplisit (φ),
+    // bukan width x depth terpisah. widthMm=depthMm=176 di bawah adalah
+    // pemetaan `derived` kita ke skema chassisMm persegi, BUKAN pengukuran
+    // vendor dua-sumbu terpisah (beda dari Grandstream/EnGenius/Araknis/
+    // Cambium/Hikvision di atas yang semuanya sudah W×D dua-angka vendor).
+    chassisMm: { widthMm: 176, depthMm: 176 },
+    front: {
+      portZones: [
+        {
+          // V, datasheet resmi "Hardware Specifications": satu-satunya port
+          // jaringan, GbE, menerima PoE.
+          ports: [{ type: 'rj45', count: 1, label: 'Ethernet (PoE)', poe: true }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V nama saja: "LED indicator: 1*SYS" — satu LED sistem tunggal,
+      // warna/pola nyala TIDAK dirinci. 'white' = placeholder UNVERIFIED.
+      leds: [{ label: 'SYS', color: 'white', position: 'left' }],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // PoE 802.3af atau 48V/0.8A Passive PoE
+    },
+    // brand: derived, low-confidence — tak ada inspeksi foto produk detail
+    // sesi riset ini.
+    brand: { accent: '#C7C7C5', chassis: '#F4F4F2', label: 'Tenda', badge: 'stripe' },
+  },
 ];
 
 // ─── Resolve helpers ──────────────────────────────────────────────────────────

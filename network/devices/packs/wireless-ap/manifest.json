@@ -5,7 +5,7 @@
   "categories": [
     "wireless-ap"
   ],
-  "device_count": 4,
+  "device_count": 11,
   "enabled_by_default": true,
-  "source_note": "Migrated from network/devices/library/wireless-ap.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
+  "source_note": "Migrated from network/devices/library/wireless-ap.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4. +7 SKU 2026-09-06 (research/3d-device-specs-wireless-ap.md): Grandstream GWN7660, EnGenius ECW230, Araknis AN-520-AP-I, Cambium XV3-8, Hikvision DS-3WAP622E-SI, Peplink AP One AX, Tenda i27."
 }
