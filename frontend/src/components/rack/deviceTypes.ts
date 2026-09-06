@@ -973,6 +973,340 @@ export const DEVICE_TYPES: DeviceType[] = [
     brand: { accent: '#007DB8', chassis: '#17171A', label: 'Dell', badge: 'stripe' },
   },
 
+  // ── Lenovo ThinkSystem SR650 V4 (2U server) ──────────────────────────────
+  {
+    slug: 'lenovo-thinksystem-sr650-v4',
+    manufacturer: 'Lenovo',
+    model: 'ThinkSystem SR650 V4',
+    uHeight: 2,
+    isFullDepth: true,
+    // §8.1 V (research/3d-device-specs-server.md §1, pubs.lenovo.com
+    // /sr650-v4/server_specifications_mechanical, dibuka langsung): body
+    // width 445mm eksplisit dibedakan vendor dari lebar-dengan-rail-latch
+    // 482mm (19.0") — dipakai 445mm (body), bukan 482mm.
+    chassisMm: { widthMm: 445, depthMm: 796 },
+    front: {
+      portZones: [
+        {
+          // V jenis/jumlah (pubs.lenovo.com/sr650-v4/server_front_view).
+          // Konfigurasi representatif: 24x SFF hot-swap. Varian backplane
+          // lain yang ADA tapi TIDAK dimodelkan: 12x LFF 3.5", 32x E3.S NVMe.
+          ports: [{ type: 'drive-sff', count: 24 }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // V, satu-satunya SKU batch ini dengan daftar LED lengkap + warna
+      // (pubs.lenovo.com/sr650-v4/server_front_operator_panel).
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'NET', color: 'green', position: 'left' },
+        { label: 'ERR', color: 'amber', position: 'left' },
+        { label: 'ID', color: 'blue', position: 'left' },
+      ],
+      isServerBezel: true,
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+        {
+          type: 'port-zone',
+          portZone: {
+            // mgmt-rj45: XCC dedicated 1GbE, V. 2x OCP 3.0 NIC slot bersifat
+            // MODULAR (1/10/25/40G tergantung kartu terpasang) — TIDAK
+            // digambar sebagai PortSpec tetap (research §gap-2).
+            ports: [{ type: 'mgmt-rj45', count: 1, label: 'XCC' }],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — belum dikonfirmasi ke foto produk
+    // aktual (research §1); merah aksen dari identitas korporat Lenovo.
+    brand: { accent: '#E2231A', chassis: '#1A1A1A', label: 'Lenovo', badge: 'stripe' },
+  },
+
+  // ── Inspur NF5280M5 (2U server) ───────────────────────────────────────────
+  {
+    slug: 'inspur-nf5280m5',
+    manufacturer: 'Inspur',
+    model: 'NF5280M5',
+    uHeight: 2,
+    isFullDepth: true,
+    // §8.1 V (research/3d-device-specs-server.md §2, PDF resmi inspur.com):
+    // "Dimension（W×H×D）: 435mm×87mm×779.5mm".
+    chassisMm: { widthMm: 435, depthMm: 779.5 },
+    front: {
+      portZones: [
+        {
+          // V (PDF resmi, tabel teks — UNVERIFIED urutan X-Y, PDF tanpa
+          // diagram bergambar). Konfigurasi representatif: 25x SFF. Varian
+          // lain yang ADA tapi TIDAK dimodelkan: 12x LFF 3.5".
+          ports: [{ type: 'drive-sff', count: 25 }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'usb', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+      ],
+      // V untuk keberadaannya (PDF resmi, tabel "I/O Interface"), TAPI
+      // warna TIDAK disebutkan di datasheet ini — placeholder putih netral,
+      // bukan tebakan warna asli.
+      leds: [{ label: 'UID', color: 'white', position: 'left' }],
+      isServerBezel: true,
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+        {
+          type: 'port-zone',
+          portZone: {
+            // mgmt-rj45: BMC dedicated 1GbE, V. OCP 25G + PHY 1G/10G slot
+            // bersifat MODULAR (jumlah/jenis port aktual baru diketahui
+            // setelah kartu terpasang) — TIDAK digambar sebagai PortSpec
+            // tetap (research §gap-2).
+            ports: [{ type: 'mgmt-rj45', count: 1 }],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — tidak ada inspeksi foto produk;
+    // aksen korporat TIDAK ditentukan (research §2), dipakai netral = chassis.
+    brand: { accent: '#1C1C1E', chassis: '#1C1C1E', label: 'Inspur', badge: 'stripe' },
+  },
+
+  // ── QCT QuantaGrid D52BQ-2U (2U server) ───────────────────────────────────
+  {
+    slug: 'qct-quantagrid-d52bq-2u',
+    manufacturer: 'QCT',
+    model: 'QuantaGrid D52BQ-2U',
+    uHeight: 2,
+    isFullDepth: true,
+    // §8.1 V (research/3d-device-specs-server.md §3, dikonfirmasi identik
+    // di qct.io product page DAN PDF datasheet resmi mirror hyperscalers.com):
+    // "W x H x D (mm): 440 x 87.5 x 780".
+    chassisMm: { widthMm: 440, depthMm: 780 },
+    front: {
+      portZones: [
+        {
+          // V — 5 varian SKU backplane berbeda dalam satu model, dipilih
+          // SKU#4 sebagai representasi (paling padat/umum): 24x SFF depan.
+          ports: [{ type: 'drive-sff', count: 24 }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'usb', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+      ],
+      // V untuk keberadaannya ("Front I/O: Power/ID/Status LEDs", generik
+      // 3 LED tanpa breakdown warna per-fungsi) — warna UNVERIFIED,
+      // placeholder putih netral, bukan tebakan warna asli.
+      leds: [{ label: 'STATUS', color: 'white', position: 'left' }],
+      isServerBezel: true,
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+        {
+          type: 'port-zone',
+          portZone: {
+            // mgmt-rj45: dedicated LOM GbE mgmt, V. NIC 10G RJ45 mezzanine
+            // OCP bersifat OPSIONAL/MODULAR — TIDAK digambar sebagai
+            // PortSpec tetap (research §gap-2, bukan bawaan wajib).
+            ports: [{ type: 'mgmt-rj45', count: 1 }],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        // rear juga punya 2x drive-sff NVMe/SATA opsional per datasheet —
+        // TIDAK digambar (opsional, tidak selalu terpasang).
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — tidak ada inspeksi foto produk;
+    // aksen korporat TIDAK ditentukan (research §3), dipakai netral = chassis.
+    brand: { accent: '#1D1D1F', chassis: '#1D1D1F', label: 'QCT', badge: 'stripe' },
+  },
+
+  // ── Wiwynn SV300G3 (1U server, 19-inch konvensional) ──────────────────────
+  {
+    slug: 'wiwynn-sv300g3',
+    manufacturer: 'Wiwynn',
+    model: 'SV300G3',
+    uHeight: 1,
+    // §8.1 V (research/3d-device-specs-server.md §4, wiwynn.com/products
+    // /19-inch/sv300g3, dibuka langsung): "43.5 (H) × 436 (W) × 710 (D) (mm)".
+    chassisMm: { widthMm: 436, depthMm: 710 },
+    front: {
+      portZones: [
+        {
+          // V: "Ten 2.5″ hot-plug drive bays".
+          ports: [{ type: 'drive-sff', count: 10 }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'usb', count: 1 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.06,
+        },
+      ],
+      // LED UNVERIFIED total — halaman resmi hanya menyebut 3 tombol
+      // PWR/UID/Reset, dikonfirmasi ulang eksplisit TIDAK ada LED status/
+      // HDD/network terpisah untuk model ini. Pola minimal generik dipakai
+      // sebagai gantinya (preseden askey-rtf6105vw).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+      isServerBezel: true,
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+        {
+          type: 'port-zone',
+          portZone: {
+            // mgmt-rj45: dedicated GbE BMC port, V. rj45: rear I/O standar
+            // 1x, V (tetap, bukan modular — beda dari slot OCP v2.0 opsional
+            // yang juga ada di model ini tapi tidak digambar).
+            ports: [
+              { type: 'mgmt-rj45', count: 1 },
+              { type: 'rj45', count: 1 },
+            ],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — tidak ada inspeksi foto produk;
+    // aksen korporat TIDAK ditentukan (research §4, dijual white-box ke
+    // hyperscaler), dipakai netral = chassis.
+    brand: { accent: '#151517', chassis: '#151517', label: 'Wiwynn', badge: 'stripe' },
+  },
+
+  // ── Pure Storage FlashArray//X70 R5 (3U all-flash SAN) ────────────────────
+  {
+    slug: 'pure-flasharray-x70-r5',
+    manufacturer: 'Pure Storage',
+    model: 'FlashArray//X70 R5',
+    uHeight: 3,
+    isFullDepth: true,
+    // §8.1 V (research/3d-device-specs-server.md §5, PDF resmi
+    // everpuredata.com/content/dam/pdf/en/datasheets/ds-flasharray-x.pdf):
+    // "5.12” x 18.94” x 29.72” chassis" (H×W×D). Lebar 18.94" (481,1mm)
+    // dipertahankan sebagai body chassis nyata (BUKAN dihilangkan meski
+    // dekat 19"/482,6mm) karena datasheet yang sama mencantumkan //X50 R5
+    // dengan lebar BERBEDA (400mm) untuk chassis yang sama-sama masuk rak
+    // 19" — variasi antar-model adalah bukti kuat ini angka body asli.
+    chassisMm: { widthMm: 481, depthMm: 755 },
+    front: {
+      portZones: [
+        {
+          // UNVERIFIED urutan pasti — V(2nd) (manualslib.com mirror
+          // instalasi resmi, dikorroborasi WebSearch): 10 atau 20
+          // DirectFlash Module (DFM) bay. Direpresentasikan sebagai
+          // drive-sff (proksi terdekat) — DFM adalah modul NVMe proprietary
+          // Pure, BUKAN drive 2.5" standar SFF/LFF industri; catat perbedaan
+          // fisik ini untuk builder 3D.
+          ports: [{ type: 'drive-sff', count: 20, label: 'DFM' }],
+          rows: 1,
+          align: 'fill',
+        },
+      ],
+      // LED UNVERIFIED total — nol daftar LED front panel ditemukan di
+      // datasheet marketing maupun mirror instalasi. Pola minimal generik
+      // dipakai sebagai gantinya (preseden askey-rtf6105vw).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+      isServerBezel: true,
+    },
+    rear: {
+      blocks: [
+        { type: 'iec-inlet', count: 2 },
+        {
+          type: 'port-zone',
+          portZone: {
+            // mgmt-rj45 x2 (mgmt0/mgmt1, 1000base-t) + rj45 x4 (ct0/ct1
+            // eth0/eth1, 10gbase-t — konektor fisik tetap RJ45 meski 10G) —
+            // V(2nd), NetBox Data Exchange + korroborasi PDF resmi. Host
+            // port FC/Ethernet 10-100G untuk data path utama bersifat
+            // MODULAR (kartu HBA tambahan) — TIDAK dienumerasi.
+            ports: [
+              { type: 'mgmt-rj45', count: 2 },
+              { type: 'rj45', count: 4 },
+            ],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — bezel oranye khas "Pure Storage"
+    // (research §5), TAPI rebrand korporat ke "Everpure" efektif 23 Feb
+    // 2026 berpotensi mengubah skema warna — hex oranye lama dicatat
+    // dengan peringatan eksplisit mungkin sudah usang, belum ada foto
+    // produk era Everpure diperiksa.
+    brand: { accent: '#FA4B2A', chassis: '#17171A', label: 'Pure Storage', badge: 'stripe' },
+  },
+
+  // ── Hitachi Vantara VSP One Block 24/26/28 (2U all-flash SAN) ─────────────
+  {
+    slug: 'hitachi-vsp-one-block',
+    manufacturer: 'Hitachi Vantara',
+    model: 'VSP One Block 24/26/28',
+    uHeight: 2,
+    // §8.1 chassisMm DIHILANGKAN (UNVERIFIED, keputusan leader) — PDF resmi
+    // matrix-specifications menyebut "Width: 19.0” (482mm W)": angka genap
+    // bulat TANPA variasi antar-kelas node (beda dari kasus Pure/Everpure di
+    // atas, yang justru punya lebar berbeda per varian sebagai bukti body
+    // asli) — pola klasik restated lebar-rak-nominal, BUKAN pengukuran body
+    // chassis aktual. Depth 852mm (33.6") tidak ditebak jadi body sendirian
+    // karena skema chassisMm mewajibkan width+depth sepasang.
+    front: {
+      // portZones DIHILANGKAN (UNVERIFIED, keputusan leader) — PDF resmi
+      // hanya menyebut kapasitas maksimum agregat "72 SFF NVMe SSD"
+      // (mencakup node dasar + hingga 2x expansion tray 24-SFF); jumlah bay
+      // FISIK pada node controller dasar sendiri tidak dinyatakan eksplisit
+      // di kedua PDF resmi yang dibuka riset — tidak ditebak dari angka
+      // tray ekspansi sebagai proksi node dasar (dua komponen berbeda).
+      portZones: [],
+      // LED UNVERIFIED total — kedua PDF resmi (datasheet + matrix-specs)
+      // adalah dokumen marketing/spec-comparison, tidak membahas front
+      // panel/LED sama sekali. Pola minimal generik dipakai sebagai
+      // gantinya (preseden askey-rtf6105vw).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+      isServerBezel: true,
+    },
+    rear: {
+      // Host port Fibre Channel (hingga 32x FC, Gen 7) SENGAJA DIHILANGKAN
+      // (keputusan leader): TIDAK ADA tipe port "fc" di kosakata PortType —
+      // aturan Surya melarang memetakan FC ke tipe lain (mis. sfp+) karena
+      // protokol dan optik FC berbeda dari Ethernet meski konektor fisik
+      // SFP+ mirip. Menunggu tipe port dedicated di skema (research §gap-1).
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — belum dikonfirmasi ke foto produk
+    // aktual (research §6); merah aksen dari identitas korporat Hitachi.
+    brand: { accent: '#E60012', chassis: '#17171A', label: 'Hitachi Vantara', badge: 'stripe' },
+  },
+
   // ── VSOL V5600X7 (OLT chassis) ──────────────────────────────────────────
   {
     slug: 'vsol-v5600x7',
