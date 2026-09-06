@@ -3477,17 +3477,25 @@ export const DEVICE_TYPES: DeviceType[] = [
     // di sini, tidak duplikat lintas-kategori.
     chassisMm: { widthMm: 438.4, depthMm: 515 },
     front: {
-      // Catatan penting: datasheet resmi eksplisit menyatakan SEMUA port
-      // (termasuk mgmt-rj45/sfp+-mgmt/console/usb) ada di FRONT ("All ports
-      // on front; PSUs and fans accessible from rear"). Keputusan leader
-      // 2026-09-06 menaruh mgmt/console di REAR di sini untuk konsistensi
-      // faceplate DC ToR dgn D-Link/Netberg di batch ini — override
-      // sengaja atas sumber, dicatat eksplisit agar tidak dikira salah baca.
+      // V eksplisit, datasheet resmi edge-core.com: "All ports on front;
+      // PSUs and fans accessible from rear" — mgmt-rj45/sfp+-mgmt/console/
+      // usb SEMUA ada di FRONT bersama data port, hanya PSU+fan yang rear.
       portZones: [
         {
           ports: [{ type: 'qsfp28', count: 32 }],
           rows: 2,
           align: 'fill',
+        },
+        {
+          ports: [
+            { type: 'mgmt-rj45', count: 1 },
+            { type: 'sfp+', count: 2, label: 'MGMT' }, // "10G management port", BUKAN data uplink
+            { type: 'usb', count: 1 },
+            { type: 'console-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.16,
         },
       ],
       // Jenis LED V (Diagnostic/Locator/PSU/Fan), warna TIDAK dicantumkan
@@ -3498,22 +3506,10 @@ export const DEVICE_TYPES: DeviceType[] = [
       ],
     },
     rear: {
+      // V eksplisit, datasheet resmi: PSU + fan accessible from rear.
       blocks: [
         { type: 'psu-slot', count: 2 }, // redundant, load-sharing, hot-swap
         { type: 'fan-tray', count: 6 }, // 5+1 redundant hot-swap
-        {
-          type: 'port-zone',
-          portZone: {
-            ports: [
-              { type: 'mgmt-rj45', count: 1 },
-              { type: 'sfp+', count: 2, label: 'MGMT' }, // "10G management port", BUKAN data uplink
-              { type: 'usb', count: 1 },
-              { type: 'console-rj45', count: 1 },
-            ],
-            rows: 1,
-            align: 'left',
-          },
-        },
       ],
     },
     // brand: derived, low-confidence — white-box ODM Taiwan (Accton), tidak
