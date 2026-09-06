@@ -7,7 +7,7 @@
  * counter chips, basemap switcher, signal legend, and GIS toggle stack the
  * top-right, so this corner is free.
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Search, Loader2, X } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
 import { geocode, type GeoResult } from '@/services/geocodeService';
@@ -22,6 +22,23 @@ export function MapSearch() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside close (D6 — same ref+mousedown idiom as TopBar's user menu
+  // and ui/Select.tsx): the results dropdown used to stay open until a result
+  // was picked or Escape was pressed, so clicking the map behind it left it
+  // stuck open.
+  useEffect(() => {
+    if (!results && !error) return;
+    const handler = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setResults(null);
+        setError(null);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [results, error]);
 
   async function runSearch() {
     const q = query.trim();
@@ -57,7 +74,7 @@ export function MapSearch() {
   }
 
   return (
-    <div className={cn('pointer-events-auto absolute top-3 w-72', MAP_CHROME_INSET, zc.popover)}>
+    <div ref={rootRef} className={cn('pointer-events-auto absolute top-3 w-72', MAP_CHROME_INSET, zc.popover)}>
       <div className="glass-strong flex items-center gap-2 rounded-xl border border-fg/15 px-3 shadow-glass-lg">
         <Search className="h-4 w-4 shrink-0 text-fg/45" />
         <input
