@@ -9,7 +9,8 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { NodeModel } from '@/api/types';
-import { DeviceFaceplate } from './DeviceFaceplate';
+import { DeviceFaceplate, LED_FILL } from './DeviceFaceplate';
+import { DEVICE_TYPES, type Led } from './deviceTypes';
 
 function node(id: string, nos: NodeModel['nos'], ifaceCount: number): NodeModel {
   return {
@@ -90,6 +91,24 @@ describe('DeviceFaceplate approximate-shape marker', () => {
       <DeviceFaceplate node={packNode} span={1} face="front" />,
     );
     expect(fallbackHtml).not.toBe(packHtml);
+  });
+});
+
+describe('Led color union — purple/yellow (batch router 2026-09-06)', () => {
+  it('LED_FILL maps every Led color, including purple and yellow, to a distinct real hex value', () => {
+    const colors: Led['color'][] = ['green', 'amber', 'blue', 'red', 'white', 'purple', 'yellow'];
+    const fills = colors.map((c) => LED_FILL[c]);
+    for (const fill of fills) {
+      expect(fill).toMatch(/^#[0-9A-Fa-f]{6}$/);
+    }
+    expect(new Set(fills).size).toBe(colors.length); // no two colors share a hex
+  });
+
+  it('the corrected wireless-AP entries use their real vendor colors, not a bent fallback', () => {
+    const grandstream = DEVICE_TYPES.find((d) => d.slug === 'grandstream-gwn7660');
+    const hikvision = DEVICE_TYPES.find((d) => d.slug === 'hikvision-ds-3wap622e-si');
+    expect(grandstream?.front.leds.map((l) => l.color)).toEqual(['purple', 'blue', 'yellow']);
+    expect(hikvision?.front.leds.map((l) => l.color)).toEqual(['yellow']);
   });
 });
 

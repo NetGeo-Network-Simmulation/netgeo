@@ -408,6 +408,310 @@
         "form_factor": "desktop"
       },
       "datasheet_note": "CPE generik untuk sisi pelanggan FTTH/SMB; profil ringan."
+    },
+    {
+      "id": "draytek-vigor-3910",
+      "display_name": "DrayTek Vigor 3910",
+      "vendor": "DrayTek",
+      "vendor_options": [
+        "DrayTek"
+      ],
+      "kind": "router",
+      "subcategory": "edge-security-router",
+      "tags": [
+        "multi-wan",
+        "vpn-gateway",
+        "smb",
+        "rackmount-1u"
+      ],
+      "icon": {
+        "name": "router-edge",
+        "emoji": "🛜"
+      },
+      "nos": [
+        "drayos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "P1-P2",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 10000
+        },
+        {
+          "pattern": "P3-P4",
+          "count": 2,
+          "type": "eth",
+          "speed_mbps": 2500
+        },
+        {
+          "pattern": "P5-P8",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "P9-P12",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 35,
+        "psu": "internal fixed AC, non-redundant (HA via unit kedua)",
+        "feed": "AC 100-240V 50/60Hz"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U rackmount, 443x285x45mm"
+      },
+      "datasheet_note": "V — DrayTek Vigor 3910 Datasheet resmi + Quick Start Guide resmi. RIP/OSPF/BGP didukung; tidak ada IS-IS/MPLS/SR/VXLAN (sesuai kelas SMB gateway). Firmware DrayOS tertutup, bukan white-box."
+    },
+    {
+      "id": "tplink-omada-er8411",
+      "display_name": "TP-Link Omada ER8411",
+      "vendor": "TP-Link",
+      "vendor_options": [
+        "TP-Link"
+      ],
+      "kind": "router",
+      "subcategory": "sdn-edge-gateway",
+      "tags": [
+        "omada-sdn",
+        "cloud-managed",
+        "smb",
+        "multi-wan",
+        "rackmount-1u"
+      ],
+      "icon": {
+        "name": "router-edge",
+        "emoji": "🛜"
+      },
+      "nos": [
+        "omada",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "Port1-2",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 10000
+        },
+        {
+          "pattern": "Port3",
+          "count": 1,
+          "type": "sfp",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "Port4-11",
+          "count": 8,
+          "type": "eth",
+          "speed_mbps": 1000
+        }
+      ],
+      "power": {
+        "typical_w": 19.12,
+        "max_w": 26.36,
+        "psu": "2x fixed AC (redundant, non hot-swap FRU)",
+        "feed": "AC 100-240VAC 50/60Hz"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U rackmount, 440x220x44mm, 2 fan"
+      },
+      "datasheet_note": "V — TP-Link Omada ER8411 Datasheet v1.20 resmi + Installation Guide resmi. RIP/OSPF hanya di Standalone Mode; tidak ada BGP/IS-IS/MPLS/SR/VXLAN. Firmware Omada tertutup, bukan white-box."
+    },
+    {
+      "id": "ufispace-s9600-72xc",
+      "display_name": "UfiSpace S9600-72XC",
+      "vendor": "UfiSpace",
+      "vendor_options": [
+        "UfiSpace"
+      ],
+      "kind": "router",
+      "subcategory": "whitebox-aggregation-router",
+      "tags": [
+        "open-networking",
+        "onie",
+        "5g-aggregation",
+        "srv6",
+        "whitebox",
+        "dc-power-option"
+      ],
+      "icon": {
+        "name": "router-core",
+        "emoji": "🌐"
+      },
+      "nos": [
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "0-63",
+          "count": 64,
+          "type": "sfp28",
+          "speed_mbps": 25000
+        },
+        {
+          "pattern": "64-71",
+          "count": 8,
+          "type": "qsfp",
+          "speed_mbps": 100000
+        }
+      ],
+      "power": {
+        "typical_w": 328,
+        "max_w": null,
+        "psu": "1+1 hot-swap redundant, capacity 1300W (AC atau DC)",
+        "feed": "AC 100-240V ATAU DC -48V (dua model PSU AC/DC terpisah)"
+      },
+      "physical": {
+        "ru": 2,
+        "form_factor": "2U rackmount, 436x609.6x87.7mm, berat 15,19kg tanpa FRU"
+      },
+      "datasheet_note": "V — UfiSpace S9600-72XC Datasheet resmi + Hardware Installation Guide resmi (rev R1.8, tabel dimensi melabeli chassis \"S9701-82DC\" — nama part internal ODM identik). Mendukung full SRv6; BGP/OSPF/IS-IS/VXLAN bergantung NOS pihak ketiga yang di-load via ONIE (white-box, tidak ada NOS bundel tetap)."
+    },
+    {
+      "id": "extreme-slx-9740-40c",
+      "display_name": "Extreme SLX 9740-40C",
+      "vendor": "Extreme",
+      "vendor_options": [
+        "Extreme"
+      ],
+      "kind": "router",
+      "subcategory": "sp-core-aggregation-router",
+      "tags": [
+        "evpn-vxlan",
+        "mpls",
+        "bgp-ls",
+        "application-hosting",
+        "19in-rack"
+      ],
+      "icon": {
+        "name": "router-core",
+        "emoji": "🌐"
+      },
+      "nos": [
+        "slx-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "1-40",
+          "count": 40,
+          "type": "qsfp",
+          "speed_mbps": 100000
+        }
+      ],
+      "power": {
+        "typical_w": 1033,
+        "max_w": 1033,
+        "psu": "1600W AC/DC capacity per unit, hingga 2 PSU (base) di 40C",
+        "feed": "AC atau DC (opsi PSU AC/DC terpisah)"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U rackmount, 450x640x43.1mm, berat unpackaged 10,55kg (13,62kg dgn 2 PSU AC)"
+      },
+      "datasheet_note": "V — Extreme SLX 9740 Data Sheet resmi + Hardware Installation Guide resmi (9036696-01). BGP/OSPF/IS-IS + EVPN-VXLAN + MPLS/VPLS didukung eksplisit sebagai fitur tetap (bukan tergantung NOS pihak ketiga). 40C (1U) dipilih atas 80C (2U) sebagai konfigurasi acuan."
+    },
+    {
+      "id": "ubiquiti-udm-pro",
+      "display_name": "Ubiquiti UniFi Dream Machine Pro (UDM-Pro)",
+      "vendor": "Ubiquiti",
+      "vendor_options": [
+        "Ubiquiti"
+      ],
+      "kind": "router",
+      "subcategory": "all-in-one-edge-security-gateway",
+      "tags": [
+        "unifi",
+        "cloud-gateway",
+        "nvr-builtin",
+        "smb",
+        "prosumer",
+        "rackmount-1u"
+      ],
+      "icon": {
+        "name": "router-edge",
+        "emoji": "🛜"
+      },
+      "nos": [
+        "unifi-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "LAN1-8",
+          "count": 8,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "WAN",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000
+        },
+        {
+          "pattern": "SFP+LAN",
+          "count": 1,
+          "type": "sfp",
+          "speed_mbps": 10000
+        },
+        {
+          "pattern": "SFP+WAN",
+          "count": 1,
+          "type": "sfp",
+          "speed_mbps": 10000
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 33,
+        "psu": "internal AC/DC 50W, non-redundant (redundansi via aksesori eksternal USP-RPS)",
+        "feed": "AC 100-240V 50/60Hz + opsi DC input dari USP-RPS"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U rackmount, 442.4x43.7x285.6mm, berat 3,9kg"
+      },
+      "datasheet_note": "V — Ubiquiti Datasheet UDM-Pro resmi (dl.ubnt.com). IDS/IPS throughput 3,5 Gbps (diukur iPerf3). Detail protokol routing dinamis (BGP/OSPF) TIDAK dicantumkan di datasheet ini. NOS: UniFi OS, firmware tertutup, bukan white-box."
     }
   ],
   "_notes": "Migrated from network/devices/library/routers.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'routers:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none."

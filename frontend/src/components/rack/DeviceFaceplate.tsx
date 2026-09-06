@@ -58,13 +58,17 @@ const PANEL_W = PANEL_X1 - PANEL_X0;
 
 // ─── Port shape helpers ───────────────────────────────────────────────────────
 
-/** LED dot colours */
-const LED_FILL: Record<'green' | 'amber' | 'blue' | 'red' | 'white', string> = {
-  green: '#27C28B',
-  amber: '#F5A623',
-  blue:  '#4FA9F0',
-  red:   '#F05050',
-  white: '#E8E6E0',
+/** LED dot colours. Exported so tests can check every `Led['color']` maps to
+ *  a real hex value (no silent `undefined` fill) without going through the
+ *  full node → resolveDeviceType → render pipeline. */
+export const LED_FILL: Record<'green' | 'amber' | 'blue' | 'red' | 'white' | 'purple' | 'yellow', string> = {
+  green:  '#27C28B',
+  amber:  '#F5A623',
+  blue:   '#4FA9F0',
+  red:    '#F05050',
+  white:  '#E8E6E0',
+  purple: '#9B5DE5',
+  yellow: '#F0D93F',
 };
 
 /** Small vertical column of status LEDs (dot + label) — shared by the front
