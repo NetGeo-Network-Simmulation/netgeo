@@ -494,6 +494,495 @@
         "form_factor": "1U-fixed"
       },
       "datasheet_note": "48x RJ45 GbE + 4x SFP+ 10G; PSU internal 60W tetap (non-PoE, non-modular), switching capacity 176Gbps/88Gbps non-blocking. Vendor (techspecs.ui.com) hanya mempublikasikan 'Max. Power Consumption 60W' — tidak ada angka typical terpisah, jadi typical_w sengaja tidak diisi (bukan ditebak)."
+    },
+    {
+      "id": "dlink-dgs-3630-52pc",
+      "display_name": "D-Link DGS-3630-52PC (52-Port L3 PoE Access)",
+      "vendor": "D-Link",
+      "vendor_options": [
+        "D-Link"
+      ],
+      "kind": "switch",
+      "subcategory": "access-l2",
+      "tags": [
+        "campus",
+        "access",
+        "poe",
+        "layer3",
+        "stackable"
+      ],
+      "icon": {
+        "name": "switch-access",
+        "emoji": "🔀"
+      },
+      "nos": [
+        "dlink-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 44,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": true,
+          "role": "access"
+        },
+        {
+          "pattern": "combo{n}",
+          "count": 4,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": true,
+          "role": "access-combo"
+        },
+        {
+          "pattern": "uplink{n}",
+          "count": 4,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "uplink"
+        },
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        }
+      ],
+      "power": {
+        "typical_w": 54.1,
+        "max_w": 485,
+        "psu": "internal + optional external RPS (DPS-700)",
+        "feed": "AC 100-240V",
+        "poe_budget_w": 370
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "L3 stackable access (hingga 9 unit/432 port via DAC), switching capacity 176Gbps, forwarding 130.95Mpps, VLAN 802.1Q+GVRP, STP/RSTP/MSTP, OSPF/BGP/IS-IS, MPLS L2VPN/L3VPN, OpenFlow 1.3 (dlink.com resmi, V). PoE 370W budget IEEE 802.3af/at (bukan bt). 4 port 'combo{n}' adalah port fisik combo RJ45/SFP (satu port, dua media, salah satu aktif) — direpresentasikan sisi RJ45. MGMT/console/console-USB/USB ada di REAR panel (V, manual resmi), bukan front."
+    },
+    {
+      "id": "netgear-m4300-52g-poe-plus",
+      "display_name": "Netgear M4300-52G-PoE+ (GSM4352PA)",
+      "vendor": "Netgear",
+      "vendor_options": [
+        "Netgear"
+      ],
+      "kind": "switch",
+      "subcategory": "aggregation",
+      "tags": [
+        "campus",
+        "aggregation",
+        "poe",
+        "stackable",
+        "10g-uplink"
+      ],
+      "icon": {
+        "name": "switch-aggregation",
+        "emoji": "🧮"
+      },
+      "nos": [
+        "netgear-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 48,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": true,
+          "role": "access"
+        },
+        {
+          "pattern": "eth10g{n}",
+          "count": 2,
+          "type": "eth",
+          "speed_mbps": 10000,
+          "role": "uplink"
+        },
+        {
+          "pattern": "sfp+{n}",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "uplink"
+        },
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 865,
+        "psu": "modular (1 or 2 bay, APS550W/APS1000W, optional RPS)",
+        "feed": "AC 110/220V",
+        "poe_budget_w": 480
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "Switching fabric 176Gbps, PoE budget 480W (1 PSU) hingga 1440W (dual PSU EPS mode 220V), NSF hitless failover, VLAN, PVST+/RSTP interop (netgear.com resmi, V). typical_w tidak diisi — datasheet hanya publikasikan angka 'max, worst case'. OOB mgmt port ada di FRONT; RS232 console ada di REAR."
+    },
+    {
+      "id": "zyxel-xgs4600-52f",
+      "display_name": "Zyxel XGS4600-52F (48-Port SFP L3 Aggregation)",
+      "vendor": "Zyxel",
+      "vendor_options": [
+        "Zyxel"
+      ],
+      "kind": "switch",
+      "subcategory": "aggregation",
+      "tags": [
+        "aggregation",
+        "l3",
+        "sfp",
+        "fiber",
+        "stackable"
+      ],
+      "icon": {
+        "name": "switch-aggregation",
+        "emoji": "🧮"
+      },
+      "nos": [
+        "zynos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "sfp{n}",
+          "count": 48,
+          "type": "sfp",
+          "speed_mbps": 1000,
+          "role": "access"
+        },
+        {
+          "pattern": "sfp+{n}",
+          "count": 4,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "uplink"
+        },
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 70.16,
+        "psu": "dual PSU slot (PWR/PWR2), AC or DC model variant",
+        "feed": "AC 100-240V (varian DC tersedia terpisah)"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "Switching capacity 176Gbps, forwarding 130.9Mpps, MAC table 32K, L3 forwarding 8K IPv4/4K IPv6, routing table 12K, tanpa PoE (zyxel.com resmi via Wayback snapshot, V). 48 port SFP murni fiber (BUKAN RJ45 combo seperti varian -32/-32F sekeluarga). MGMT ada di FRONT, console ada di REAR — kebalikan pola varian -32/-32F."
+    },
+    {
+      "id": "ale-os6560-p48x4",
+      "display_name": "Alcatel-Lucent Enterprise OmniSwitch OS6560-P48X4",
+      "vendor": "Alcatel-Lucent Enterprise",
+      "vendor_options": [
+        "Alcatel-Lucent Enterprise"
+      ],
+      "kind": "switch",
+      "subcategory": "access-l2",
+      "tags": [
+        "campus",
+        "access",
+        "poe",
+        "stackable",
+        "virtual-chassis"
+      ],
+      "icon": {
+        "name": "switch-access",
+        "emoji": "🔀"
+      },
+      "nos": [
+        "ale-aos",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 48,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": true,
+          "role": "access"
+        },
+        {
+          "pattern": "sfp{n}",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 1000,
+          "role": "uplink"
+        },
+        {
+          "pattern": "sfp+{n}",
+          "count": 4,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "uplink"
+        }
+      ],
+      "power": {
+        "typical_w": 104,
+        "max_w": 920,
+        "psu": "modular 1+1 hot-swappable (primary 920W AC PoE PSU + optional backup slide-in)",
+        "feed": "AC",
+        "poe_budget_w": 815
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "Switching capacity 216Gbps, throughput 160.7Mpps, MACsec di semua port, stacking 320Gbps (Virtual Chassis hingga 8 unit), IEEE 802.1D STP (al-enterprise.com PDF resmi, V). PoE budget hingga 1645W dengan 2 PSU (920W x2, EPS load-sharing) — poe_budget_w di sini 815W untuk 1 PSU. LED jenis V, warna TIDAK dicantumkan datasheet (marketing-tier) — derived."
+    },
+    {
+      "id": "ruckus-icx7150-48p",
+      "display_name": "RUCKUS ICX 7150-48P (EOL 2026-01-15)",
+      "vendor": "RUCKUS",
+      "vendor_options": [
+        "RUCKUS"
+      ],
+      "kind": "switch",
+      "subcategory": "access-l2",
+      "tags": [
+        "campus",
+        "access",
+        "poe",
+        "stackable",
+        "eol-2026"
+      ],
+      "icon": {
+        "name": "switch-access",
+        "emoji": "🔀"
+      },
+      "nos": [
+        "fastiron",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "eth{n}",
+          "count": 48,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "poe": true,
+          "role": "access"
+        },
+        {
+          "pattern": "eth-uplink{n}",
+          "count": 2,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "uplink"
+        },
+        {
+          "pattern": "sfp+{n}",
+          "count": 4,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "uplink"
+        },
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        }
+      ],
+      "power": {
+        "typical_w": 47,
+        "max_w": 491,
+        "psu": "single integrated, rated 525W AC",
+        "feed": "AC (C14 inlet)",
+        "poe_budget_w": 370
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-fixed"
+      },
+      "datasheet_note": "DISCONTINUED 15 Januari 2026 — dicatat eksplisit per halaman produk resmi ruckusnetworks.com (V), dipilih tetap karena data teknis paling lengkap/terverifikasi di antara kandidat Ruckus lain. Switching capacity 180Gbps, forwarding 134Mpps, stacking hingga 12 unit via SFP+ (480Gbps agregat), silent-mode fan-off menurunkan PoE budget ke 150W (ruckusnetworks.com PDF resmi, V)."
+    },
+    {
+      "id": "netberg-aurora-610",
+      "display_name": "Netberg Aurora 610 (Tofino DC ToR)",
+      "vendor": "Netberg",
+      "vendor_options": [
+        "Netberg"
+      ],
+      "kind": "switch",
+      "subcategory": "dc-tor",
+      "tags": [
+        "datacenter",
+        "dc-tor",
+        "white-box",
+        "p4-programmable",
+        "tofino",
+        "onie",
+        "sonic"
+      ],
+      "icon": {
+        "name": "switch-tor",
+        "emoji": "🗄️"
+      },
+      "nos": [
+        "sonic",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "sfp28-{n}",
+          "count": 48,
+          "type": "sfp28",
+          "speed_mbps": 25000,
+          "role": "access"
+        },
+        {
+          "pattern": "qsfp28-{n}",
+          "count": 8,
+          "type": "qsfp",
+          "speed_mbps": 100000,
+          "role": "uplink"
+        },
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        }
+      ],
+      "power": {
+        "typical_w": 350,
+        "max_w": 415,
+        "psu": "redundant 1+1 hot-swap, 800W 80+ Platinum (AC) atau -40~-60V DC opsional",
+        "feed": "AC 100-240V atau HVDC 240V atau DC -40~-60V"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-rackmount"
+      },
+      "datasheet_note": "ASIC Intel/Barefoot Tofino BFN-T10-032D-020 2.0Tbps, CPU Xeon D-1257, 16GB DDR4 ECC, 128GB SSD, NOS kompatibel Open Network Linux + SONiC (ONIE bootloader) (netbergtw.com manual resmi, V). Data port di FRONT, PSU/fan/mgmt/console/USB di REAR — konvensi DC ToR standar, V eksplisit manual."
+    },
+    {
+      "id": "edgecore-as7726-32x",
+      "display_name": "Edgecore AS7726-32X (DCS204, DC ToR/Spine)",
+      "vendor": "Edgecore",
+      "vendor_options": [
+        "Edgecore"
+      ],
+      "kind": "switch",
+      "subcategory": "dc-tor",
+      "tags": [
+        "datacenter",
+        "dc-tor",
+        "dc-spine",
+        "white-box",
+        "onie",
+        "sonic-compatible",
+        "broadcom-trident3"
+      ],
+      "icon": {
+        "name": "switch-tor",
+        "emoji": "🗄️"
+      },
+      "nos": [
+        "sonic",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "qsfp28-{n}",
+          "count": 32,
+          "type": "qsfp",
+          "speed_mbps": 100000,
+          "role": "access"
+        },
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "mgmt"
+        },
+        {
+          "pattern": "mgmt-sfp+{n}",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "mgmt"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 550,
+        "psu": "redundant 2x, load-sharing, hot-swappable, AC 100-240V atau -48VDC (-36~-75VDC)",
+        "feed": "AC atau -48VDC"
+      },
+      "physical": {
+        "ru": 1,
+        "form_factor": "1U-rackmount"
+      },
+      "datasheet_note": "Broadcom BCM56870 Trident 3, 3.2Tbps full duplex, forwarding 1.52Bpps, CPU Intel Xeon D-1518, 16GB DDR4, 64GB SSD, ONIE preloaded, kompatibel SONiC/NOS open source & komersial (edge-core.com PDF resmi, V). Sebelumnya sempat dipilih untuk pack routers, DIKELUARKAN dari sana atas koreksi leader (ini switch DC ToR 32x100G, bukan router) — tidak duplikat lintas-kategori. 'mgmt-sfp+{n}' adalah 2x port SFP+ 10G KHUSUS manajemen (bukan uplink data), fisik SFP+ tapi fungsi mgmt per datasheet resmi."
     }
   ],
   "_notes": "Migrated from network/devices/library/switches.json (v1) — ids stay bare here, the loader (backend/app/api/device_types.py) prefixes with 'switches:' when merging into the registry. capabilities_ref dropped (no capabilities.md consumer exists). snmp_oids left absent — the loader's _device_json_to_type() already falls back to the generic IF-MIB set (_IF_MIB_OIDS) when a device has none."

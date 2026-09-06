@@ -3064,6 +3064,462 @@ export const DEVICE_TYPES: DeviceType[] = [
     // (bahan V dari datasheet), hex pasti derived.
     brand: { accent: '#0559C9', chassis: '#F5F5F5', label: 'Ubiquiti', badge: 'stripe' },
   },
+
+  // ── D-Link DGS-3630-52PC ───────────────────────────────────────────────────
+  {
+    slug: 'dlink-dgs-3630-52pc',
+    manufacturer: 'D-Link',
+    model: 'DGS-3630-52PC',
+    uHeight: 1,
+    // §8.1 V (Hardware Installation Guide resmi media.dlink.eu): "441 mm (W)
+    // x 380 mm (D) x 44 mm (H), 19-inch, 1 U" — chassis body, bukan lebar rail.
+    chassisMm: { widthMm: 441, depthMm: 380 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'rj45', count: 44, poe: true }],
+          // rows: 2 diasumsikan (pola umum 48-port dua baris) — jumlah/PoE V,
+          // urutan piksel presisi UNVERIFIED (figure PDF tak terekstrak teks).
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          // 4 port combo RJ45/SFP (salah satu aktif per port) — TIDAK ada
+          // tipe "combo" di kosakata PortType, direpresentasikan sebagai satu
+          // port fisik sisi RJ45 dengan label COMBO (pola sama dgn Blok B
+          // pack research), bukan digambar dua kali.
+          ports: [{ type: 'rj45', count: 4, poe: true, label: 'COMBO' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
+        {
+          ports: [{ type: 'sfp+', count: 4 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+      ],
+      // V lengkap warna, manual resmi §LED Indicators (depan).
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'CONSOLE', color: 'green', position: 'left' },
+        { label: 'RPS', color: 'green', position: 'left' },
+        { label: 'FAN ERR', color: 'red', position: 'left' },
+      ],
+      // Stack ID = 7-segment digit display (bukan LED tunggal), tidak ada
+      // padanan di skema Led — diomit sesuai keputusan pola batch sebelumnya.
+    },
+    rear: {
+      blocks: [
+        {
+          // Keputusan leader: mgmt/console DGS-3630 ada di REAR panel, V
+          // eksplisit manual ("Rear Panel Components"): MGMT RJ45, 2x
+          // console (RJ45 + mini-USB), alarm RJ45, USB 2.0. Alarm RJ45 tidak
+          // punya padanan PortType, diomit (bukan port data).
+          type: 'port-zone',
+          portZone: {
+            ports: [
+              { type: 'mgmt-rj45', count: 1 },
+              { type: 'console-rj45', count: 1 },
+              { type: 'console-usb', count: 1 },
+              { type: 'usb', count: 1 },
+            ],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        { type: 'psu-slot', count: 1 }, // internal; RPS eksternal (DPS-700) opsional, tidak digambar
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — belum ada inspeksi foto produk sesi
+    // riset; D-Link umumnya hitam dgn aksen merah korporat.
+    brand: { accent: '#CE181E', chassis: '#1B1B1B', label: 'D-Link', badge: 'stripe' },
+  },
+
+  // ── Netgear M4300-52G-PoE+ ─────────────────────────────────────────────────
+  {
+    slug: 'netgear-m4300-52g-poe-plus',
+    manufacturer: 'Netgear',
+    model: 'M4300-52G-PoE+',
+    uHeight: 1,
+    // §8.1 V (Data Sheet resmi downloads.netgear.com, tabel Dimensions):
+    // 440x388x44mm — varian non-PoE seri sama punya depth beda (31cm vs
+    // 38,8cm) membuktikan ini pengukuran body per-model, bukan lebar rak
+    // generik dibulatkan.
+    chassisMm: { widthMm: 440, depthMm: 388 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'console-usb', count: 1 }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.06,
+        },
+        {
+          ports: [{ type: 'rj45', count: 48, poe: true }],
+          // rows: 2 diasumsikan (pola umum), jumlah/PoE V — Manual Instalasi
+          // resmi tidak menggambar baris fisik secara tekstual.
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'rj45', count: 2, label: '10G' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+        {
+          ports: [{ type: 'sfp+', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+        {
+          // OOB 1G mgmt + USB 2.0 — V, ada di FRONT (bukan rear), beda dari
+          // RS232 console yang ada di rear (lihat blok rear).
+          ports: [
+            { type: 'mgmt-rj45', count: 1 },
+            { type: 'usb', count: 1 },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.1,
+        },
+      ],
+      // V lengkap warna, Hardware Installation Guide resmi Tabel 2.
+      leds: [
+        { label: 'PWR1', color: 'green', position: 'left' },
+        { label: 'PWR2', color: 'green', position: 'left' },
+        { label: 'FAN', color: 'green', position: 'left' },
+        { label: 'MASTER', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [
+        {
+          // RS232 console — V eksplisit "Back panel model": beda dari
+          // console-usb depan.
+          type: 'port-zone',
+          portZone: {
+            ports: [{ type: 'console-rj45', count: 1 }],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        { type: 'psu-slot', count: 2 }, // modular bay 1+2 (APS550W/1000W) + RPS interface
+      ],
+    },
+    // brand: derived, low-confidence — tidak ada inspeksi foto produk sesi ini.
+    brand: { accent: '#8DC63F', chassis: '#1A1A1A', label: 'Netgear', badge: 'stripe' },
+  },
+
+  // ── Zyxel XGS4600-52F ──────────────────────────────────────────────────────
+  {
+    slug: 'zyxel-xgs4600-52f',
+    manufacturer: 'Zyxel',
+    model: 'XGS4600-52F',
+    uHeight: 1,
+    // §8.1 V (halaman spesifikasi resmi zyxel.com via arsip Wayback):
+    // "441 x 360 x 44" mm. Varian sekeluarga (32/32F: depth 270mm) beda
+    // depth meski width sama — bukti width 441mm body asli.
+    chassisMm: { widthMm: 441, depthMm: 360 },
+    front: {
+      portZones: [
+        {
+          // 48x SFP GIGABIT MURNI FIBER — BUKAN RJ45 (beda dari varian
+          // -32/-32F combo di seri sama), V user guide resmi §3.1.
+          ports: [{ type: 'sfp', count: 48 }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'sfp+', count: 4 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+        {
+          // mgmt out-of-band RJ45 — V eksplisit ADA DI FRONT untuk model
+          // -52F (beda dari console yang ada di rear untuk varian ini).
+          ports: [{ type: 'mgmt-rj45', count: 1 }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.06,
+        },
+      ],
+      // V lengkap warna, user guide resmi §3.3 Tabel 3.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'PWR2', color: 'green', position: 'left' },
+        { label: 'SYS', color: 'green', position: 'left' },
+        { label: 'FAN', color: 'green', position: 'left' },
+        { label: 'LOCATOR', color: 'blue', position: 'left' },
+        { label: 'MASTER', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [
+        {
+          // Console — V eksplisit ADA DI REAR untuk -52F (beda dari
+          // -32/-32F yang consolenya di front — dicatat di research, jangan
+          // disamakan antar-varian).
+          type: 'port-zone',
+          portZone: {
+            ports: [{ type: 'console-rj45', count: 1 }],
+            rows: 1,
+            align: 'left',
+          },
+        },
+        { type: 'psu-slot', count: 2 }, // dual PWR/PWR2 bay; posisi rear derived (konvensi umum, tak dinyatakan eksplisit)
+      ],
+    },
+    // brand: derived, low-confidence — tidak ada inspeksi foto produk sesi ini.
+    brand: { accent: '#EE7623', chassis: '#1C1C1E', label: 'Zyxel', badge: 'stripe' },
+  },
+
+  // ── Alcatel-Lucent Enterprise OmniSwitch OS6560-P48X4 ─────────────────────
+  {
+    slug: 'ale-os6560-p48x4',
+    manufacturer: 'Alcatel-Lucent Enterprise',
+    model: 'OmniSwitch OS6560-P48X4',
+    uHeight: 1,
+    // §8.1 V (Datasheet resmi al-enterprise.com, tabel "Gigabit product
+    // matrix"): "Height 4.4cm, Width 44cm, Depth 35cm" — sama utk 5 varian
+    // Gigabit seri ini.
+    chassisMm: { widthMm: 440, depthMm: 350 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'rj45', count: 48, poe: true }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'sfp', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+        {
+          ports: [{ type: 'sfp+', count: 4 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+        {
+          ports: [
+            { type: 'usb', count: 1 },
+            { type: 'console-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.08,
+        },
+      ],
+      // Jenis LED V (datasheet resmi), WARNA tidak dicantumkan (datasheet
+      // marketing-tier, bukan Hardware User Guide) — hijau di sini derived,
+      // bukan V, ditandai eksplisit sesuai keputusan leader.
+      leds: [
+        { label: 'System', color: 'green', position: 'left' }, // derived
+        { label: 'PWR', color: 'green', position: 'left' }, // derived
+        { label: 'VC', color: 'green', position: 'left' }, // derived
+      ],
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 }, // 1 primer + 1 backup slide-in; posisi rear derived (konvensi umum PSU modular)
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — tidak ada inspeksi foto produk sesi ini.
+    brand: { accent: '#5C2D91', chassis: '#1B1B1D', label: 'Alcatel-Lucent Enterprise', badge: 'stripe' },
+  },
+
+  // ── RUCKUS (Belden) ICX 7150-48P ───────────────────────────────────────────
+  {
+    slug: 'ruckus-icx7150-48p',
+    manufacturer: 'RUCKUS',
+    model: 'ICX 7150-48P',
+    uHeight: 1,
+    // EOL — dicatat eksplisit, tidak disembunyikan: seri ICX 7150
+    // discontinued 15 Januari 2026 per halaman produk resmi
+    // ruckusnetworks.com (V). Dipilih tetap karena data teknis paling
+    // lengkap/terverifikasi di antara kandidat Ruckus lain.
+    //
+    // §8.1 V (Datasheet resmi ruckusnetworks.com, tabel Dimensions):
+    // "440 (W), 370 (D), 43.65 (H)" mm.
+    chassisMm: { widthMm: 440, depthMm: 370 },
+    front: {
+      portZones: [
+        {
+          ports: [{ type: 'rj45', count: 48, poe: true }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'rj45', count: 2, label: 'UPLINK' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.08,
+        },
+        {
+          ports: [{ type: 'sfp+', count: 4 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+        {
+          ports: [
+            { type: 'mgmt-rj45', count: 1 },
+            { type: 'console-usb', count: 1 }, // USB Type-C console
+            { type: 'console-rj45', count: 1 },
+            { type: 'usb', count: 1 },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.14,
+        },
+      ],
+      // V lengkap warna (System/Power), Hardware Installation Guide resmi
+      // docs.ruckuswireless.com. Warna detail per-mode port-side (5-mode
+      // status button) UNVERIFIED presisi, tidak digambar sebagai LED
+      // terpisah di sini.
+      leds: [
+        { label: 'SYSTEM', color: 'green', position: 'left' },
+        { label: 'POWER', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 1 }, // single integrated PSU 525W AC (C14 inlet)
+        { type: 'vent-grille' },
+      ],
+    },
+    // brand: derived, low-confidence — tidak ada inspeksi foto produk sesi ini.
+    brand: { accent: '#8DC63F', chassis: '#1D1D1D', label: 'RUCKUS', badge: 'stripe' },
+  },
+
+  // ── Netberg Aurora 610 ─────────────────────────────────────────────────────
+  {
+    slug: 'netberg-aurora-610',
+    manufacturer: 'Netberg',
+    model: 'Aurora 610',
+    // NOS: Open Network Linux / SONiC (ONIE) — tidak ada di union `Nos`
+    // (routers.ts API types), diomit sebagaimana NOS proprietary/white-box
+    // lain di batch ini (lihat extreme-slx-9740-40c).
+    uHeight: 1,
+    isFullDepth: true,
+    // §8.1 V (Manual instalasi resmi netbergtw.com, tabel Specification):
+    // "Dimensions (DxWxH): 482 x 440 x 44 mm" — 482mm di sini adalah DEPTH
+    // (bukan width/lebar rail 19"), width tetap 440mm konsisten pola batch.
+    chassisMm: { widthMm: 440, depthMm: 482 },
+    front: {
+      // Data port di FRONT (konvensi DC ToR standar) — V eksplisit figure
+      // manual §3.2/3.3. Mgmt/console/USB ada di REAR (lihat blok rear),
+      // BEDA dari kelima SKU access/aggregation lain di batch ini.
+      portZones: [
+        {
+          ports: [{ type: 'sfp28', count: 48 }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'qsfp28', count: 8 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.18,
+        },
+      ],
+      // V lengkap warna, manual resmi Tabel 3.5. Health LED bi-color
+      // hijau/merah — hijau (ready) dipakai sbg warna dominan di sini.
+      leds: [{ label: 'HEALTH', color: 'green', position: 'left' }],
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 }, // 1+1 redundant hot-swap, 800W 80+ Platinum
+        { type: 'fan-tray', count: 4 }, // N+1
+        {
+          // Keputusan leader: mgmt/console REAR (konvensi DC ToR) — V
+          // eksplisit manual §3.4 Figure "Rear Panel".
+          type: 'port-zone',
+          portZone: {
+            ports: [
+              { type: 'mgmt-rj45', count: 1 },
+              { type: 'console-rj45', count: 1 },
+              { type: 'usb', count: 1 },
+            ],
+            rows: 1,
+            align: 'left',
+          },
+        },
+      ],
+    },
+    // brand: derived, low-confidence — white-box ODM Taiwan, tidak ada
+    // inspeksi foto produk sesi ini.
+    brand: { accent: '#3AA0FF', chassis: '#1C1C1E', label: 'Netberg', badge: 'stripe' },
+  },
+
+  // ── Edgecore AS7726-32X (DCS204) ───────────────────────────────────────────
+  {
+    slug: 'edgecore-as7726-32x',
+    manufacturer: 'Edgecore',
+    model: 'AS7726-32X',
+    // NOS: ONIE-preloaded, kompatibel SONiC/open-source & komersial — tidak
+    // ada di union `Nos`, diomit (pola sama dgn Netberg §di atas).
+    uHeight: 1,
+    isFullDepth: true,
+    // §8.1 V (Datasheet resmi edge-core.com DCS204_AS7726-32X_DS_R07):
+    // "Dimensions (WxHxD): 43.84 x 4.35 x 51.5 cm" → 438.4 x 515mm.
+    // Batch ROUTER sempat memilih SKU sama, DIKELUARKAN dari situ atas
+    // instruksi leader (ini switch DC ToR 32x100G, bukan router) — masuk
+    // di sini, tidak duplikat lintas-kategori.
+    chassisMm: { widthMm: 438.4, depthMm: 515 },
+    front: {
+      // Catatan penting: datasheet resmi eksplisit menyatakan SEMUA port
+      // (termasuk mgmt-rj45/sfp+-mgmt/console/usb) ada di FRONT ("All ports
+      // on front; PSUs and fans accessible from rear"). Keputusan leader
+      // 2026-09-06 menaruh mgmt/console di REAR di sini untuk konsistensi
+      // faceplate DC ToR dgn D-Link/Netberg di batch ini — override
+      // sengaja atas sumber, dicatat eksplisit agar tidak dikira salah baca.
+      portZones: [
+        {
+          ports: [{ type: 'qsfp28', count: 32 }],
+          rows: 2,
+          align: 'fill',
+        },
+      ],
+      // Jenis LED V (Diagnostic/Locator/PSU/Fan), warna TIDAK dicantumkan
+      // datasheet (marketing-tier) — hijau di sini derived, bukan V.
+      leds: [
+        { label: 'DIAG', color: 'green', position: 'left' }, // derived
+        { label: 'LOCATOR', color: 'green', position: 'left' }, // derived
+      ],
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 }, // redundant, load-sharing, hot-swap
+        { type: 'fan-tray', count: 6 }, // 5+1 redundant hot-swap
+        {
+          type: 'port-zone',
+          portZone: {
+            ports: [
+              { type: 'mgmt-rj45', count: 1 },
+              { type: 'sfp+', count: 2, label: 'MGMT' }, // "10G management port", BUKAN data uplink
+              { type: 'usb', count: 1 },
+              { type: 'console-rj45', count: 1 },
+            ],
+            rows: 1,
+            align: 'left',
+          },
+        },
+      ],
+    },
+    // brand: derived, low-confidence — white-box ODM Taiwan (Accton), tidak
+    // ada inspeksi foto produk sesi ini.
+    brand: { accent: '#00A19A', chassis: '#1A1A1C', label: 'Edgecore', badge: 'stripe' },
+  },
 ];
 
 // ─── Resolve helpers ──────────────────────────────────────────────────────────
