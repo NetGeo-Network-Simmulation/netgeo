@@ -175,9 +175,42 @@ def build_qsfp_cage():
     export_glb(outer, 'cage-qsfp.glb')
 
 
+# ─── RJ-11/RJ-14 (6P6C) voice/FXS jack cage shell (Sesi port-fxs) ──────────
+# 6-position modular connector is physically SMALLER than the 8-position
+# 8P8C/RJ45 above and NOT interchangeable with it (keputusan Surya
+# 2026-09-06) -- ONU voice/FXS ports must render as their own shape, not a
+# mispainted rj45. Opening width 9.85mm / height 6.60mm: Wikipedia "Modular
+# connector" typical-dimensions table (en.wikipedia.org/wiki/Modular_connector,
+# citing ANSI/TIA-1096-A + ISO 8877), cross-checked against that same
+# table's 8P8C row (11.68mm width) which matches this file's own
+# already-used RJ45 body width exactly. This supersedes the lower-confidence
+# 9.65mm figure in docs/design/24-DEVICE-PHYSICAL-SPEC.md's RJ11 section,
+# which that doc itself flags as "low-confidence -- angka dari ingatan umum
+# industri, TIDAK diverifikasi". Depth (13.7mm) is NOT independently
+# sourced -- derived by scaling the RJ45 8P8C body length above (16.25mm) by
+# the same width ratio (9.85/11.68); kept shallow like the LC/SFP cages
+# purely for visual proportion, not a literal cage-depth claim.
+def build_rj11_cage():
+    clear_scene()
+    wall = 0.0005
+    w, h, depth = 0.00985, 0.0066, 0.0137
+    outer = box('rj11-cage-outer', w + 2 * wall, h + 2 * wall, depth, 0.0)
+    inner = box('rj11-cage-inner', w, h, depth + 0.002, 0.001)
+    mod = outer.modifiers.new('cut', 'BOOLEAN')
+    mod.operation = 'DIFFERENCE'
+    mod.object = inner
+    bpy.context.view_layer.objects.active = outer
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(inner, do_unlink=True)
+    outer.name = 'rj11-cage'
+    add_material(outer, 'rj11-jack-housing', (0.09, 0.09, 0.1))
+    export_glb(outer, 'cage-rj11.glb')
+
+
 if __name__ == '__main__':
     build_rj45()
     build_lc()
     build_sfp_cage()
     build_qsfp_cage()
+    build_rj11_cage()
     print('done')

@@ -17,6 +17,9 @@
  *   usb        → flat rect
  *   drive-sff  → bezel slot + handle bar + status LED (left pip)
  *   drive-lff  → taller bezel slot + handle + status LED
+ *   fxs        → narrow amber-stroke jack (RJ-11 6P voice, ~70% of an
+ *                8P8C/rj45 cage's width — must read as a different,
+ *                smaller connector, never the rj45 shape)
  *
  * ponytail: schematic-faithful, not pixel-exact vendor render. One parametric
  * engine covers every kind. Upgrade path: add NodeModel.model → look up
@@ -169,6 +172,21 @@ function renderPort(
     return (
       <rect key={key} x={r.x} y={r.y + r.h * 0.2} width={r.w} height={r.h * 0.6}
         rx="0.4" fill="#1a1a30" stroke="#5050a0" strokeWidth="0.5" />
+    );
+  }
+
+  if (pt === 'fxs') {
+    // RJ-11 6P voice jack: physically narrower than the 8P8C rj45 cage
+    // below (9.85mm vs 11.68mm opening width, see tools/blender/
+    // build_assets.py build_rj11_cage() for the sourced numbers) — drawn
+    // narrower + amber-stroked (POTS convention) so it never reads as a
+    // miscoloured rj45 port.
+    const jw = r.w * 0.7, jx = r.x + (r.w - jw) / 2;
+    return (
+      <g key={key}>
+        <rect x={jx} y={r.y} width={jw} height={r.h} rx="0.6" fill="#141410" stroke="#8a6a2a" strokeWidth="0.4" />
+        <rect x={jx + jw * 0.3} y={r.y + r.h * 0.6} width={jw * 0.4} height={r.h * 0.3} rx="0.3" fill="#2c2a1c" />
+      </g>
     );
   }
 

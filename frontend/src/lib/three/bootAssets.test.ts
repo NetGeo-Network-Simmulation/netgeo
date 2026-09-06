@@ -72,4 +72,22 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     expect(qsfpSize.y).toBeCloseTo(0.037, 2); // Datum L/K-to-PCB
     expect(qsfpSize.z).toBeCloseTo(0.01602, 2); // 15.02mm component-free height + wall
   });
+
+  // Slice port-fxs: RJ-11 6P voice jack cage — narrower/shorter than the
+  // 8P8C rj45 cross-section above (see build_rj11_cage() in
+  // tools/blender/build_assets.py for the sourced 9.85/6.60mm numbers).
+  it('rj11 jack cage parses and is narrower/shorter than the 8P8C rj45 cross-section', async () => {
+    const loader = new GLTFLoader();
+    const rj11Buf = await nodeFetch('/3d/cage-rj11.glb');
+    const rj11Gltf = await loader.parseAsync(rj11Buf, '');
+    const rj11Box = new THREE.Box3().setFromObject(rj11Gltf.scene);
+    const rj11Size = new THREE.Vector3();
+    rj11Box.getSize(rj11Size);
+    expect(rj11Size.x).toBeCloseTo(0.01085, 2); // 9.85mm opening + 2x0.5mm wall
+    expect(rj11Size.y).toBeCloseTo(0.0137, 2); // depth (derived, see source comment)
+    expect(rj11Size.z).toBeCloseTo(0.0076, 2); // 6.60mm opening + 2x0.5mm wall
+
+    // must not be mistakable for the 8P8C rj45 body (0.01168 x 0.02875)
+    expect(rj11Size.x).toBeLessThan(0.01168);
+  });
 });
