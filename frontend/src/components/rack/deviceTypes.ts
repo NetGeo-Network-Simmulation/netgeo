@@ -60,7 +60,7 @@ export interface RearBlock {
 
 export interface Led {
   label: string;
-  color: 'green' | 'amber' | 'blue' | 'red' | 'white';
+  color: 'green' | 'amber' | 'blue' | 'red' | 'white' | 'purple' | 'yellow';
   position: 'left' | 'right' | 'above';
 }
 
@@ -2512,13 +2512,14 @@ export const DEVICE_TYPES: DeviceType[] = [
       // blinking red (factory reset) · solid red (update gagal) · solid
       // purple (belum diprovisioning) · blinking blue (provisioning) ·
       // solid blue (provisioned) · blinking white (locate AP) · yellow
-      // (mesh disconnect). `Led.color` skema ini tak punya 'purple'/
-      // 'yellow' — 3 entri di bawah dipetakan ke warna steady-state normal
-      // (blue = provisioned/operasional), bukan tebakan data baru.
+      // (mesh disconnect). `Led.color` sekarang punya 'purple'/'yellow'
+      // (ditambahkan batch router 2026-09-06) — 3 entri di bawah dikoreksi
+      // ke warna asli vendor: not-provisioned (purple), provisioned (blue),
+      // mesh-disconnect (yellow).
       leds: [
-        { label: 'Status 1 (multi-warna, lihat komentar)', color: 'blue', position: 'left' },
-        { label: 'Status 2 (multi-warna, lihat komentar)', color: 'blue', position: 'left' },
-        { label: 'Status 3 (multi-warna, lihat komentar)', color: 'blue', position: 'left' },
+        { label: 'Status (not-provisioned)', color: 'purple', position: 'left' },
+        { label: 'Status (provisioned)', color: 'blue', position: 'left' },
+        { label: 'Status (mesh disconnect)', color: 'yellow', position: 'left' },
       ],
     },
     rear: {
@@ -2689,10 +2690,11 @@ export const DEVICE_TYPES: DeviceType[] = [
       // V palet warna saja: "LED Indicator: Yellow/green/blue for different
       // working states, flashing mode" — jumlah LED fisik & pemetaan warna-
       // ke-state TIDAK dirinci (lebih generik dari tabel Grandstream/Araknis
-      // di atas). 'yellow' tak ada di enum `Led.color` skema ini — direpre-
-      // sentasikan dgn 'green' (salah satu dari 3 warna nyata palet vendor,
-      // bukan warna baru), palet lengkap dicatat di komentar ini.
-      leds: [{ label: 'Status (palet kuning/hijau/biru, pola tak dirinci)', color: 'green', position: 'left' }],
+      // di atas). `Led.color` sekarang punya 'yellow' (ditambahkan batch
+      // router 2026-09-06) — dikoreksi ke warna asli vendor; representasi
+      // dipilih 'yellow' sebagai LED status utama, palet lengkap (kuning/
+      // hijau/biru) tetap dicatat di komentar ini.
+      leds: [{ label: 'Status (palet kuning/hijau/biru, pola tak dirinci)', color: 'yellow', position: 'left' }],
     },
     rear: {
       blocks: [{ type: 'psu-slot', count: 1 }], // PoE 802.3af/at atau DC 12V/1.5A adapter
@@ -2775,6 +2777,292 @@ export const DEVICE_TYPES: DeviceType[] = [
     // brand: derived, low-confidence — tak ada inspeksi foto produk detail
     // sesi riset ini.
     brand: { accent: '#C7C7C5', chassis: '#F4F4F2', label: 'Tenda', badge: 'stripe' },
+  },
+
+  // ── Batch router (Sesi riset 2026-09-06, research/3d-device-specs-router.md) ──
+  // 5 SKU chassisMm V dari sumber primer vendor; H3C dan Ruijie sengaja
+  // dikecualikan (masih V(2nd)/belum layak, keputusan leader). Edgecore
+  // AS7726-32X JUGA dikecualikan dari batch ini (koreksi leader
+  // 2026-09-06): SKU sama dipilih batch switch (data-center ToR 32x100G),
+  // dikonversi ke pack `switches`, bukan `routers`, untuk hindari duplikat
+  // lintas-kategori.
+
+  // ── DrayTek Vigor 3910 ────────────────────────────────────────────────────
+  {
+    slug: 'draytek-vigor-3910',
+    manufacturer: 'DrayTek',
+    model: 'Vigor 3910',
+    uHeight: 1,
+    // §8.1 V (datasheet resmi DrayTek): 443x285x45mm, chassis body (BUKAN
+    // 482,6mm lebar rail).
+    chassisMm: { widthMm: 443, depthMm: 285 },
+    front: {
+      portZones: [
+        {
+          ports: [
+            { type: 'usb', count: 2 },
+            // V isi/jumlah dari Quick Start Guide resmi; dokumen menyebut
+            // "Console Connector / Console Flat Cable" — bentuk fisik kabel
+            // pipih mirip RJ45 tapi pinout tak dikonfirmasi eksplisit di
+            // teks. DIASUMSIKAN console-rj45, bukan V penuh untuk detail
+            // konektor (research §1.A).
+            { type: 'console-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.16,
+        },
+        {
+          // P1-P2, switchable WAN/LAN 10G/1G.
+          ports: [{ type: 'sfp+', count: 2, label: 'P1-P2' }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          // P3-P12: 2x 2.5GBase-T + 8x GbE, semua RJ45, switchable WAN/LAN.
+          ports: [{ type: 'rj45', count: 10, label: 'P3-P12' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.5,
+        },
+      ],
+      // V, Quick Start Guide resmi.
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'ACT', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'iec-inlet' }], // internal fixed AC, non-redundant
+    },
+    // brand: derived — DrayTek belum ada foto produk detail diperiksa pass ini.
+    brand: { accent: '#D0021B', chassis: '#E8E8E8', label: 'DrayTek', badge: 'stripe' },
+  },
+
+  // ── TP-Link (Omada) ER8411 ────────────────────────────────────────────────
+  {
+    slug: 'tplink-omada-er8411',
+    manufacturer: 'TP-Link',
+    model: 'Omada ER8411',
+    uHeight: 1,
+    // §8.1 V (datasheet resmi TP-Link): 440x220x44mm, chassis body.
+    chassisMm: { widthMm: 440, depthMm: 220 },
+    front: {
+      portZones: [
+        {
+          ports: [
+            { type: 'usb', count: 2 }, // USB1 (LTE) + USB2 (storage)
+            // UNVERIFIED tipe fisik (RJ45 vs USB-C) — Installation Guide
+            // resmi hanya menyebut label "Console" tanpa spesifikasi bentuk
+            // (research §2.A). console-rj45 dipilih sebagai asumsi paling
+            // masuk akal (mayoritas gateway rackmount kelas ini pakai RJ45
+            // console), BUKAN V.
+            { type: 'console-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.18,
+        },
+        {
+          // Port1-2 SFP+ WAN/WAN-LAN 10G, Port3 SFP WAN/LAN 1G.
+          ports: [
+            { type: 'sfp+', count: 2, label: 'Port1-2' },
+            { type: 'sfp', count: 1, label: 'Port3' },
+          ],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'rj45', count: 8, label: 'Port4-11' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.4,
+        },
+      ],
+      // V, Installation Guide resmi.
+      leds: [
+        { label: 'PWR1', color: 'green', position: 'left' },
+        { label: 'PWR2', color: 'green', position: 'left' },
+        { label: 'SYS', color: 'green', position: 'left' },
+        { label: 'FAN', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'iec-inlet', count: 2 }], // 2x fixed AC redundant, non hot-swap
+    },
+    // brand: derived — chassis hitam/abu gelap khas lini Omada.
+    brand: { accent: '#2681FF', chassis: '#1A1A1A', label: 'TP-Link', badge: 'stripe' },
+  },
+
+  // ── UfiSpace S9600-72XC ───────────────────────────────────────────────────
+  {
+    slug: 'ufispace-s9600-72xc',
+    manufacturer: 'UfiSpace',
+    model: 'S9600-72XC',
+    uHeight: 2,
+    isFullDepth: true,
+    // §8.1 V (datasheet resmi + Hardware Installation Guide resmi, dua
+    // sumber angka identik): 436x609.6x87.7mm. CATATAN: tabel dimensi di
+    // Installation Guide melabeli baris ini "S9701-82DC" (nama part
+    // internal/ODM), bukan salah tempel — angka numerik identik dengan
+    // datasheet marketing S9600-72XC (research §3.A).
+    chassisMm: { widthMm: 436, depthMm: 609.6 },
+    front: {
+      portZones: [
+        {
+          // Isi & jumlah V; urutan visual kiri-kanan TIDAK terkonfirmasi
+          // (diagram front panel adalah gambar, tidak ter-ekstrak sebagai
+          // teks — research §3.A). Susunan di bawah = `derived`: blok
+          // SFP28 besar di kiri, QSFP28 di kanan, klaster mgmt/console
+          // terpisah.
+          ports: [{ type: 'sfp28', count: 64, label: 'derived: order' }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'qsfp28', count: 8, label: 'derived: order' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+        {
+          ports: [
+            { type: 'sfp+', count: 2, label: 'MGMT' },
+            { type: 'console-rj45', count: 1 },
+            { type: 'console-usb', count: 1 },
+            { type: 'mgmt-rj45', count: 1 },
+            { type: 'usb', count: 1 },
+          ],
+          rows: 2,
+          align: 'left',
+          widthFraction: 0.14,
+        },
+      ],
+      // V, Hardware Installation Guide resmi §Front Panel LED. Timing
+      // SMB "1PPS"/"10MHz" (bukan LED) tak ada padanan union type — utang
+      // kosakata, tidak direpresentasikan visual (research §3.A/gap).
+      leds: [
+        { label: 'SYNC', color: 'green', position: 'left' },
+        { label: 'SYS', color: 'green', position: 'left' },
+        { label: 'FAN', color: 'green', position: 'left' },
+        { label: 'PS0', color: 'green', position: 'left' },
+        { label: 'PS1', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 }, // 1+1 hot-swap, 1300W AC atau DC
+        { type: 'fan-tray', count: 1 },
+      ],
+    },
+    // brand: derived — UfiSpace produk B2B ODM tanpa identitas warna
+    // konsumen; chassis abu-abu gelap standar rak telco 2U.
+    brand: { accent: '#5A5A5A', chassis: '#2B2B2B', label: 'UfiSpace', badge: 'stripe' },
+  },
+
+  // ── Extreme Networks SLX 9740-40C ─────────────────────────────────────────
+  {
+    slug: 'extreme-slx-9740-40c',
+    manufacturer: 'Extreme',
+    model: 'SLX 9740-40C',
+    // NOS: SLX-OS (proprietary Extreme) — tidak ada di union `Nos` (routers.ts
+    // API types), diomit sebagaimana vendor proprietary lain di batch ini.
+    uHeight: 1,
+    isFullDepth: true,
+    // §8.1 V (Hardware Installation Guide resmi §Weights and Physical
+    // Dimensions): 450x640x43.1mm. 40C (1U) dipilih atas 80C (2U) sebagai
+    // konfigurasi acuan (research §5).
+    chassisMm: { widthMm: 450, depthMm: 640 },
+    front: {
+      portZones: [
+        {
+          // Item #2 Figure 1 resmi: 40x QSFP28 100GE/40GE. Pola
+          // warna/behavior LED per-port QSFP28 detail UNVERIFIED (research §5).
+          ports: [{ type: 'qsfp28', count: 40 }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [
+            { type: 'mgmt-rj45', count: 1 },
+            { type: 'usb', count: 1 },
+            { type: 'console-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.12,
+        },
+      ],
+      // V, Hardware Installation Guide resmi §LED activity interpretation.
+      leds: [
+        { label: 'Power', color: 'green', position: 'left' },
+        { label: 'Status', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [
+        { type: 'psu-slot', count: 2 },
+        { type: 'fan-tray', count: 6 },
+      ],
+    },
+    // brand: derived — Extreme corporate identity ungu, chassis hitam standar.
+    brand: { accent: '#66218A', chassis: '#1C1C1C', label: 'Extreme', badge: 'stripe' },
+  },
+
+  // ── Ubiquiti UniFi Dream Machine Pro (UDM-Pro) ────────────────────────────
+  {
+    slug: 'ubiquiti-udm-pro',
+    manufacturer: 'Ubiquiti',
+    model: 'UDM-Pro',
+    uHeight: 1,
+    // §8.1 V (Datasheet resmi Ubiquiti dl.ubnt.com/ds/udm-pro.pdf):
+    // 442.4x285.6x43.7mm, chassis body (BUKAN 482,6mm lebar rail).
+    chassisMm: { widthMm: 442.4, depthMm: 285.6 },
+    front: {
+      portZones: [
+        {
+          // Bay HDD 3,5" internal untuk UniFi Protect NVR — router dengan
+          // drive bay, drive-lff dipakai sesuai keputusan leader.
+          ports: [{ type: 'drive-lff', count: 1 }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.16,
+        },
+        {
+          // LAN 8x GbE RJ45 + WAN 1x GbE RJ45; urutan pasti klaster kanan
+          // tak terkonfirmasi ke sumber (research §6.A), isi/jumlah V.
+          ports: [
+            { type: 'rj45', count: 8, label: 'LAN' },
+            { type: 'rj45', count: 1, label: 'WAN' },
+          ],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [
+            { type: 'sfp+', count: 1, label: 'LAN' },
+            { type: 'sfp+', count: 1, label: 'WAN' },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+      ],
+      // V, Datasheet resmi §LEDs.
+      leds: [
+        { label: 'Ethernet', color: 'green', position: 'left' },
+        { label: 'SFP+', color: 'white', position: 'left' },
+        { label: 'HDD', color: 'white', position: 'left' },
+      ],
+      hasLcd: true,
+      lcdPos: 'left', // layar LCM touchscreen 1.3" — V, datasheet resmi
+    },
+    rear: {
+      blocks: [{ type: 'iec-inlet' }], // internal AC/DC 50W, non-redundant fixed
+    },
+    // brand: derived — enclosure Aluminium CNC putih/abu terang khas UniFi
+    // (bahan V dari datasheet), hex pasti derived.
+    brand: { accent: '#0559C9', chassis: '#F5F5F5', label: 'Ubiquiti', badge: 'stripe' },
   },
 ];
 

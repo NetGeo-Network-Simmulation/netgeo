@@ -21,7 +21,7 @@ from app.api import device_types as dt
 # just needs to stay in sync so the parametrized test below is meaningful).
 _REAL_PACKS = {
     "olt": 11,
-    "routers": 7,
+    "routers": 12,
     "switches": 9,
     "firewalls": 11,
     "onu": 11,
