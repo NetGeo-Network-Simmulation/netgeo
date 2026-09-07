@@ -29,7 +29,7 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { Search, Plus, X, Waypoints } from 'lucide-react';
+import { Search, Plus, X, Waypoints, AlertTriangle } from 'lucide-react';
 import { DeviceNode, type DeviceNodeData } from './DeviceNode';
 import { PulseEdge } from './PulseEdge';
 import { ConnectionLine } from './ConnectionLine';
@@ -106,6 +106,10 @@ export function TopologyCanvas() {
   // (clearing focusNodeId first flipped the prop back and the late fit
   // overrode setCenter; QA round 2).
   const [suppressInitialFit] = useState(() => Boolean(useUiStore.getState().focusNodeId));
+  // Visible, non-blocking report for a failed auto-cable (Q4 bridge below) —
+  // same local-state + inline banner idiom Rack3DElevationPanel already uses
+  // for its own mutation errors, not a new toast system (ponytail).
+  const [cableError, setCableError] = useState<string | null>(null);
   useEffect(() => {
     if (!focusNodeId || !rfReady) return;
     const n = nodesMap.get(focusNodeId);
@@ -309,12 +313,13 @@ export function TopologyCanvas() {
         ifaceType(nodesMap, link.b_iface),
       );
       if (!media) return; // e.g. a wireless port — no sensible cable media
+      setCableError(null);
       void physicalApi
         .createCable({ project_id: link.project_id, link_id: link.id, media, length_m: 1 })
         .catch(() => {
           // Visible, not silent (D4 lesson: a no-op that looks like it worked
           // is a bug). The topology link already succeeded and stays either way.
-          window.alert(
+          setCableError(
             'Link topologi dibuat, tapi kabel fisik gagal dibuat otomatis. Tambahkan kabelnya manual di tampilan rak.',
           );
         });
@@ -525,6 +530,25 @@ export function TopologyCanvas() {
       >
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--ng-border)" />
         <Controls position="bottom-right" className="!border-fg/10 !bg-fg/5 backdrop-blur" />
+
+        {cableError && (
+          <Panel position="top-center" className="!m-3">
+            <div
+              role="alert"
+              className="flex items-center gap-1.5 rounded-lg border border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400 shadow-glass backdrop-blur"
+            >
+              <AlertTriangle size={13} className="shrink-0" />
+              {cableError}
+              <button
+                onClick={() => setCableError(null)}
+                aria-label="Dismiss"
+                className="ml-1 text-red-400/70 hover:text-red-400"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </Panel>
+        )}
 
         <Panel position="top-left" className="!m-3">
           <div className="flex flex-col gap-2">
