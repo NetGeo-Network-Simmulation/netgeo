@@ -362,6 +362,68 @@ async def test_patch_unknown_rack_is_404(client):
     assert resp.status_code == 404
 
 
+async def test_create_rack_with_outdoor_enclosure_profile(client):
+    # NG-PH3D outdoor-placement vocabulary: the new "outdoor-nema" value is
+    # legal the same way every indoor vendor profile already is.
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    rack = await client.post(
+        "/api/racks",
+        json={"project_id": pid, "name": "Cab1", "enclosure_profile": "outdoor-nema"},
+    )
+    assert rack.status_code == 201, rack.text
+    assert rack.json()["enclosure_profile"] == "outdoor-nema"
+
+
+# --- Node.mount (outdoor placement vocabulary, keputusan Surya 2026-09-06) --
+async def test_patch_node_mount_persists(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    node = (
+        await client.post(
+            "/api/nodes", json={"project_id": pid, "name": "rru1", "kind": "ap"}
+        )
+    ).json()
+    assert node["mount"] is None
+
+    patched = await client.patch(
+        f"/api/nodes/{node['id']}",
+        json={"mount": {"type": "pole", "height_agl_m": 12.5}},
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["mount"] == {"type": "pole", "height_agl_m": 12.5}
+
+    # persisted, not just echoed — a fresh read still shows it.
+    got = (await client.get(f"/api/nodes/{node['id']}")).json()
+    assert got["mount"] == {"type": "pole", "height_agl_m": 12.5}
+
+
+async def test_patch_node_invalid_mount_type_is_rejected(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    node = (
+        await client.post(
+            "/api/nodes", json={"project_id": pid, "name": "rru1", "kind": "ap"}
+        )
+    ).json()
+    resp = await client.patch(
+        f"/api/nodes/{node['id']}", json={"mount": {"type": "orbit"}}
+    )
+    assert resp.status_code == 422
+
+
+# --- Site.structure_type (outdoor placement vocabulary) ----------------------
+async def test_create_site_with_structure_type(client):
+    # Value is a free string on purpose — the structure taxonomy (guyed/
+    # self-support/monopole/rooftop) is still pending a research pass
+    # (netgeo-plan-outdoor-placement.md §4/§9), so nothing here asserts an
+    # enum of legal values.
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    resp = await client.post(
+        "/api/sites",
+        json={"project_id": pid, "name": "Tower-1", "structure_type": "tower"},
+    )
+    assert resp.status_code == 201, resp.text
+    assert resp.json()["structure_type"] == "tower"
+
+
 # --- move between racks + RU validation (NG-PH3D P2) -------------------------
 async def test_move_node_between_racks_in_same_site_persists(client):
     pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]

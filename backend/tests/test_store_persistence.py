@@ -75,6 +75,50 @@ async def test_legacy_node_without_device_type_id_field_still_loads(tmp_path):
     assert node.device_type_id is None
 
 
+async def test_legacy_node_and_site_without_outdoor_fields_still_load(tmp_path):
+    """A state.json written before the outdoor-placement vocabulary has no
+    `mount`/`structure_type` keys at all — must load fine, defaulting to None."""
+    state_file = tmp_path / "state.json"
+    state_file.write_text(
+        json.dumps(
+            {
+                "_projects": [{"id": "p1", "name": "Lab", "description": ""}],
+                "_sites": [{"id": "s1", "project_id": "p1", "name": "HQ"}],
+                "_nodes": [{"id": "n1", "project_id": "p1", "name": "Edge1"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    repo = MemoryRepository(state_path=state_file)
+
+    node = await repo.get_node("n1")
+    site = await repo.get_site("s1")
+    assert node.mount is None
+    assert site.structure_type is None
+
+
+async def test_node_mount_persists_across_restart(tmp_path):
+    state_file = tmp_path / "state.json"
+    repo1 = MemoryRepository(state_path=state_file)
+
+    proj = await repo1.create_project("Lab", "desc")
+    node = await repo1.add_node(
+        Node(
+            id="n1",
+            project_id=proj.id,
+            name="rru1",
+            mount={"type": "pole", "height_agl_m": 9.0},
+        )
+    )
+    assert node.mount.type == "pole"
+
+    repo2 = MemoryRepository(state_path=state_file)
+    got_node = await repo2.get_node(node.id)
+    assert got_node.mount.type == "pole"
+    assert got_node.mount.height_agl_m == 9.0
+
+
 async def test_state_file_is_atomic_and_0600(tmp_path):
     state_file = tmp_path / "state.json"
     repo = MemoryRepository(state_path=state_file)

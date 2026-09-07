@@ -146,6 +146,22 @@ class Radio(_Base):
     height_agl_m: float = 6.0
 
 
+class NodeMount(_Base):
+    """How an outdoor node without a rack is physically installed (outdoor
+    placement vocabulary, keputusan Surya 2026-09-06). Only meaningful when
+    ``Node.rack_id`` is ``None`` — a racked device's mounting is the rack
+    itself. ``type`` mirrors the non-rackmount `physical.form_factor` values
+    already used in device packs (`pole-mount`→pole, `wall-mount`→wall,
+    `strand-mount`→strand, `ceiling-mount`→ceiling), plus `ground` for a
+    ground-level outdoor cabinet/pedestal with no vertical structure. Purely
+    descriptive — no engine or rendering code reads this yet (that's a later
+    slice); it exists so the placement can be recorded today.
+    """
+
+    type: Literal["pole", "wall", "strand", "ground", "ceiling"]
+    height_agl_m: float | None = None
+
+
 class Node(_Base):
     id: str
     project_id: str
@@ -179,6 +195,11 @@ class Node(_Base):
     # only — never read by the sim engine (determinism contract untouched).
     # None for hand-built/legacy nodes; old topologies load fine without it.
     device_type_id: str | None = None
+    # Outdoor placement (no rack) description — pole/wall/strand/ground/
+    # ceiling + install height. None for every node today (rack-mounted or
+    # plain map/canvas placement); existing nodes predate this field and
+    # load as None.
+    mount: NodeMount | None = None
 
 
 class NodeCreate(_Base):
@@ -196,6 +217,7 @@ class NodeCreate(_Base):
     site_id: str | None = None
     intent: dict | None = None
     device_type_id: str | None = None
+    mount: NodeMount | None = None
 
 
 class NodeUpdate(_Base):
@@ -215,6 +237,7 @@ class NodeUpdate(_Base):
     site_id: str | None = None
     intent: dict | None = None
     device_type_id: str | None = None
+    mount: NodeMount | None = None
 
 
 class Link(_Base):
@@ -298,13 +321,32 @@ class Site(_Base):
     region: str = ""
     lat: float | None = Field(None, ge=-90, le=90)
     lon: float | None = Field(None, ge=-180, le=180)
+    # Physical classification of the site itself (outdoor placement
+    # vocabulary, keputusan Surya 2026-09-06 §3). Named `structure_type`, not
+    # `site_type`, precisely to avoid colliding with the *already existing*
+    # "Tower" concept elsewhere (Node kind='ap' + intent.map_role=='tower',
+    # RF planning on the map — see app/services/wireless.py — a completely
+    # different entity; leave it untouched). Deliberately a bare `str | None`
+    # instead of a locked enum: the structure taxonomy (guyed/self-support/
+    # monopole/rooftop, TIA-222 load classes) needs its own research pass
+    # before values are fixed (netgeo-plan-outdoor-placement.md §4/§9) — no
+    # height/size/model fields either, same reason. None == every site today
+    # (unchanged behaviour); existing sites predate this field and load as
+    # None.
+    structure_type: str | None = None
 
 
 # Enclosure look for the 2.5D physical-plant view (NG-PH3D P1). Keep this list
 # in sync with the `RACK_SPECS` keys in frontend/src/lib/three/rack3d.ts — that
 # file is the single source for what each profile looks like; this is only the
 # backend's validation of which keys are legal to persist.
-RackEnclosureProfile = Literal["apc", "dell", "hpe", "vertiv", "eaton", "rittal", "cpi"]
+#
+# "outdoor-nema" datasheet: Rittal TS 8 Type 3R weatherproof cabinet, SKU
+# 8608548, 600x800x2000mm (rittal.com product page, V) — see the matching
+# RACK_SPECS['outdoor-nema'] entry in rack3d.ts, kept in lock-step here.
+RackEnclosureProfile = Literal[
+    "apc", "dell", "hpe", "vertiv", "eaton", "rittal", "cpi", "outdoor-nema"
+]
 
 
 class Rack(_Base):
@@ -340,6 +382,7 @@ class SiteCreate(_Base):
     region: str = ""
     lat: float | None = Field(None, ge=-90, le=90)
     lon: float | None = Field(None, ge=-180, le=180)
+    structure_type: str | None = None
 
 
 class SiteUpdate(_Base):
@@ -349,6 +392,7 @@ class SiteUpdate(_Base):
     region: str | None = None
     lat: float | None = Field(None, ge=-90, le=90)
     lon: float | None = Field(None, ge=-180, le=180)
+    structure_type: str | None = None
 
 
 class RackCreate(_Base):
