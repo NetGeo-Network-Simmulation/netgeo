@@ -308,6 +308,21 @@ class CableMedia(str, Enum):
     gpon_drop = "gpon_drop"
 
 
+# Physical form of an outdoor structure (taxonomy research, tower-structure-
+# taxonomy.md). Three values only — each confirmed by both FCC Form 854
+# structure codes (MTOWER/LTOWER/GTOWER) and two independent Indonesian Perda
+# kota (Surakarta, Probolinggo): a single unjointed pole, a self-supporting
+# jointed-frame tower, and a guyed structure held by anchor cables.
+# Deliberately NOT in this enum: "rooftop"/"ground" (FCC models rooftop as a
+# Building+X combination, not its own structure code — see `mount_location`
+# below) and "camouflage" (Perda Surakarta explicitly calls it a "jenis lain",
+# orthogonal to these three forms — see `camouflage` below). Also deliberately
+# NOT here: TIA-222 Structure Class I/II/III — that classifies wind/seismic
+# load by service consequence, not physical form (a monopole and a lattice
+# tower can both be any class), so it does not belong in a form taxonomy.
+StructureType = Literal["monopole", "self-supporting-lattice", "guyed-mast"]
+
+
 class Site(_Base):
     """A building/location that holds racks (NG-PH-01).
 
@@ -326,14 +341,27 @@ class Site(_Base):
     # `site_type`, precisely to avoid colliding with the *already existing*
     # "Tower" concept elsewhere (Node kind='ap' + intent.map_role=='tower',
     # RF planning on the map — see app/services/wireless.py — a completely
-    # different entity; leave it untouched). Deliberately a bare `str | None`
-    # instead of a locked enum: the structure taxonomy (guyed/self-support/
-    # monopole/rooftop, TIA-222 load classes) needs its own research pass
-    # before values are fixed (netgeo-plan-outdoor-placement.md §4/§9) — no
-    # height/size/model fields either, same reason. None == every site today
-    # (unchanged behaviour); existing sites predate this field and load as
-    # None.
-    structure_type: str | None = None
+    # different entity; leave it untouched). Locked to `StructureType` above
+    # per the taxonomy research pass (netgeo-plan-outdoor-placement.md §4/§9,
+    # tower-structure-taxonomy.md). None == every site today (unchanged
+    # behaviour); existing sites predate this field and load as None.
+    structure_type: StructureType | None = None
+    # Where the structure sits — a placement, not a structure form (FCC models
+    # rooftop as Building+antenna/mast/pole/tower, not a form code; Perda
+    # Probolinggo Pasal 8(1) separates "green field" vs "roof top" the same
+    # way). Kept as a separate field rather than folded into `structure_type`.
+    mount_location: Literal["ground", "rooftop"] | None = None
+    # Design treatment applied on top of a monopole/lattice/guyed structure to
+    # blend it into its surroundings (Perda Surakarta Pasal 1(15): "Menara
+    # Kamuflase" is explicitly a "jenis lain", not a fourth structure form) —
+    # hence a boolean flag here, not a `structure_type` value.
+    camouflage: bool = False
+    # Structure height, metres AGL. Deliberately no per-type range/validation
+    # (e.g. "monopole 15-60m") — the taxonomy research found no authoritative
+    # standard/regulator source for such ranges, only vendor marketing blogs,
+    # which the project's sourcing rules exclude as fact (tower-structure-
+    # taxonomy.md §7). Free number, no bucketing.
+    height_agl_m: float | None = None
 
 
 # Enclosure look for the 2.5D physical-plant view (NG-PH3D P1). Keep this list
@@ -382,7 +410,10 @@ class SiteCreate(_Base):
     region: str = ""
     lat: float | None = Field(None, ge=-90, le=90)
     lon: float | None = Field(None, ge=-180, le=180)
-    structure_type: str | None = None
+    structure_type: StructureType | None = None
+    mount_location: Literal["ground", "rooftop"] | None = None
+    camouflage: bool = False
+    height_agl_m: float | None = None
 
 
 class SiteUpdate(_Base):
@@ -392,7 +423,10 @@ class SiteUpdate(_Base):
     region: str | None = None
     lat: float | None = Field(None, ge=-90, le=90)
     lon: float | None = Field(None, ge=-180, le=180)
-    structure_type: str | None = None
+    structure_type: StructureType | None = None
+    mount_location: Literal["ground", "rooftop"] | None = None
+    camouflage: bool | None = None
+    height_agl_m: float | None = None
 
 
 class RackCreate(_Base):

@@ -411,17 +411,57 @@ async def test_patch_node_invalid_mount_type_is_rejected(client):
 
 # --- Site.structure_type (outdoor placement vocabulary) ----------------------
 async def test_create_site_with_structure_type(client):
-    # Value is a free string on purpose — the structure taxonomy (guyed/
-    # self-support/monopole/rooftop) is still pending a research pass
-    # (netgeo-plan-outdoor-placement.md §4/§9), so nothing here asserts an
-    # enum of legal values.
+    # Locked to the 3-value taxonomy (tower-structure-taxonomy.md §6):
+    # monopole / self-supporting-lattice / guyed-mast.
     pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
     resp = await client.post(
         "/api/sites",
-        json={"project_id": pid, "name": "Tower-1", "structure_type": "tower"},
+        json={
+            "project_id": pid,
+            "name": "Tower-1",
+            "structure_type": "monopole",
+            "mount_location": "ground",
+            "camouflage": False,
+            "height_agl_m": 30.0,
+        },
     )
     assert resp.status_code == 201, resp.text
-    assert resp.json()["structure_type"] == "tower"
+    body = resp.json()
+    assert body["structure_type"] == "monopole"
+    assert body["mount_location"] == "ground"
+    assert body["camouflage"] is False
+    assert body["height_agl_m"] == 30.0
+
+
+async def test_create_site_with_invalid_structure_type_rejected(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    resp = await client.post(
+        "/api/sites",
+        json={"project_id": pid, "name": "Tower-1", "structure_type": "rooftop"},
+    )
+    assert resp.status_code == 422
+
+
+async def test_patch_site_structure_fields_round_trip(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site = (
+        await client.post("/api/sites", json={"project_id": pid, "name": "HQ"})
+    ).json()
+    resp = await client.patch(
+        f"/api/sites/{site['id']}",
+        json={
+            "structure_type": "self-supporting-lattice",
+            "mount_location": "rooftop",
+            "camouflage": True,
+            "height_agl_m": 45.5,
+        },
+    )
+    assert resp.status_code == 200, resp.text
+    got = (await client.get(f"/api/sites/{site['id']}")).json()
+    assert got["structure_type"] == "self-supporting-lattice"
+    assert got["mount_location"] == "rooftop"
+    assert got["camouflage"] is True
+    assert got["height_agl_m"] == 45.5
 
 
 # --- move between racks + RU validation (NG-PH3D P2) -------------------------
