@@ -4,12 +4,17 @@
  * (Select is the default direct-manipulation pointer; Link is a hint mode —
  * links are drawn by dragging between device ports). Group is reserved for a
  * later phase and is disabled so it never reads as a dead control.
+ *
+ * The topology workspace bleeds its canvas to x=0 (AppShell), so this dock
+ * uses `CHROME_INSET` instead of a plain `left-4` to clear the floating
+ * nav rail — same offset MapToolbar already uses for the same reason.
  */
 import { MousePointer2, Spline, Group as GroupIcon, Plus, Trash2 } from 'lucide-react';
 import { useTopoUiStore } from '@/store/topoUiStore';
 import { useTopologyStore } from '@/store/topologyStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { CHROME_INSET } from '@/theme/shell';
 
 export function TopologyToolbar() {
   const tool = useTopoUiStore((s) => s.tool);
@@ -22,7 +27,7 @@ export function TopologyToolbar() {
   const deleteLabel = selectedNodeId ? 'Delete device' : selectedLinkId ? 'Delete link' : 'Delete';
 
   return (
-    <div className={cn('pointer-events-auto absolute bottom-4 left-4 flex items-center gap-1', zc.workspace)}>
+    <div className={cn('pointer-events-auto absolute bottom-4 flex items-center gap-1', CHROME_INSET, zc.workspace)}>
       <div className="glass flex items-center gap-1 rounded-full border border-fg/12 p-1 shadow-glass">
         <button
           onClick={() => openPicker()}

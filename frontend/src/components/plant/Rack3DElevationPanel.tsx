@@ -30,6 +30,7 @@ import type { Rack } from '@/api/types';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiError } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
+import { CHROME_INSET_PL } from '@/theme/shell';
 import { cn } from '@/lib/cn';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
 import { loadBootAssets } from '@/lib/three/bootAssets';
@@ -990,7 +991,7 @@ export function Rack3DElevationPanel() {
   return (
     <div className="absolute inset-0 flex flex-col">
       {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-2">
+      <div className={cn('flex flex-wrap items-center gap-2 border-b border-fg/10 pr-3 py-2', CHROME_INSET_PL)}>
         {/* Create site / rack — moved here from the deleted 2D elevation
             panel, the only place these existed before. */}
         <button
@@ -1095,25 +1096,25 @@ export function Rack3DElevationPanel() {
       {/* Per-rack enclosure profile, one chip per rack actually shown —
           replaces the old fixed two-slot A/B picker row. */}
       {viewRacks.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-fg/10 px-3 py-1.5">
+        <div className={cn('flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-fg/10 pr-3 py-1.5', CHROME_INSET_PL)}>
           {viewRacks.map((r) => rackChip(r))}
         </div>
       )}
 
       {error && (
-        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400">
+        <div className={cn('flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 pr-3 py-1.5 text-xs text-red-400', CHROME_INSET_PL)}>
           <AlertTriangle size={13} /> {error}
         </div>
       )}
       {topoQ.isError && (
-        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400">
+        <div className={cn('flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 pr-3 py-1.5 text-xs text-red-400', CHROME_INSET_PL)}>
           <AlertTriangle size={13} /> Gagal memuat topologi project.
         </div>
       )}
 
       {/* NG-PH3D P3: over-length banner (GET /plant, over_length flag). */}
       {overLength.length > 0 && (
-        <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
+        <div className={cn('border-b border-amber-500/20 bg-amber-500/10 pr-3 py-1.5 text-xs text-amber-300', CHROME_INSET_PL)}>
           <div className="flex items-center gap-1 font-medium">
             <AlertTriangle size={13} /> Cable exceeds maximum length (link errored)
           </div>
@@ -1132,7 +1133,7 @@ export function Rack3DElevationPanel() {
           of losing it silently. Clicking one arms the "Pindahkan" bar below,
           the exact same place-a-device path P2 already shipped. */}
       {unplaced.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-fg/10 px-3 py-1.5 text-xs">
+        <div className={cn('flex flex-wrap items-center gap-1.5 border-b border-fg/10 pr-3 py-1.5 text-xs', CHROME_INSET_PL)}>
           <span className="text-fg-muted">Unplaced ({unplaced.length})</span>
           {unplaced.map((n) => (
             <button
@@ -1169,7 +1170,7 @@ export function Rack3DElevationPanel() {
           Node dari tray Unplaced (tanpa mesh, tak bisa di-drag) tetap pakai
           klik-untuk-tempatkan, sama seperti sebelumnya. */}
       {selNode && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-1.5 text-xs">
+        <div className={cn('flex flex-wrap items-center gap-2 border-b border-fg/10 pr-3 py-1.5 text-xs', CHROME_INSET_PL)}>
           <Move className="size-3.5 text-fg-muted" />
           <span className="text-fg">{selNode.name}</span>
           <span className="text-fg-muted">
@@ -1194,7 +1195,7 @@ export function Rack3DElevationPanel() {
       </div>
 
       {/* status bar + legend */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-fg/10 px-3 py-1.5 text-[11px] text-fg-muted">
+      <div className={cn('flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-fg/10 pr-3 py-1.5 text-[11px] text-fg-muted', CHROME_INSET_PL)}>
         <span className="text-fg">{status}</span>
         {/* NG-PH3D P3: watts/BTU for exactly the two racks shown — same
             nodeWatts()/wattsToBtu() the 2D panel's per-site rollup uses. */}

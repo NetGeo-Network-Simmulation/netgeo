@@ -75,12 +75,20 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
   const viewMode = useUiStore((s) => s.viewMode);
   const simMode = useLabStore((s) => s.mode) === 'simulation';
   const drawerHosted = viewMode === 'topology' || viewMode === 'map';
-  // Map/RF are the only workspaces whose canvas bleeds under the rail (design
-  // feedback 2026-07-27): both render MapView, whose tiles are infinitely
-  // pannable, so nothing real is ever lost under the rail chassis. Every
-  // other workspace (draggable topology nodes, plant/config/reports content)
-  // keeps the reserved-space contract below.
-  const bleed = viewMode === 'map' || viewMode === 'rf';
+  // Every primary workspace canvas bleeds under the rail instead of paying a
+  // fixed 120px reserved-space tax on its own left edge (design feedback
+  // 2026-07-27 for map/rf; broadened slice/ui-layout-consistency 2026-09-07
+  // after Surya reported plant/topology content sitting in a dead gap that
+  // never touched the viewport's left edge, worst at narrow tab widths where
+  // a fixed 120px slice is a large share of the available width). Map/RF
+  // tiles are infinitely pannable so nothing real is lost under the rail
+  // chassis; topology's canvas and plant's 3D scene are equally safe to
+  // bleed since their own left-anchored chrome (toolbars, status bar,
+  // inspector) compensates with `CHROME_INSET`/`CHROME_INSET_PL` — the same
+  // pattern map/rf already used. Config/reports/problems/projects are
+  // list/table-shaped, not canvases, and keep the simpler reserved-space
+  // contract below.
+  const bleed = viewMode === 'map' || viewMode === 'rf' || viewMode === 'plant' || viewMode === 'topology';
   useShortcuts();
 
   return (
@@ -102,11 +110,13 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
               own left offset becomes the containing block those descendants
               inherit, so every workspace clears the rail without each one
               hand-rolling its own offset.
-              Map/RF are the exception (v1.2.56): their wrapper bleeds to
-              `left-0` instead, so the map canvas itself renders behind the
-              rail (the rail floats over it) rather than starting at the
-              rail's right edge — the map's own left-anchored chrome
-              (toolbar, search box, …) compensates with `MAP_CHROME_INSET`
+              Map/RF/plant/topology are the exception (v1.2.56 for map/rf;
+              slice/ui-layout-consistency for plant/topology): their wrapper
+              bleeds to `left-0` instead, so the workspace canvas itself
+              renders behind the rail (the rail floats over it) rather than
+              starting at the rail's right edge — each workspace's own
+              left-anchored chrome (toolbar, search box, status bar, …)
+              compensates with `CHROME_INSET`/`CHROME_INSET_PL`
               (theme/shell.ts) so it stays visually put.
               BottomDrawer/SimulationDock live in a second, always-rail-inset
               wrapper below (not this one): the drawer is hosted on topology
@@ -203,8 +213,8 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
 
           {/* Second, always-rail-inset layer: BottomDrawer (topology/map) and
               SimulationDock (topology + running sim) must never render under
-              the rail, even when the workspace layer above bleeds for map/RF
-              — with the rail now vertically centered its lower half would
+              the rail, even when the workspace layer above bleeds — with the
+              rail now vertically centered its lower half would
               otherwise overlap the drawer region. `pointer-events-none` here
               so the wrapper's empty area never blocks clicks on the bled map
               beneath it; the drawer/dock re-enable `pointer-events-auto` on
