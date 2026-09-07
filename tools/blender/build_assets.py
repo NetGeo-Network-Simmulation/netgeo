@@ -22,10 +22,19 @@ endpoint with the tip at that point looks flush with the port.
 Scope (NG-PH3D 3a, hard boundary — see briefing): only dimension-VERIFIED
 parts are modelled with real numbers. QSFP-DD/XFP/FC/ST/MPO/E2000/IEC power
 connectors stay UNVERIFIED and are deliberately not built here.
+
+Outdoor placement track (Slice 5 + 7, see tower-structure-taxonomy.md memory):
+adds the outdoor NEMA cabinet + tower structure meshes. These use a DIFFERENT
+origin convention from the connector boots above — origin at the BASE centre
+(bottom face, X/Y centred), since a site sits this chassis/structure directly
+on the ground/pad rather than keying off a cable tip. Each part is still
+authored with its vertical extent along local Z (base at Z=0), so the same
++Y-up export rotation lands it upright with the base at Y=0.
 """
 import bpy
 import os
 import math
+from mathutils import Vector
 
 OUT_DIR = os.path.normpath(os.path.join(os.path.dirname(bpy.data.filepath or __file__), '..', '..', 'frontend', 'public', '3d'))
 
@@ -71,6 +80,25 @@ def frustum(name, r_top, r_bottom, sz, cz, sides=8):
     obj.name = name
     obj.rotation_euler = (0, 0, 0)
     bpy.ops.object.transform_apply(location=False, rotation=True, scale=True)
+    return obj
+
+
+def strut(name, p0, p1, thickness):
+    """A thin square-cross-section bar connecting world-space points p0 -> p1 (metres/units).
+    Generalises box() (which only ever spans vertically) to an arbitrary 3D edge — same
+    align-to-direction technique rack3d.ts already uses in three.js for cable tangents
+    (`Quaternion.setFromUnitVectors`). Used for lattice-tower legs and cross-bracing."""
+    p0v, p1v = Vector(p0), Vector(p1)
+    length = (p1v - p0v).length
+    mid = (p0v + p1v) / 2
+    bpy.ops.mesh.primitive_cube_add(size=1)
+    obj = bpy.context.object
+    obj.name = name
+    obj.scale = (thickness, thickness, length)
+    obj.location = mid
+    direction = (p1v - p0v).normalized()
+    obj.rotation_euler = Vector((0, 0, 1)).rotation_difference(direction).to_euler()
+    bpy.ops.object.transform_apply(location=True, rotation=True, scale=True)
     return obj
 
 
@@ -207,10 +235,119 @@ def build_rj11_cage():
     export_glb(outer, 'cage-rj11.glb')
 
 
+# ─── Outdoor NEMA cabinet (Slice 5, V — Rittal TS 8 Type 3R SKU 8608548, ────
+# rittal.com product page). 600(W) x 800(D) x 2000(H) mm — matches backend
+# RackEnclosureProfile['outdoor-nema'] in schemas.py and
+# RACK_SPECS['outdoor-nema'] in rack3d.ts; keep all three in sync.
+# Modelled as a thin-walled shell (same boolean-shell technique as the SFP/
+# QSFP/RJ11 cages above) plus a shallow door insert + handle on the front
+# (+Y) face for readability — ponytail: the simplest shape that still reads
+# as "outdoor cabinet" instead of a plain crate. No vents/hinges/lock
+# modelled (decorative trim, not dimension-sourced, not load-bearing for
+# identification). Origin at the BASE centre — see module docstring.
+def build_cabinet_outdoor():
+    clear_scene()
+    w, d, h = 0.6, 0.8, 2.0
+    wall = 0.01  # 10mm sheet-metal wall — proportional/decorative, not vendor-specified
+    outer = box('cabinet-outer', w, d, h, h)
+    inner = box('cabinet-inner', w - 2 * wall, d - 2 * wall, h - 2 * wall, h - wall)
+    mod = outer.modifiers.new('cut', 'BOOLEAN')
+    mod.operation = 'DIFFERENCE'
+    mod.object = inner
+    bpy.context.view_layer.objects.active = outer
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(inner, do_unlink=True)
+    outer.name = 'cabinet-shell'
+
+    door_w, door_h, door_t = w - 0.1, h - 0.2, 0.006
+    bpy.ops.mesh.primitive_cube_add(size=1)
+    door = bpy.context.object
+    door.name = 'cabinet-door'
+    door.scale = (door_w, door_t, door_h)
+    door.location = (0, d / 2 + door_t / 2, h / 2)
+    bpy.ops.object.transform_apply(location=True, scale=True)
+
+    handle_w, handle_d, handle_h = 0.02, 0.03, 0.25
+    bpy.ops.mesh.primitive_cube_add(size=1)
+    handle = bpy.context.object
+    handle.name = 'cabinet-handle'
+    handle.scale = (handle_w, handle_d, handle_h)
+    handle.location = (door_w / 2 - 0.05, d / 2 + door_t + handle_d / 2, h / 2)
+    bpy.ops.object.transform_apply(location=True, scale=True)
+
+    obj = join([outer, door, handle], 'cabinet-outdoor-nema')
+    add_material(obj, 'cabinet-steel', (0.275, 0.282, 0.247))  # matches RACK_SPECS frame 0x46483f
+    export_glb(obj, 'cabinet-outdoor.glb')
+
+
+# ─── Tower structures (Slice 7, tower-structure-taxonomy.md memory) ────────
+# NORMALIZED unit height (1.0) for every structure below — the taxonomy
+# research deliberately found NO authoritative (standard/regulator) height
+# range for any tower type, only vendor-blog numbers that are explicitly
+# excluded as a fact source. So these meshes carry no real-world dimension
+# claim; they are representative/derived silhouettes only, meant to be
+# rescaled by Site.tower.height_agl_m at render time. Only 3 structure_type
+# values exist (monopole/self-supporting-lattice/guyed-mast); guyed-mast
+# reuses one of these two pole/lattice meshes (its guy cables are a separate
+# line-render system, deliberately NOT modelled this slice). rooftop/
+# ground-mount/camouflage are placement/material attributes, not distinct
+# meshes (taxonomy §5) — no mesh is built for them.
+
+def build_monopole():
+    """Monopole tower (Perda Probolinggo §8(2)(c): round "tiang bundar" sub-shape). ponytail:
+    the simplest shape that still reads as a monopole is a single tapered cylinder, so it's
+    exactly that (reuses the frustum() helper already used for the RJ45/LC boots above)."""
+    clear_scene()
+    obj = frustum('tower-monopole', r_top=0.012, r_bottom=0.035, sz=1.0, cz=1.0, sides=12)
+    add_material(obj, 'tower-monopole-steel', (0.5, 0.5, 0.52))
+    export_glb(obj, 'tower-monopole.glb')
+
+
+def build_lattice_tower(legs, name, filename):
+    """Self-supporting lattice tower, generic (Perda Probolinggo §8(2)(a): kaki-4/kaki-3).
+    Stepped taper: N modules stacked, each module's footprint constant within itself and
+    narrower than the module below it (classic lattice "wedding-cake" silhouette) — legs are
+    straight verticals per module rather than continuously slanted, kept as the simplest
+    topology that still reads as a tapering lattice tower."""
+    clear_scene()
+    n_modules = 6
+    r_base, r_top = 0.06, 0.015
+    leg_w = 0.006
+    dz = 1.0 / n_modules
+    angles = [2 * math.pi * i / legs for i in range(legs)]
+    parts = []
+    for m in range(n_modules):
+        r = r_base + (r_top - r_base) * (m / (n_modules - 1))
+        z0, z1 = m * dz, (m + 1) * dz
+        corners = [(r * math.cos(a), r * math.sin(a)) for a in angles]
+        for i, (cx, cy) in enumerate(corners):
+            nx, ny = corners[(i + 1) % legs]
+            parts.append(strut(f'leg-{m}-{i}', (cx, cy, z0), (cx, cy, z1), leg_w))
+            parts.append(strut(f'ring-{m}-{i}', (cx, cy, z1), (nx, ny, z1), leg_w))
+            parts.append(strut(f'brace-{m}-{i}', (cx, cy, z0), (nx, ny, z1), leg_w))
+    obj = join(parts, name)
+    add_material(obj, f'{name}-steel', (0.5, 0.5, 0.52))
+    export_glb(obj, filename)
+
+
+def build_lattice4():
+    build_lattice_tower(4, 'tower-lattice4', 'tower-lattice4.glb')
+
+
+def build_lattice3():
+    # Optional per briefing ("buat hanya kalau murah") — build_lattice_tower() already
+    # parametrises leg count, so this costs one extra call, not new geometry code.
+    build_lattice_tower(3, 'tower-lattice3', 'tower-lattice3.glb')
+
+
 if __name__ == '__main__':
     build_rj45()
     build_lc()
     build_sfp_cage()
     build_qsfp_cage()
     build_rj11_cage()
+    build_cabinet_outdoor()
+    build_monopole()
+    build_lattice4()
+    build_lattice3()
     print('done')

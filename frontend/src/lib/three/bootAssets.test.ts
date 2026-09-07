@@ -90,4 +90,40 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     // must not be mistakable for the 8P8C rj45 body (0.01168 x 0.02875)
     expect(rj11Size.x).toBeLessThan(0.01168);
   });
+
+  // Slice 5: outdoor NEMA cabinet — loader-only as of this slice (not yet
+  // rendered into the scene, see build_cabinet_outdoor() in
+  // tools/blender/build_assets.py for the sourced 600x800x2000mm numbers).
+  it('outdoor cabinet parses and matches the Rittal TS 8 Type 3R footprint', async () => {
+    const loader = new GLTFLoader();
+    const buf = await nodeFetch('/3d/cabinet-outdoor.glb');
+    const gltf = await loader.parseAsync(buf, '');
+    const box = new THREE.Box3().setFromObject(gltf.scene);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    // 600(W) x 800(D) x 2000(H) mm == RACK_SPECS['outdoor-nema'] in rack3d.ts.
+    // Local Z (height, base at 0) -> exported Y; the door protrudes past the
+    // depth footprint by a few mm so depth (exported Z) isn't asserted here.
+    expect(size.x).toBeCloseTo(0.6, 1);
+    expect(size.y).toBeCloseTo(2.0, 1);
+    expect(box.min.y).toBeCloseTo(0, 2); // origin at the base, sits on the ground/pad
+  });
+
+  // Slice 7: tower structures — NORMALIZED unit height (1.0), no verified
+  // real-world tower height exists (tower-structure-taxonomy.md memory §7),
+  // so these are representative silhouettes rescaled by height_agl_m at
+  // render time, not a vendor dimension claim. Loader-only, not yet
+  // rendered (Slice 6).
+  it('tower structures parse at their normalized unit height', async () => {
+    const loader = new GLTFLoader();
+    for (const file of ['tower-monopole.glb', 'tower-lattice4.glb', 'tower-lattice3.glb']) {
+      const buf = await nodeFetch(`/3d/${file}`);
+      const gltf = await loader.parseAsync(buf, '');
+      const box = new THREE.Box3().setFromObject(gltf.scene);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      expect(size.y).toBeCloseTo(1.0, 1);
+      expect(box.min.y).toBeCloseTo(0, 2); // origin at the base
+    }
+  });
 });

@@ -11,7 +11,8 @@ Requires Blender 5.2.0 LTS (tested at `/usr/bin/blender`):
 blender --background --python tools/blender/build_assets.py
 ```
 
-Writes `frontend/public/3d/{boot-rj45,boot-lc,cage-sfp,cage-qsfp}.glb`. A few
+Writes `frontend/public/3d/{boot-rj45,boot-lc,cage-sfp,cage-qsfp,cage-rj11,
+cabinet-outdoor,tower-monopole,tower-lattice4,tower-lattice3}.glb`. A few
 non-fatal `ERROR`/`DeprecationWarning` lines about OCIO colour management,
 Draco, and MeshOptimizer are expected — none affect the exported geometry.
 
@@ -30,3 +31,12 @@ Every dimension modelled is sourced from
 `docs/design/24-DEVICE-PHYSICAL-SPEC.md` §2.a/§2.c — see the script's own
 module docstring for the exact citations and scope boundary (only
 dimension-verified parts are modelled with real numbers).
+
+The outdoor cabinet (Slice 5) uses a real, sourced footprint (Rittal TS 8
+Type 3R, 600x800x2000mm) — see `build_cabinet_outdoor()`. The tower
+structures (Slice 7, `build_monopole()`/`build_lattice_tower()`) are
+NORMALIZED to unit height (1.0) instead: no authoritative height range
+exists for any tower type (only vendor-blog numbers, excluded as a fact
+source — see the `tower-structure-taxonomy` memory note), so these meshes
+are representative silhouettes meant to be rescaled at render time, not a
+vendor dimension claim.
