@@ -39,10 +39,11 @@ import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
 import { useLabStore } from '@/store/labStore';
 import { useTopoUiStore, type OverlayKey } from '@/store/topoUiStore';
-import { nodesApi, linksApi } from '@/api/client';
+import { nodesApi, linksApi, physicalApi } from '@/api/client';
 import { placeDevice } from '@/lib/placeDevice';
+import { mediaForIfaceTypes } from '@/lib/cableMedia';
 import { linkStatusColors, nodeColors } from '@/theme/tokens';
-import type { LinkType, NodeModel } from '@/api/types';
+import type { IfaceType, LinkModel, LinkType, NodeModel } from '@/api/types';
 import { cn } from '@/lib/cn';
 
 const nodeTypes = { device: DeviceNode };
@@ -292,6 +293,35 @@ export function TopologyCanvas() {
     };
   }, [selectedNodeId, selectedLinkId, deleteNode, deleteLink, setDeleteSelected]);
 
+  /* --- Topology → physical bridge (Q4 QA 2026-09-07) -----------------------
+   * The reverse direction (patch a rack in Rack3DElevationPanel → link
+   * appears in topology) already ships. This closes the loop: a link made
+   * here also gets a matching physical Cable, IF both endpoints are already
+   * rack-mounted — a device with no rack placement has no port coordinate to
+   * anchor a cable to, so we skip it silently-successfully rather than
+   * create a dangling/broken Cable row. The Link itself never depends on
+   * this succeeding. */
+  const attachPhysicalCable = useCallback(
+    (link: LinkModel, aNode?: NodeModel, bNode?: NodeModel) => {
+      if (!aNode || !bNode || aNode.rack_id == null || bNode.rack_id == null) return;
+      const media = mediaForIfaceTypes(
+        ifaceType(nodesMap, link.a_iface),
+        ifaceType(nodesMap, link.b_iface),
+      );
+      if (!media) return; // e.g. a wireless port — no sensible cable media
+      void physicalApi
+        .createCable({ project_id: link.project_id, link_id: link.id, media, length_m: 1 })
+        .catch(() => {
+          // Visible, not silent (D4 lesson: a no-op that looks like it worked
+          // is a bug). The topology link already succeeded and stays either way.
+          window.alert(
+            'Link topologi dibuat, tapi kabel fisik gagal dibuat otomatis. Tambahkan kabelnya manual di tampilan rak.',
+          );
+        });
+    },
+    [nodesMap],
+  );
+
   /* --- Link creation ------------------------------------------------------- */
   // A completed handle→handle drag is the ONLY thing that creates a link. We
   // reject self-links and duplicates (an identical A↔B pair already present),
@@ -334,10 +364,11 @@ export function TopologyCanvas() {
         .then((real) => {
           removeLink(tempId);
           upsertLink(real);
+          attachPhysicalCable(real, nodesMap.get(conn.source!), nodesMap.get(conn.target!));
         })
         .catch(() => removeLink(tempId));
     },
-    [nodesMap, linksMap, upsertLink, removeLink, projectId],
+    [nodesMap, linksMap, upsertLink, removeLink, projectId, attachPhysicalCable],
   );
 
   /* --- Edge reconnect: drag endpoint of an existing edge to a new node ------ */
@@ -404,12 +435,17 @@ export function TopologyCanvas() {
         .then((real) => {
           removeLink(tempId);
           upsertLink(real);
+          attachPhysicalCable(
+            real,
+            nodesMap.get(newConnection.source!),
+            nodesMap.get(newConnection.target!),
+          );
         })
         .catch(() => {
           removeLink(tempId);
         });
     },
-    [nodesMap, linksMap, projectId, removeLink, upsertLink],
+    [nodesMap, linksMap, projectId, removeLink, upsertLink, attachPhysicalCable],
   );
 
   /* --- Drag-drop device creation from the palette -------------------------- */
@@ -679,4 +715,16 @@ function firstFreeIface(node?: NodeModel): string | null {
   // If no modeled interfaces yet (fresh node), use node id as a stand-in so the
   // optimistic edge renders; backend resolves the real interface on create.
   return free?.id ?? node.id;
+}
+
+/** Port type of a link endpoint, for deriving its physical cable media. */
+function ifaceType(nodes: Map<string, NodeModel>, ifaceId: string): IfaceType {
+  for (const n of nodes.values()) {
+    const iface = n.interfaces.find((i) => i.id === ifaceId);
+    if (iface) return iface.type;
+  }
+  // `ifaceId` is a node-id stand-in (see firstFreeIface) for an interface the
+  // backend hasn't created yet — it always auto-provisions a plain `ethN`
+  // (links.py `_resolve_endpoint`), so 'eth' is the correct value, not a guess.
+  return 'eth';
 }
