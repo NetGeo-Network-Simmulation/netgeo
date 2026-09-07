@@ -21,6 +21,7 @@ from app.models import (
     Cable,
     CableCreate,
     CableUpdate,
+    Node,
     Rack,
     RackCreate,
     RackUpdate,
@@ -29,7 +30,7 @@ from app.models import (
     SiteUpdate,
 )
 from app.services import notify
-from app.services.physical import plant_report
+from app.services.physical import plant_report, unracked_nodes_by_site
 from app.store import MemoryRepository
 from app.store import NotFound as StoreNotFound
 from app.utils.ids import new_id
@@ -170,4 +171,27 @@ async def project_plant(
             }
             for lid, eff in report.items()
         },
+        # Outdoor placement (Slice 3): nodes with a site but no rack, so the
+        # frontend's unracked-devices panel can list & edit their `mount`
+        # without needing a second endpoint.
+        "unracked_nodes": {
+            sid: [
+                {"id": n.id, "name": n.name, "mount": _mount_dict(n)}
+                for n in nodes
+            ]
+            for sid, nodes in unracked_nodes_by_site(topo).items()
+        },
     }
+
+
+def _mount_dict(n: Node) -> dict | None:
+    """``Node.mount`` as a plain dict, or ``None``.
+
+    ``MemoryRepository.update_node`` patches via ``model_copy`` (no
+    revalidation — see its own comment), so a PATCHed node's ``mount`` is
+    already a plain dict rather than a ``NodeMount`` instance; a freshly
+    created node's is a real model. Handle both instead of assuming one.
+    """
+    if n.mount is None:
+        return None
+    return n.mount.model_dump() if hasattr(n.mount, "model_dump") else n.mount

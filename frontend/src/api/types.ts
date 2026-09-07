@@ -64,6 +64,15 @@ export interface Uplink {
   mode: UplinkMode;
 }
 
+/** How an outdoor node without a rack is physically installed (outdoor
+ *  placement vocabulary, keputusan Surya 2026-09-06). Only meaningful when
+ *  `rack_id` is null — mirrors backend `NodeMount`. */
+export type NodeMountType = 'pole' | 'wall' | 'strand' | 'ground' | 'ceiling';
+export interface NodeMount {
+  type: NodeMountType;
+  height_agl_m: number | null;
+}
+
 /** Wireless radio parameters (mirrors backend Radio schema). Present on ap/cpe nodes. */
 export interface Radio {
   tx_power_dbm: number;
@@ -108,6 +117,10 @@ export interface NodeModel {
    *  rack faceplate render real pack port data instead of guessing. null for
    *  hand-built/legacy nodes. */
   device_type_id?: string | null;
+  /** Outdoor placement (no rack) description — pole/wall/strand/ground/
+   *  ceiling + install height. null for every node before this field existed
+   *  or for a racked/plain-canvas node. */
+  mount?: NodeMount | null;
 }
 
 /** A detected host network adapter (GET /api/system/interfaces). */
@@ -273,6 +286,10 @@ export type CableMedia =
   | 'coax'
   | 'gpon_drop';
 
+/** Physical form of an outdoor structure (mirrors backend `StructureType`).
+ *  Locked to 3 values — see schemas.py's own taxonomy comment. */
+export type StructureType = 'monopole' | 'self-supporting-lattice' | 'guyed-mast';
+
 /** A building/location that holds racks (NG-PH-01). `lat`/`lon` are optional —
  *  a site without coordinates simply never renders on the map. */
 export interface Site {
@@ -282,6 +299,14 @@ export interface Site {
   region: string;
   lat: number | null;
   lon: number | null;
+  /** Physical classification of the site itself (outdoor placement
+   *  vocabulary, keputusan Surya 2026-09-06). null == every site before this
+   *  field existed (unchanged behaviour). */
+  structure_type?: StructureType | null;
+  mount_location?: 'ground' | 'rooftop' | null;
+  camouflage?: boolean;
+  /** Structure height, metres AGL. Free number, no bucketing. */
+  height_agl_m?: number | null;
 }
 
 /** An RU-gridded rack inside a site (NG-PH-01). Devices are placed into it
@@ -314,6 +339,10 @@ export interface SiteCreate {
   region?: string;
   lat?: number | null;
   lon?: number | null;
+  structure_type?: StructureType | null;
+  mount_location?: 'ground' | 'rooftop' | null;
+  camouflage?: boolean;
+  height_agl_m?: number | null;
 }
 
 /** PATCH body — every field optional, only provided keys are applied. */
@@ -322,6 +351,10 @@ export interface SiteUpdate {
   region?: string;
   lat?: number | null;
   lon?: number | null;
+  structure_type?: StructureType | null;
+  mount_location?: 'ground' | 'rooftop' | null;
+  camouflage?: boolean;
+  height_agl_m?: number | null;
 }
 
 export interface RackCreate {
@@ -360,10 +393,21 @@ export interface PlantLink {
   over_media: CableMedia | null;
 }
 
-/** GET /api/projects/{id}/plant — per-link physical effects, keyed by link id. */
+/** One node listed in `PlantReport.unracked_nodes` — just enough to show &
+ *  edit its `mount` (Slice 3), not the full `NodeModel`. */
+export interface UnrackedNode {
+  id: string;
+  name: string;
+  mount: NodeMount | null;
+}
+
+/** GET /api/projects/{id}/plant — per-link physical effects, keyed by link id,
+ *  plus (Slice 3) nodes with a site but no rack, keyed by site id — the 2.5D
+ *  elevation only ever iterates racks, so these have nowhere else to show up. */
 export interface PlantReport {
   project_id: string;
   links: Record<string, PlantLink>;
+  unracked_nodes: Record<string, UnrackedNode[]>;
 }
 
 /* -------------------------------------------------------------------------- */
