@@ -5,16 +5,18 @@
  * links are drawn by dragging between device ports). Group is reserved for a
  * later phase and is disabled so it never reads as a dead control.
  *
- * The topology workspace bleeds its canvas to x=0 (AppShell), so this dock
- * uses `CHROME_INSET` instead of a plain `left-4` to clear the floating
- * nav rail — same offset MapToolbar already uses for the same reason.
+ * The topology workspace bleeds its canvas to x=0 (AppShell), and the
+ * floating nav rail is vertically centered (NavigationRail.tsx) — this dock
+ * sits at `bottom-4`, well outside the rail's vertical band, so it just
+ * needs a plain `left-4` margin (slice/ui-edge-fit, Surya QA 2026-09-07:
+ * this used to borrow `CHROME_INSET`'s 136px meant for chrome the rail
+ * actually floats over, leaving a dead gap at the left edge for no reason).
  */
 import { MousePointer2, Spline, Group as GroupIcon, Plus, Trash2 } from 'lucide-react';
 import { useTopoUiStore } from '@/store/topoUiStore';
 import { useTopologyStore } from '@/store/topologyStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
-import { CHROME_INSET } from '@/theme/shell';
 
 export function TopologyToolbar() {
   const tool = useTopoUiStore((s) => s.tool);
@@ -27,7 +29,7 @@ export function TopologyToolbar() {
   const deleteLabel = selectedNodeId ? 'Delete device' : selectedLinkId ? 'Delete link' : 'Delete';
 
   return (
-    <div className={cn('pointer-events-auto absolute bottom-4 flex items-center gap-1', CHROME_INSET, zc.workspace)}>
+    <div className={cn('pointer-events-auto absolute bottom-4 left-4 flex items-center gap-1', zc.workspace)}>
       <div className="glass flex items-center gap-1 rounded-full border border-fg/12 p-1 shadow-glass">
         <button
           onClick={() => openPicker()}
