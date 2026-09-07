@@ -16,7 +16,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from app.models import Cable, CableMedia, LinkStatus, Topology
+from app.models import Cable, CableMedia, LinkStatus, Node, Topology
 
 
 @dataclass(frozen=True)
@@ -90,6 +90,22 @@ def plant_report(topo: Topology) -> dict[str, LinkPhysical]:
     for c in topo.cables:
         by_link[c.link_id].append(c)
     return {lid: link_effects(cs) for lid, cs in by_link.items()}
+
+
+def unracked_nodes_by_site(topo: Topology) -> dict[str, list[Node]]:
+    """Nodes with a site but no rack (outdoor placement, keputusan Surya
+    2026-09-06 — ``Node.mount``), keyed by ``site_id``.
+
+    The 2.5D elevation view (``plantAdapter.ts``) only ever iterates
+    ``topo.racks``, so a node placed directly on a site (no rack) has never
+    rendered anywhere and had no UI to edit its ``mount``. This is the read
+    side of that gap — a plain per-site listing, not a 3D placement.
+    """
+    by_site: dict[str, list[Node]] = defaultdict(list)
+    for n in topo.nodes:
+        if n.rack_id is None and n.site_id is not None:
+            by_site[n.site_id].append(n)
+    return dict(by_site)
 
 
 def apply_physical(topo: Topology) -> Topology:

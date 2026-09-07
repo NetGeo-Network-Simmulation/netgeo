@@ -33,6 +33,7 @@ import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { cn } from '@/lib/cn';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
 import { loadBootAssets } from '@/lib/three/bootAssets';
+import { UnrackedDevicesPanel } from './UnrackedDevicesPanel';
 import {
   adaptTopology,
   cableLengthUpdatesForNode,
@@ -1125,6 +1126,16 @@ export function Rack3DElevationPanel() {
             </button>
           ))}
         </div>
+      )}
+
+      {/* Outdoor placement, Slice 3: nodes with this site but no rack —
+          nowhere in the 2.5D elevation to click on, so list + edit their
+          mount here instead of losing them silently. */}
+      {projectId && (
+        <UnrackedDevicesPanel
+          projectId={projectId}
+          nodes={plantQ.data?.unracked_nodes[viewSiteId] ?? []}
+        />
       )}
 
       {/* Perangkat terpilih (permintaan Surya, slice C): tidak ada lagi

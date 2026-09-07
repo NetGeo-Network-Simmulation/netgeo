@@ -409,6 +409,56 @@ async def test_patch_node_invalid_mount_type_is_rejected(client):
     assert resp.status_code == 422
 
 
+# --- unracked nodes per site (Slice 3: GET /plant unracked_nodes) -----------
+async def test_plant_report_lists_unracked_node_by_site(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site = (
+        await client.post("/api/sites", json={"project_id": pid, "name": "Tower A"})
+    ).json()
+    node = (
+        await client.post(
+            "/api/nodes", json={"project_id": pid, "name": "rru1", "kind": "ap"}
+        )
+    ).json()
+    # site_id set directly, no rack_id — the exact outdoor-placement shape.
+    await client.patch(
+        f"/api/nodes/{node['id']}",
+        json={"site_id": site["id"], "mount": {"type": "pole", "height_agl_m": 12.5}},
+    )
+
+    plant = (await client.get(f"/api/projects/{pid}/plant")).json()
+    assert plant["unracked_nodes"][site["id"]] == [
+        {"id": node["id"], "name": "rru1", "mount": {"type": "pole", "height_agl_m": 12.5}}
+    ]
+
+
+async def test_plant_report_excludes_racked_and_siteless_nodes(client):
+    pid = (await client.post("/api/projects", json={"name": "p"})).json()["id"]
+    site = (
+        await client.post("/api/sites", json={"project_id": pid, "name": "HQ"})
+    ).json()
+    rack = (
+        await client.post(
+            "/api/racks", json={"project_id": pid, "site_id": site["id"], "name": "R1"}
+        )
+    ).json()
+    racked = (
+        await client.post(
+            "/api/nodes", json={"project_id": pid, "name": "sw1", "kind": "switch"}
+        )
+    ).json()
+    await client.patch(
+        f"/api/nodes/{racked['id']}", json={"rack_id": rack["id"], "ru_start": 1}
+    )
+    # no site_id at all — a plain canvas node, not an outdoor placement.
+    await client.post(
+        "/api/nodes", json={"project_id": pid, "name": "canvas1", "kind": "router"}
+    )
+
+    plant = (await client.get(f"/api/projects/{pid}/plant")).json()
+    assert plant["unracked_nodes"] == {}
+
+
 # --- Site.structure_type (outdoor placement vocabulary) ----------------------
 async def test_create_site_with_structure_type(client):
     # Locked to the 3-value taxonomy (tower-structure-taxonomy.md §6):
