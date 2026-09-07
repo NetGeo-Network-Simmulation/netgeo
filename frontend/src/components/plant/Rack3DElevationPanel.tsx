@@ -33,6 +33,7 @@ import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { cn } from '@/lib/cn';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
 import { loadBootAssets } from '@/lib/three/bootAssets';
+import { mountElevationM, structureSpecFor } from '@/lib/three/outdoorPlacement';
 import { UnrackedDevicesPanel } from './UnrackedDevicesPanel';
 import {
   adaptTopology,
@@ -198,6 +199,24 @@ export function Rack3DElevationPanel() {
   // list). Only racks whose name collides with another rack's get the
   // site-name suffix — an unambiguous name stays plain.
   const siteNameById = useMemo(() => new Map(sites.map((s) => [s.id, s.name])), [sites]);
+  // Outdoor placement, Slice 6: the viewed site's own tower/mast (or
+  // nothing — no structure_type recorded, or a disguised rooftop install)
+  // plus its unracked nodes as simple markers. Both null/[] when the site
+  // has none, so buildScene's options stay a plain no-op for every site
+  // that predates this field.
+  const structureSpec = useMemo(() => {
+    const site = sites.find((s) => s.id === viewSiteId);
+    return site ? structureSpecFor(site) : null;
+  }, [sites, viewSiteId]);
+  const outdoorNodeMarkers = useMemo(
+    () =>
+      (plantQ.data?.unracked_nodes[viewSiteId] ?? []).map((n) => ({
+        id: n.id,
+        name: n.name,
+        y: mountElevationM(n.mount?.height_agl_m),
+      })),
+    [plantQ.data, viewSiteId],
+  );
   const rackLabel = useCallback((r: Rack) => {
     const dupe = racks.filter((x) => x.name === r.name).length > 1;
     if (!dupe) return r.name;
@@ -522,7 +541,12 @@ export function Rack3DElevationPanel() {
     // (NG-PH3D P41: 0 racks -> 0 enclosures, no scene at all — not the old
     // fixed-2-bay build that always drew a DEFAULT_ENCLOSURE ghost).
     if (adapted && adapted.racks.length > 0) {
-      const built = buildScene({ racks: adapted.racks, links });
+      const built = buildScene({
+        racks: adapted.racks,
+        links,
+        structure: structureSpec,
+        outdoorNodes: outdoorNodeMarkers,
+      });
       scene.add(built.root);
       builtRef.current = built;
       applyDoors(built.registry, view.current.doors);
@@ -547,7 +571,7 @@ export function Rack3DElevationPanel() {
     fitCamera();
     placeCamera();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adapted, links, fitCamera, placeCamera, assetsLoaded]);
+  }, [adapted, links, fitCamera, placeCamera, assetsLoaded, structureSpec, outdoorNodeMarkers]);
 
   /* ─── toggles: mirror React state into the scene ───────────────────────── */
   useEffect(() => {

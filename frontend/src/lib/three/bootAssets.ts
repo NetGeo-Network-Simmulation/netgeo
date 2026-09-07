@@ -9,8 +9,9 @@
  * A host component loads these once and rebuilds the scene after they
  * resolve; buildScene() falls back to its old procedural shape for any
  * family not yet cached (first paint, or a test that never calls
- * loadBootAssets()). The cabinet/tower families are loader-only as of
- * Slice 5/7 — not yet rendered into the scene (that's Slice 6).
+ * loadBootAssets()). The cabinet/tower families (Slice 5/7) have no
+ * procedural fallback of their own — outdoor-nema racks keep the generic
+ * rack frame and towers simply don't render until cached (Slice 6).
  */
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';

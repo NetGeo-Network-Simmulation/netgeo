@@ -12,7 +12,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { getBootGeometry, type BootFamily, type CageFamily } from './bootAssets';
+import { getBootGeometry, type BootFamily, type CageFamily, type StructureFamily } from './bootAssets';
 
 /* ─── Real-world geometry (EIA-310): 1U = 44.45 mm, 19" panel = 482.6 mm ─── */
 export const U = 0.04445;
@@ -470,13 +470,42 @@ export interface RackBay {
   ruHeight?: number;
 }
 
+/** The current site's own tower/mast (Slice 6) — `{family, scale}` as
+ *  computed by `outdoorPlacement.ts`'s `structureSpecFor()`. `buildScene`
+ *  stays free of `Site`'s real shape; the host resolves that. */
+export interface StructureSpec {
+  family: StructureFamily;
+  scale: number;
+}
+
+/** A node placed directly on the site (no rack) — Slice 6's minimum render:
+ *  just enough to place *something* at the node's real mount height, not a
+ *  faceplate/chassis (that needs a device pack, out of scope here). */
+export interface OutdoorNodeMarker {
+  id: string;
+  name: string;
+  /** World Y, metres — `mountElevationM()`'s output. */
+  y: number;
+}
+
 export interface BuildOptions {
   /** Left-to-right row of real racks, in display order. At least one —
    *  callers that have zero real racks to show should not call buildScene
    *  at all (NG-PH3D P41: an empty scene is "nothing built", not a scene
-   *  with zero bays). */
+   *  with zero bays). Slice 6: this still holds even for an outdoor site
+   *  with a tower and zero racks — `structure`/`outdoorNodes` only ever
+   *  render alongside a real rack row today, not standalone; a bare-tower
+   *  site (no racks at all) is a known gap, not yet handled. */
   racks: RackBay[];
   links: LinkDef[];
+  /** The viewed site's own structure mesh, or `undefined`/`null` for none
+   *  (no `structure_type` recorded, or a disguised rooftop install — see
+   *  `isHiddenStructure()`). Skipped if its GLB isn't loaded yet, same as
+   *  the outdoor cabinet swap below — no procedural fallback for towers. */
+  structure?: StructureSpec | null;
+  /** Nodes with this site but no rack (`Node.mount`) — rendered as simple
+   *  markers next to the structure, not real chassis geometry. */
+  outdoorNodes?: OutdoorNodeMarker[];
 }
 
 export interface BuiltScene {
@@ -624,6 +653,26 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const g = new THREE.Group();
     g.name = 'rack-' + key + '-' + specKey;
     g.position.set(x, 0, 0);
+
+    // Slice 6 (outdoor placement): 'outdoor-nema' has a real Blender-
+    // authored shell (cabinet-outdoor.glb, true 600x800x2000mm, base-centre
+    // origin — build_assets.py) instead of the generic procedural frame
+    // below. Swap to it once loaded; fall back to the procedural build
+    // otherwise (same loader-then-fallback convention bootAssets.ts already
+    // documents for the rj45/lc/cage families) so a scene built before
+    // loadBootAssets() resolves still renders something. `registry.racks`
+    // still carries the real w/d/h either way, so device RU placement
+    // inside this cabinet (buildDevice) is unaffected by which shell drew.
+    if (specKey === 'outdoor-nema') {
+      const cabGeo = getBootGeometry('cabinet-outdoor');
+      if (cabGeo) {
+        const shell = new THREE.Mesh(cabGeo, track(mat('cabinet-outdoor', s.frame, { roughness: 0.6, metalness: 0.2 })));
+        shell.name = 'cabinet-outdoor-shell';
+        g.add(shell);
+        registry.racks[key] = { group: g, spec: s, specKey, w, d, h, x };
+        return g;
+      }
+    }
 
     const frameMat = track(mat('frame-' + specKey, s.frame, { roughness: 0.5, metalness: 0.35 }));
     const postW = 0.024, postD = 0.05;
@@ -2130,6 +2179,42 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   rim.name = 'aisle-rim';
   rim.position.set(chanOf.get(bays[0]!.key)! - 0.9, trayY - 0.7, 1.5);
   root.add(rim);
+
+  // Slice 6 (outdoor placement): the viewed site's own tower/mast, drawn
+  // once at a fixed clearance left of the rack row — no real site layout/
+  // GPS position feeds this yet (ponytail: fixed offset, revisit once site
+  // placement matters for something other than "doesn't overlap the
+  // racks"). Skipped entirely if its GLB isn't loaded (no procedural
+  // fallback for structures — Surya's standing rule: geometry comes from
+  // Blender, not new three.js code).
+  const structureX = -(rowWidth / 2 + 2.5);
+  if (opts.structure) {
+    const structGeo = getBootGeometry(opts.structure.family);
+    if (structGeo) {
+      const structMesh = new THREE.Mesh(structGeo, track(mat('outdoor-structure', 0x7d7d80, { roughness: 0.55, metalness: 0.5 })));
+      structMesh.name = 'site-structure';
+      structMesh.scale.setScalar(opts.structure.scale);
+      structMesh.position.set(structureX, 0, 0);
+      root.add(structMesh);
+    }
+  }
+
+  // Nodes placed directly on the site (mount, no rack): Slice 6's minimum
+  // render is just a marker at the node's real install height next to the
+  // structure — not a faceplate/chassis (that needs a device pack, out of
+  // scope here). One shared geometry/material, one draw call regardless of
+  // count would need InstancedMesh; skipped for now since outdoor node
+  // counts are small (ponytail: revisit if that stops being true).
+  if (opts.outdoorNodes?.length) {
+    const markerGeo = track(new THREE.SphereGeometry(0.06, 10, 8));
+    const markerMat = track(mat('outdoor-node-marker', 0xf2c14e, { emissive: 0xf2c14e, emissiveIntensity: 0.5 }));
+    for (const n of opts.outdoorNodes) {
+      const marker = new THREE.Mesh(markerGeo, markerMat);
+      marker.name = 'outdoor-node-' + n.id;
+      marker.position.set(structureX, n.y, 0);
+      root.add(marker);
+    }
+  }
 
   return { root, registry, trayY, rowWidthM: rowWidth };
 }
