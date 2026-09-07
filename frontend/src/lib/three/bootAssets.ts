@@ -1,13 +1,16 @@
 /**
- * Loader for the Blender-authored connector assets (tools/blender/
- * build_assets.py -> frontend/public/3d/*.glb): cable-end boots (rj45/lc)
- * and device-faceplate port cages (sfp/qsfp/rj11). Kept out of rack3d.ts so
- * buildScene() itself never touches the network/filesystem — it stays a
- * pure, synchronous scene builder the rest of the app (and every existing
- * test) can keep calling the way it already does. A host component loads
- * these once and rebuilds the scene after they resolve; buildScene() falls
- * back to its old procedural shape for any family not yet cached (first
- * paint, or a test that never calls loadBootAssets()).
+ * Loader for the Blender-authored assets (tools/blender/build_assets.py ->
+ * frontend/public/3d/*.glb): cable-end boots (rj45/lc), device-faceplate
+ * port cages (sfp/qsfp/rj11), the outdoor NEMA cabinet, and generic tower
+ * structures (monopole/lattice — outdoor placement track, Slice 5 + 7).
+ * Kept out of rack3d.ts so buildScene() itself never touches the network/
+ * filesystem — it stays a pure, synchronous scene builder the rest of the
+ * app (and every existing test) can keep calling the way it already does.
+ * A host component loads these once and rebuilds the scene after they
+ * resolve; buildScene() falls back to its old procedural shape for any
+ * family not yet cached (first paint, or a test that never calls
+ * loadBootAssets()). The cabinet/tower families are loader-only as of
+ * Slice 5/7 — not yet rendered into the scene (that's Slice 6).
  */
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
@@ -15,7 +18,9 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 
 export type BootFamily = 'rj45' | 'lc';
 export type CageFamily = 'cage-sfp' | 'cage-qsfp' | 'cage-rj11';
-export type AssetFamily = BootFamily | CageFamily;
+export type EnclosureFamily = 'cabinet-outdoor';
+export type StructureFamily = 'tower-monopole' | 'tower-lattice4' | 'tower-lattice3';
+export type AssetFamily = BootFamily | CageFamily | EnclosureFamily | StructureFamily;
 
 const URLS: Record<AssetFamily, string> = {
   rj45: '/3d/boot-rj45.glb',
@@ -23,6 +28,10 @@ const URLS: Record<AssetFamily, string> = {
   'cage-sfp': '/3d/cage-sfp.glb',
   'cage-qsfp': '/3d/cage-qsfp.glb',
   'cage-rj11': '/3d/cage-rj11.glb',
+  'cabinet-outdoor': '/3d/cabinet-outdoor.glb',
+  'tower-monopole': '/3d/tower-monopole.glb',
+  'tower-lattice4': '/3d/tower-lattice4.glb',
+  'tower-lattice3': '/3d/tower-lattice3.glb',
 };
 
 const cache: Partial<Record<AssetFamily, THREE.BufferGeometry>> = {};
