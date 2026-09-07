@@ -10,7 +10,6 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Radio as RadioIcon } from 'lucide-react';
 import { nodesApi } from '@/api/client';
 import type { NodeMountType, UnrackedNode } from '@/api/types';
-import { CHROME_INSET_PL } from '@/theme/shell';
 import { cn } from '@/lib/cn';
 
 const MOUNT_TYPES: NodeMountType[] = ['pole', 'wall', 'strand', 'ground', 'ceiling'];
@@ -40,7 +39,7 @@ export function UnrackedDevicesPanel({
   if (nodes.length === 0) return null;
 
   return (
-    <div className={cn('border-b border-fg/10 pr-3 py-1.5 text-xs', CHROME_INSET_PL)} data-testid="unracked-devices-panel">
+    <div className="border-b border-fg/10 px-3 py-1.5 text-xs" data-testid="unracked-devices-panel">
       <div className="mb-1 flex items-center gap-1.5 text-fg-muted">
         <RadioIcon className="size-3.5" />
         Penempatan luar rak ({nodes.length})

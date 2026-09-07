@@ -83,11 +83,15 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
   // a fixed 120px slice is a large share of the available width). Map/RF
   // tiles are infinitely pannable so nothing real is lost under the rail
   // chassis; topology's canvas and plant's 3D scene are equally safe to
-  // bleed since their own left-anchored chrome (toolbars, status bar,
-  // inspector) compensates with `CHROME_INSET`/`CHROME_INSET_PL` — the same
-  // pattern map/rf already used. Config/reports/problems/projects are
-  // list/table-shaped, not canvases, and keep the simpler reserved-space
-  // contract below.
+  // bleed — the rail is vertically centered (NavigationRail.tsx), so only
+  // chrome actually sitting in its vertical band needs `CHROME_INSET`/
+  // `CHROME_INSET_PL` (theme/shell.ts); a fixed top/bottom bar (plant's
+  // toolbar/status rows, topology's bottom-left dock) sits outside that
+  // band and stays flush left instead (slice/ui-edge-fit, 2026-09-07 re-QA:
+  // the broadened fix above had applied the inset to those bars too, which
+  // is the dead-gap-on-the-left regression Surya then reported a second
+  // time). Config/reports/problems/projects are list/table-shaped, not
+  // canvases, and keep the simpler reserved-space contract below.
   const bleed = viewMode === 'map' || viewMode === 'rf' || viewMode === 'plant' || viewMode === 'topology';
   useShortcuts();
 
@@ -114,10 +118,12 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
               slice/ui-layout-consistency for plant/topology): their wrapper
               bleeds to `left-0` instead, so the workspace canvas itself
               renders behind the rail (the rail floats over it) rather than
-              starting at the rail's right edge — each workspace's own
-              left-anchored chrome (toolbar, search box, status bar, …)
+              starting at the rail's right edge — only the chrome that
+              actually sits in the rail's vertical band (map's tool column)
               compensates with `CHROME_INSET`/`CHROME_INSET_PL`
-              (theme/shell.ts) so it stays visually put.
+              (theme/shell.ts); chrome pinned to a fixed top/bottom edge
+              stays flush left instead, see theme/shell.ts for the full
+              contract.
               BottomDrawer/SimulationDock live in a second, always-rail-inset
               wrapper below (not this one): the drawer is hosted on topology
               AND map, so if it rode inside the bleed wrapper it would render
