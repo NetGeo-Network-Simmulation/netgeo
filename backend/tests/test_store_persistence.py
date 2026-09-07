@@ -55,6 +55,34 @@ async def test_node_device_type_id_persists_across_restart(tmp_path):
     assert got_node.device_type_id == "switches:cisco-c9300-48p-access"
 
 
+async def test_site_structure_fields_persist_across_restart(tmp_path):
+    """Slice 4: structure_type/mount_location/camouflage/height_agl_m survive
+    a save/reload, same pattern as device_type_id above."""
+    state_file = tmp_path / "state.json"
+    repo1 = MemoryRepository(state_path=state_file)
+
+    proj = await repo1.create_project("Lab", "desc")
+    site = await repo1.add_site(
+        Site(
+            id="s1",
+            project_id=proj.id,
+            name="Tower-1",
+            structure_type="guyed-mast",
+            mount_location="ground",
+            camouflage=True,
+            height_agl_m=60.0,
+        )
+    )
+    assert site.structure_type == "guyed-mast"
+
+    repo2 = MemoryRepository(state_path=state_file)
+    got_site = await repo2.get_site(site.id)
+    assert got_site.structure_type == "guyed-mast"
+    assert got_site.mount_location == "ground"
+    assert got_site.camouflage is True
+    assert got_site.height_agl_m == 60.0
+
+
 async def test_legacy_node_without_device_type_id_field_still_loads(tmp_path):
     """A state.json written before N4 has no `device_type_id` key at all on
     its node entries — must load fine, defaulting to None, not crash."""

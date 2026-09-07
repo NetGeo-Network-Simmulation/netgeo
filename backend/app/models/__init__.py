@@ -86,6 +86,7 @@ from app.models.schemas import (  # noqa: F401
     Site,
     SiteCreate,
     SiteUpdate,
+    StructureType,
     Topology,
     WirelessLink,
     WirelessPlanResult,
