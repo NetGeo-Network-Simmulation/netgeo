@@ -55,6 +55,11 @@ export const RACK_SPECS: Record<string, RackSpec> = {
   eaton: { label: 'Eaton RE 42U', u: 42, w: 600, d: 1000, h: 2000, frame: 0x393a3e, door: true, exit: 'side' },
   rittal: { label: 'Rittal TS IT 42U', u: 42, w: 600, d: 1000, h: 2000, frame: 0x4c4f52, door: true, exit: 'top' },
   cpi: { label: 'Chatsworth two-post 45U', u: 45, w: 500, d: 76, h: 2134, frame: 0x525356, door: false, exit: 'side' },
+  // Outdoor weatherproof cabinet (NG-PH3D outdoor-placement vocabulary) —
+  // Rittal TS 8 Type 3R, SKU 8608548, NEMA 3R rated, 600x800x2000mm
+  // (rittal.com product page, V). Matches backend
+  // RackEnclosureProfile['outdoor-nema'] in schemas.py — keep both in sync.
+  'outdoor-nema': { label: 'Rittal TS 8 Type 3R Outdoor (8608548)', u: 42, w: 600, d: 800, h: 2000, frame: 0x46483f, door: true, exit: 'top' },
 };
 
 /** A rack's real backend `ru_height` almost never matches its enclosure
