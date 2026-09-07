@@ -27,7 +27,7 @@ _REAL_PACKS = {
     "onu": 11,
     "wireless-ap": 11,
     "optical-transport": 7,
-    "cell-site": 3,
+    "cell-site": 10,
     "servers": 9,
 }
 

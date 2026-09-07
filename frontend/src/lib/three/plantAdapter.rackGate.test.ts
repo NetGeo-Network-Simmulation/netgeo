@@ -5,6 +5,8 @@
  * actually apply it — not just accept it as decoration.
  */
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { canPlaceDevice, canRackMount } from './plantAdapter';
 import type { RackBay } from './rack3d';
 
@@ -54,5 +56,36 @@ describe('canPlaceDevice form_factor gate', () => {
 
   it('still accepts a device with no form_factor at all (legacy data)', () => {
     expect(canPlaceDevice(bays, 'a', 1, 1, 42)).toBe(true);
+  });
+});
+
+/**
+ * Slice 8 (cell-site/RAN outdoor batch): proves the real pack data, not just
+ * the pure-function cases above, gates correctly — 6 outdoor RRU/AAU/O-RU
+ * SKUs rejected, the one rackmount DAS headend (SOLiD nBIU) accepted.
+ */
+describe('cell-site pack physical.form_factor (real data)', () => {
+  const packPath = path.join(
+    __dirname,
+    '../../../../network/devices/packs/cell-site/devices/cell-site.json',
+  );
+  const pack = JSON.parse(readFileSync(packPath, 'utf-8')) as {
+    devices: { id: string; physical?: { form_factor?: string } }[];
+  };
+  const byId = new Map(pack.devices.map((d) => [d.id, d.physical?.form_factor]));
+
+  it.each([
+    'benetel-ran650',
+    'airspan-airstrand-2200',
+    'samsung-mmu-mt6402-48a',
+    'mavenir-b12-4t4r-mr44ea',
+    'comba-cws-4240-71',
+    'parallel-wireless-crossfire-x2ru',
+  ])('rejects outdoor SKU %s from the rack', (id) => {
+    expect(canRackMount(byId.get(id))).toBe(false);
+  });
+
+  it('accepts the SOLiD nBIU (rackmount 19"/3U DAS headend)', () => {
+    expect(canRackMount(byId.get('solid-alliance-nbiu'))).toBe(true);
   });
 });

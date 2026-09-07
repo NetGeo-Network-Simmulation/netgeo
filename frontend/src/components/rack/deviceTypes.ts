@@ -3516,6 +3516,326 @@ export const DEVICE_TYPES: DeviceType[] = [
     // ada inspeksi foto produk sesi ini.
     brand: { accent: '#00A19A', chassis: '#1A1A1C', label: 'Edgecore', badge: 'stripe' },
   },
+
+  // ── Cell-site / RAN batch (research/3d-device-specs-cell-site.md) ─────────
+  // 6 dari 7 SKU adalah RRU/AAU/O-RU OUTDOOR (pole/wall/strand-mount), BUKAN
+  // rackmount — hanya SOLiD nBIU (headend DAS indoor) yang rackmount 19"/3U.
+  // `uHeight: 1` pada 6 SKU outdoor adalah penempatan shelf/dudukan NetGeo
+  // (keputusan leader), bukan klaim RU vendor. Konektor RF (N-type/4.3-10/
+  // F-type/DB-15/QMA) TIDAK punya padanan `PortType` — dihilangkan, dicatat
+  // per-SKU, menunggu tipe port dedicated (aturan Surya: port wajib sesuai
+  // standar). Gating rak (`canRackMount` di plantAdapter.ts) dikendalikan
+  // oleh `physical.form_factor` di pack JSON (cell-site.json), BUKAN oleh
+  // field di sini — `DeviceType` (file ini) tidak punya field form_factor.
+
+  // ── Benetel RAN650 (n78 O-RU) ─────────────────────────────────────────────
+  {
+    slug: 'benetel-ran650',
+    manufacturer: 'Benetel',
+    model: 'RAN650 (n78 O-RU)',
+    uHeight: 1,
+    // §8.1 V (cdn.prod.website-files.com PDF resmi Benetel, Rev 1.3): "Unit
+    // Dimensions (LxWxH): 310 x 310 x 108 mm".
+    chassisMm: { widthMm: 310, depthMm: 310 },
+    front: {
+      portZones: [
+        {
+          // V (PDF resmi Tabel 4): 2x SFP+ 10GbE fronthaul O-RAN split 7.2x
+          // (eCPRI berbasis Ethernet optik langsung, bukan CPRI legacy) —
+          // "hanya 1 dari 2 aktif di revisi HW saat ini", dicatat di label.
+          ports: [{ type: 'sfp+', count: 2, label: 'Fronthaul (1 aktif di HW rev ini)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        // 4x N-type (RF antena 4x4 MIMO) + 1x GPS SMA + 1x DC power 3-pin
+        // TIDAK direpresentasikan — nol padanan kosakata PortType.
+      ],
+      // LED UNVERIFIED total — datasheet 4 halaman penuh (General
+      // Description, Product Details, 4 tabel spesifikasi, Ordering Info)
+      // tidak punya satu pun bagian/tabel LED. Pola minimal generik dipakai
+      // sebagai gantinya (keputusan leader).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // V: DC -48V, 100W typical (tidak dipisah max)
+    },
+    // brand: UNVERIFIED total — datasheet nol foto produk berwarna/deskripsi
+    // chassis tekstual (pola sama Askey [[3d-device-specs-onu]] §8).
+    brand: { accent: '#707070', chassis: '#707070', label: 'Benetel', badge: 'stripe' },
+  },
+
+  // ── SOLiD ALLIANCE nBIU (DAS headend, rackmount) ──────────────────────────
+  {
+    slug: 'solid-alliance-nbiu',
+    manufacturer: 'SOLiD',
+    model: 'ALLIANCE nBIU (DAS Headend)',
+    uHeight: 3, // V eksplisit "3U" — satu-satunya klaim RU vendor di batch ini
+    // §8.1 V (solid.com PDF resmi Rev 1.0 Okt 2025): "482.6 x 132.5 x 455.0mm
+    // (19" X 3U X 455.0mm)".
+    chassisMm: { widthMm: 482.6, depthMm: 455.0 },
+    front: {
+      portZones: [
+        {
+          // V (tabel modul optik): hingga 16x LC/APC fiber (2x optical
+          // module 8-port maks) — konektor optik FIX pada modul, bukan cage
+          // SFP tukar-pasang, dipetakan `sfp` sebagai padanan terdekat
+          // (judgment call, dicatat di research).
+          ports: [{ type: 'sfp', count: 16, label: 'DAS Fiber (LC/APC fix)' }],
+          rows: 2,
+          align: 'fill',
+        },
+        {
+          ports: [
+            { type: 'mgmt-rj45', count: 1, label: 'MGMT' },
+            { type: 'usb', count: 1, label: 'MGMT (USB-A)' },
+          ],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.16,
+        },
+        // Hingga 32x QMA (RF UL/DL, dari maks 8x nMDBU) TIDAK direpresentasikan
+        // — nol padanan kosakata PortType.
+      ],
+      // V, tabel penuh dengan warna (Front Panel, Electrical Specifications).
+      leds: [
+        { label: 'nMDBU Power', color: 'green', position: 'left' },
+        { label: 'nMDBU Alarm', color: 'red', position: 'left' },
+        { label: 'nMCPU Power', color: 'green', position: 'left' },
+        { label: 'nMCPU Alarm', color: 'red', position: 'left' },
+        { label: 'nMCPU Link (berkedip = komunikasi)', color: 'green', position: 'left' },
+        { label: 'nMPSU Power', color: 'green', position: 'left' },
+        { label: 'nMPSU Alarm', color: 'amber', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: nMPSU redundant-capable, AC 800W atau DC -48V 700W kapasitas;
+      // konsumsi maksimum sistem aktual 400W full load (angka terpisah).
+      blocks: [{ type: 'psu-slot', count: 2 }],
+    },
+    // brand: UNVERIFIED total — PDF tidak menampilkan foto produk berwarna.
+    brand: { accent: '#707070', chassis: '#707070', label: 'SOLiD', badge: 'stripe' },
+  },
+
+  // ── Airspan AirStrand 2200 (AT22-N48-S, strand-mount) ─────────────────────
+  {
+    slug: 'airspan-airstrand-2200',
+    manufacturer: 'Airspan',
+    model: 'AirStrand 2200 (AT22-N48-S)',
+    uHeight: 1,
+    // §8.1 V (fccid.io mirror Installation Guide resmi Airspan, Table 6):
+    // "500 x 180 x 203mm (L x W x H)".
+    chassisMm: { widthMm: 180, depthMm: 500 },
+    front: {
+      // Satu-satunya SKU di batch ini dengan NOL port digital konvensional —
+      // interface tunggalnya adalah 1x konektor F-type (coax RF) yang
+      // membawa power DAN data (DOCSIS 3.1) sekaligus dari kabel CATV/HFC.
+      // F-type TIDAK punya padanan PortType (gap baru, beda dari N-type/QMA
+      // RF murni di SKU lain) — portZones sengaja kosong, bukan lupa.
+      portZones: [],
+      // V, tabel penuh dengan warna+state (Table 8 "System LED Function").
+      // "oranye" (major alarm) dipetakan `amber` — `Led.color` NetGeo tidak
+      // punya "orange" (judgment call, sama pola dengan Comba/Parallel
+      // Wireless di bawah). Backhaul LED (state/warna tidak dirinci) diomit.
+      leds: [
+        { label: 'System (powering up)', color: 'white', position: 'left' },
+        { label: 'System (software loading, kedip 3Hz)', color: 'green', position: 'left' },
+        { label: 'System (operasi normal)', color: 'blue', position: 'left' },
+        { label: 'System (critical alarm)', color: 'red', position: 'left' },
+        { label: 'System (major alarm)', color: 'amber', position: 'left' },
+      ],
+    },
+    rear: {
+      // V: <95W, sumber AC quasi-sine 44-89VAC via kabel HFC (power-over-
+      // coax) — bukan IEC/DC konvensional, psu-slot dipakai sbg placeholder.
+      blocks: [{ type: 'psu-slot', count: 1 }],
+    },
+    // brand: UNVERIFIED total — Installation Guide dokumen teknis murni.
+    brand: { accent: '#707070', chassis: '#707070', label: 'Airspan', badge: 'stripe' },
+  },
+
+  // ── Samsung MMU MT6402-48A (CBRS Massive MIMO AAU) ────────────────────────
+  {
+    slug: 'samsung-mmu-mt6402-48a',
+    manufacturer: 'Samsung',
+    model: 'MMU MT6402-48A (CBRS Massive MIMO)',
+    uHeight: 1,
+    // §8.1 V (fccid.io mirror Installation Manual resmi Samsung, Table 1):
+    // "16,1in (410mm) x 4,1in (102,9mm) x 34,1in (866mm)" — device SANGAT
+    // tinggi/sempit (rasio ~2,1:1), proporsional seperti panel antena
+    // vertikal, BUKAN kotak biasa (peringatan builder 3D dari research).
+    chassisMm: { widthMm: 410, depthMm: 102.9 },
+    front: {
+      portZones: [
+        {
+          // V (Table 1): "Fronthaul: CPRI (10 Gbps x 6 port, Duplex), eCPRI
+          // (HW ready)" — CPRI optik 10Gbps dipetakan `sfp+` (aproksimasi
+          // eksplisit, bukan klaim vendor identik dengan cage SFP+ fisik).
+          ports: [{ type: 'sfp+', count: 6, label: 'Fronthaul CPRI 10G (eCPRI HW-ready)' }],
+          rows: 2,
+          align: 'fill',
+        },
+        // 1x DC -48V power connector + 1x grounding point TIDAK
+        // direpresentasikan (bukan data port).
+      ],
+      // LED UNVERIFIED — field DIHILANGKAN. Manual 64 halaman: bagian "MMU
+      // External Interface" adalah figur yang tidak ter-OCR; nol tabel LED
+      // tekstual ditemukan. Pola minimal generik dipakai (keputusan leader).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // V: DC -48V (-38..-57V), LTE 700W / NR 750W @100%
+    },
+    // brand: UNVERIFIED total — manual instalasi teknis murni.
+    brand: { accent: '#707070', chassis: '#707070', label: 'Samsung', badge: 'stripe' },
+  },
+
+  // ── Mavenir B12 4T4R 160W RRH (MR44EA) ────────────────────────────────────
+  {
+    slug: 'mavenir-b12-4t4r-mr44ea',
+    manufacturer: 'Mavenir',
+    model: 'B12 4T4R 160W RRH (MR44EA)',
+    uHeight: 1,
+    // §8.1 V (fccid.io mirror Hardware Installation Manual resmi Mavenir):
+    // "Size: 400mm x 295mm x 144mm".
+    chassisMm: { widthMm: 400, depthMm: 295 },
+    front: {
+      portZones: [
+        {
+          // V (manual resmi): "Two fronthaul optical SFP ports capable of
+          // supporting 10G and 25G Ethernet, O-RAN-compliant fronthaul" —
+          // dual-rate 10G/25G dipetakan `sfp28` sbg kapabilitas tertinggi
+          // (aproksimasi eksplisit, port bisa berjalan di 10G tergantung
+          // konfigurasi jaringan).
+          ports: [{ type: 'sfp28', count: 2, label: 'Fronthaul O-RAN (dual-rate 10G/25G)' }],
+          rows: 1,
+          align: 'fill',
+        },
+        // RF 4x4 MIMO (tipe konektor UNVERIFIED) + 1x AISG v3.0 + 4x
+        // dry-contact alarm + DC IN/GND TIDAK direpresentasikan.
+      ],
+      // LED UNVERIFIED total — manual instalasi 24 halaman fokus prosedur
+      // mounting fisik/kabel, nol bagian/tabel LED. Pola minimal generik
+      // dipakai (keputusan leader).
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: {
+      // V: DC -48V input. Konsumsi listrik (watt) UNVERIFIED — manual hanya
+      // sebut "40W per port" TX RF output, BUKAN konsumsi daya elektrik.
+      blocks: [{ type: 'psu-slot', count: 1 }],
+    },
+    // brand: UNVERIFIED total — manual instalasi teknis murni.
+    brand: { accent: '#707070', chassis: '#707070', label: 'Mavenir', badge: 'stripe' },
+  },
+
+  // ── Comba CWS-4240-71 (High Power RRH, Band 71) ───────────────────────────
+  {
+    slug: 'comba-cws-4240-71',
+    manufacturer: 'Comba',
+    model: 'CWS-4240-71 (B71 RRH)',
+    uHeight: 1,
+    // §8.1 V (fccid.io mirror User Guide resmi Comba, Table 2.6.1.1):
+    // "400mm x 300mm x 126mm" — urutan sumbu L×W×H V(2nd)/interpretasi
+    // (kolom tabel sumber sendiri ambigu, dicatat di research), ketiga
+    // angka mentahnya V.
+    chassisMm: { widthMm: 300, depthMm: 126 },
+    front: {
+      portZones: [
+        {
+          // V (Table 1.3.1): OP1/OP2, masing-masing 10GE eCPRI fronthaul
+          // (cage SFP+ fisik, bukan estimasi).
+          ports: [{ type: 'sfp+', count: 2, label: 'OP1/OP2 Fronthaul eCPRI (10GE)' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.5,
+        },
+        {
+          // V (Table 1.3.1): "DEBUG/OMT" Mini-USB, "Ethernet interface for
+          // LMT" — dipetakan `console-usb` sbg padanan terdekat meski
+          // teknisnya Ethernet-over-USB, bukan serial console murni
+          // (judgment call, dicatat di research).
+          ports: [{ type: 'console-usb', count: 1, label: 'DEBUG/OMT (LMT)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.15,
+        },
+        // Sisi bawah (Table 1.3.2), SEMUA RF/antena, TIDAK direpresentasikan
+        // — tipe konektor eksak tercatat di research utk builder 3D masa
+        // depan: ANT1/ANT2 = 4.3-10 (female) x2, GPS = N-type (female) x1,
+        // AISG/MON = DB-15 x1. **SKU paling terdampak gap konektor RF di
+        // batch ini** — 4 konektor eksak tak satupun terwakili di faceplate.
+      ],
+      // V, tabel PALING LENGKAP di batch ini (Table 1.3.3: warna + pola
+      // kedip presisi Hz). "oranye" dipetakan `amber` (judgment call, sama
+      // seperti Airspan/Parallel Wireless).
+      leds: [
+        { label: 'PWR', color: 'green', position: 'left' },
+        { label: 'RUN/ALM (operasi normal)', color: 'green', position: 'left' },
+        { label: 'RUN/ALM (alarm)', color: 'amber', position: 'left' },
+        { label: 'ACT (PA normal)', color: 'green', position: 'left' },
+        { label: 'VSWR (alarm terdeteksi)', color: 'green', position: 'left' },
+        { label: 'OP1 (link normal)', color: 'green', position: 'left' },
+        { label: 'OP2 (link normal)', color: 'green', position: 'left' },
+      ],
+    },
+    rear: {
+      blocks: [{ type: 'psu-slot', count: 1 }], // V: DC -48V (-36..-57V), typical 200W / max 297W
+    },
+    // brand: UNVERIFIED total — User Guide diagram garis, bukan foto produk.
+    brand: { accent: '#707070', chassis: '#707070', label: 'Comba', badge: 'stripe' },
+  },
+
+  // ── Parallel Wireless CrossFire X2RU (DRRU-R428) ──────────────────────────
+  {
+    slug: 'parallel-wireless-crossfire-x2ru',
+    manufacturer: 'Parallel Wireless',
+    model: 'CrossFire X2RU (DRRU-R428)',
+    uHeight: 1,
+    // chassisMm DIHILANGKAN (UNVERIFIED, keputusan leader) — User Manual FCC
+    // yang ditemukan murni prosedur radio setup/GUI, nol bagian dimensi
+    // fisik/berat sama sekali (beda dari SKU RAN lain di batch ini yang
+    // datang dari installation guide fisik).
+    front: {
+      portZones: [
+        {
+          // V (Table 1-1): OPS/OPM, manual eksplisit "use 10G port & SFP+
+          // module" — dipetakan `sfp28` sbg kapabilitas kelas 10G/25G modern
+          // (aproksimasi eksplisit, sama pola dengan Mavenir di atas).
+          ports: [{ type: 'sfp28', count: 2, label: 'OPS/OPM Fronthaul eCPRI' }],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.5,
+        },
+        {
+          // Akses maintenance via GUI IP (https://10.7.3.200) — konektor
+          // fisik RJ45 TIDAK disebut eksplisit di manual, dipetakan
+          // `mgmt-rj45` berdasarkan inferensi (judgment call, dicatat di
+          // research), bukan kepastian tekstual.
+          ports: [{ type: 'mgmt-rj45', count: 1, label: 'DEBUG (inferensi)' }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.2,
+        },
+        // CH1-CH4 (RF 4x4 MIMO, konektor UNVERIFIED) + ALARM + RET
+        // (reserved) + POWER + GND TIDAK direpresentasikan.
+      ],
+      // V, dua tabel terpisah (Table 1-2 Optical Indicator + Table 1-3
+      // System Run Indicator). "oranye" dipetakan `amber` (judgment call).
+      leds: [
+        { label: 'OPS Optical (normal)', color: 'green', position: 'left' },
+        { label: 'OPM Optical (normal)', color: 'green', position: 'left' },
+        { label: 'System Run (bekerja, tanpa alarm)', color: 'green', position: 'left' },
+        { label: 'System Run (bekerja, dengan alarm)', color: 'red', position: 'left' },
+        { label: 'System Run (upgrading software)', color: 'amber', position: 'left' },
+      ],
+    },
+    rear: {
+      // Power UNVERIFIED total — manual fokus konfigurasi software, nol
+      // voltase input/konsumsi watt disebut. psu-slot generik sbg placeholder.
+      blocks: [{ type: 'psu-slot', count: 1 }],
+    },
+    // brand: UNVERIFIED total — manual GUI/konfigurasi murni.
+    brand: { accent: '#707070', chassis: '#707070', label: 'Parallel Wireless', badge: 'stripe' },
+  },
 ];
 
 // ─── Resolve helpers ──────────────────────────────────────────────────────────
