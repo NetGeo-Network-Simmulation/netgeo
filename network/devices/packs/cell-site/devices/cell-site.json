@@ -239,6 +239,408 @@
         "fronthaul": "integrated"
       },
       "datasheet_note": "FWA/small-cell budget untuk last-mile rural; bukan macro RAN."
+    },
+    {
+      "id": "benetel-ran650",
+      "display_name": "Benetel RAN650 (n78 O-RU)",
+      "vendor": "Benetel",
+      "vendor_options": [
+        "Benetel"
+      ],
+      "kind": "router",
+      "subcategory": "cell-site",
+      "tags": [
+        "5g",
+        "nr",
+        "o-ran",
+        "split-7.2x",
+        "outdoor-rru",
+        "n78",
+        "private-network"
+      ],
+      "icon": {
+        "name": "cell-site-small",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ran-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "fronthaul-sfp{n}",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "fronthaul-O-RAN-7.2x",
+          "note": "hanya 1 dari 2 aktif di revisi HW saat ini; CPRI/eCPRI dipetakan sfp sbg aproksimasi (eCPRI berbasis Ethernet optik langsung)"
+        }
+      ],
+      "power": {
+        "typical_w": 100,
+        "max_w": null,
+        "psu": "single (integrated, DC feed)",
+        "feed": "DC-48V"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "pole-mount"
+      },
+      "datasheet_note": "RAN650 n78 O-RU: outdoor IP65, encased enclosure (BUKAN rackmount); TX +37dBm/antenna (hingga 5W), 4x4 MIMO via antena eksternal (4x N-type female — tak ada padanan tipe pack), GPS (1x SMA — tak ada padanan), sync GPS+IEEE-1588v2 PTP, suhu operasi -33~+55C. Datasheet tak spesifik pole vs wall — form_factor pole-mount dipilih sbg representasi non-rack tunggal. cdn.prod.website-files.com PDF resmi Benetel Rev 1.3."
+    },
+    {
+      "id": "solid-alliance-nbiu",
+      "display_name": "SOLiD ALLIANCE nBIU (DAS Headend)",
+      "vendor": "SOLiD",
+      "vendor_options": [
+        "SOLiD"
+      ],
+      "kind": "router",
+      "subcategory": "cell-site",
+      "tags": [
+        "das",
+        "neutral-host",
+        "multi-operator",
+        "das-headend",
+        "rackmount-19in",
+        "600mhz-4000mhz",
+        "c-band",
+        "indoor-outdoor-coverage"
+      ],
+      "icon": {
+        "name": "cell-site",
+        "emoji": "🗼"
+      },
+      "nos": [
+        "ran-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "optic-lc{n}",
+          "count": 16,
+          "type": "sfp",
+          "speed_mbps": null,
+          "role": "das-fiber-transport",
+          "note": "LC/APC fixed, bukan cage SFP tukar-pasang; 2x optical module 8-port maks"
+        },
+        {
+          "pattern": "mgmt-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": 1000,
+          "role": "management"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": 400,
+        "psu": "redundant-capable (nMPSU, AC 800W atau DC 700W capacity)",
+        "feed": "AC110/220V-or-DC-48V (dual-option)"
+      },
+      "physical": {
+        "ru": 3,
+        "form_factor": "rackmount"
+      },
+      "datasheet_note": "nBIU: rackmount 19in/3U (satu-satunya SKU rackmount di batch cell-site ini — headend DAS indoor, bukan radio outdoor), berat total maks ~28kg fully loaded; kompatibel REL6 remote units (eROU<1W, N2ROU 2W, MROU 5W, HROU 20W, MPROU 5-20W); band FDD 700/850/1900/AWS/2600 + TDD 3450-3980MHz (34_CA/C-band); hingga 8x nMDBU per chassis; 1x USB-A management + hingga 32x QMA RF (UL/DL) tidak punya tipe pack. solid.com PDF resmi Rev 1.0 Okt 2025."
+    },
+    {
+      "id": "airspan-airstrand-2200",
+      "display_name": "Airspan AirStrand 2200 (AT22-N48-S)",
+      "vendor": "Airspan",
+      "vendor_options": [
+        "Airspan"
+      ],
+      "kind": "router",
+      "subcategory": "cell-site",
+      "tags": [
+        "5g",
+        "nr",
+        "cbrs",
+        "n48",
+        "small-cell",
+        "strand-mount",
+        "hfc-powered",
+        "docsis-3.1-backhaul",
+        "cable-operator"
+      ],
+      "icon": {
+        "name": "cell-site-small",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ran-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [],
+      "power": {
+        "typical_w": null,
+        "max_w": 95,
+        "psu": "single (power-over-coax dari jaringan HFC)",
+        "feed": "AC-quasi-sine-44-89VAC-via-coax"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "strand-mount"
+      },
+      "datasheet_note": "AirStrand 2200 (AT22-N48-S): satu-satunya SKU batch ini dengan nol port digital konvensional — interface tunggal 1x konektor F-type (coax RF) membawa power+data DOCSIS3.1 sekaligus, tak punya padanan tipe pack (ports kosong dengan sengaja). Dipasang menggantung di kabel strand HFC/CATV. Antena dual-sector dual 2x2 SBA, EIRP maks 44,5dBm (single)/42,5dBm (dual), operasi -40~+60C, IP65/IP67. fccid.io mirror Installation Guide resmi Airspan P/N DUG01287 Rev A2 Okt 2021."
+    },
+    {
+      "id": "samsung-mmu-mt6402-48a",
+      "display_name": "Samsung MMU MT6402-48A (CBRS Massive MIMO)",
+      "vendor": "Samsung",
+      "vendor_options": [
+        "Samsung"
+      ],
+      "kind": "router",
+      "subcategory": "cell-site",
+      "tags": [
+        "cbrs",
+        "5g-nr-ready",
+        "lte",
+        "massive-mimo",
+        "64t64r",
+        "aau",
+        "pole-mount",
+        "wall-mount",
+        "cpri"
+      ],
+      "icon": {
+        "name": "cell-site",
+        "emoji": "🗼"
+      },
+      "nos": [
+        "ran-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "cpri-sfp{n}",
+          "count": 6,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "fronthaul-CPRI",
+          "tech": "CPRI 10Gbps duplex (eCPRI HW-ready, belum aktif); dipetakan sfp sbg aproksimasi optik CPRI/eCPRI"
+        }
+      ],
+      "power": {
+        "typical_w": 700,
+        "max_w": 750,
+        "psu": "single (integrated, DC feed)",
+        "feed": "DC-48V"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "pole-mount"
+      },
+      "datasheet_note": "MT6402-48A: instalasi Pole mount ATAU Wall mount (keduanya eksplisit di Installation Manual — form_factor pole-mount dipilih sbg representasi non-rack tunggal); IBW/OBW 150/60MHz, 64T64R 128 elemen antena, 12W/47dBm-EIRP-per-10MHz, IP65; 1x DC -48V power connector + 1x grounding point tidak punya tipe pack. fccid.io mirror Installation Manual resmi Samsung Electronics v1.0 2019."
+    },
+    {
+      "id": "mavenir-b12-4t4r-mr44ea",
+      "display_name": "Mavenir B12 4T4R 160W RRH (MR44EA)",
+      "vendor": "Mavenir",
+      "vendor_options": [
+        "Mavenir"
+      ],
+      "kind": "router",
+      "subcategory": "cell-site",
+      "tags": [
+        "lte",
+        "band12",
+        "fdd",
+        "4t4r",
+        "rrh",
+        "o-ran",
+        "wall-mount",
+        "pole-mount",
+        "openbeam-family"
+      ],
+      "icon": {
+        "name": "cell-site-small",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ran-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "fronthaul-sfp{n}",
+          "count": 2,
+          "type": "sfp28",
+          "speed_mbps": 25000,
+          "role": "fronthaul-O-RAN",
+          "note": "dual-rate 10G/25G Ethernet, port bisa dikonfigurasi jalan di 10G"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "single (integrated, DC feed)",
+        "feed": "DC-48V"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "wall-mount"
+      },
+      "datasheet_note": "B12 4T4R (MR44EA): FCC ID 2AWAS-910-00085, wall mounting (back/side) via bracket radio+bracket pole; Band 12 (3GPP), TX 729-745MHz/RX 699-715MHz, FDD, 4x4 MIMO dual TRX, 40W per port TX RF output (BUKAN konsumsi listrik — konsumsi watt UNVERIFIED, tidak digabung keliru); RF 4x4 MIMO (konektor UNVERIFIED) + 1x AISG v3.0 + 4x dry-contact alarm tidak punya tipe pack. fccid.io mirror Hardware Installation Manual resmi Mavenir Systems Inc v1.0 2021."
+    },
+    {
+      "id": "comba-cws-4240-71",
+      "display_name": "Comba CWS-4240-71 (B71 RRH)",
+      "vendor": "Comba",
+      "vendor_options": [
+        "Comba"
+      ],
+      "kind": "router",
+      "subcategory": "cell-site",
+      "tags": [
+        "lte",
+        "band71",
+        "600mhz",
+        "fdd",
+        "2t2r",
+        "4t4r",
+        "rrh",
+        "o-ran",
+        "ecpri",
+        "pole-mount",
+        "wall-mount"
+      ],
+      "icon": {
+        "name": "cell-site-small",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ran-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "fronthaul-op{n}",
+          "count": 2,
+          "type": "sfp",
+          "speed_mbps": 10000,
+          "role": "fronthaul-eCPRI-to-BBU-or-cascade",
+          "note": "OP1=ke BBU, OP2=cascade ke RRH lain; protokol eCPRIv1, topologi star, jarak maks <20km"
+        },
+        {
+          "pattern": "omt-usb0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": null,
+          "role": "local-maintenance-terminal"
+        }
+      ],
+      "power": {
+        "typical_w": 200,
+        "max_w": 297,
+        "psu": "single (integrated, DC feed)",
+        "feed": "DC-48V"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "pole-mount"
+      },
+      "datasheet_note": "CWS-4240-71: FCC ID PX8CWS-4240-71, instalasi pole-mount ATAU wall-mount (keduanya eksplisit, Section 3.3.1a/b — form_factor pole-mount dipilih sbg representasi non-rack tunggal). Konektor RF eksak (tak ada padanan tipe pack — SKU paling terdampak gap ini di batch): 2x ANT (4.3-10 female), 1x GPS (N-type female), 1x AISG/MON (DB-15). Anomali penamaan internal dokumen 'ENB35A77R'/'ENB25A77R' dicatat, tidak dikoreksi. fccid.io mirror User Guide resmi Comba Telecom Ltd v1-0-1 Okt 2019."
+    },
+    {
+      "id": "parallel-wireless-crossfire-x2ru",
+      "display_name": "Parallel Wireless CrossFire X2RU (DRRU-R428)",
+      "vendor": "Parallel Wireless",
+      "vendor_options": [
+        "Parallel Wireless"
+      ],
+      "kind": "router",
+      "subcategory": "cell-site",
+      "tags": [
+        "lte",
+        "band41",
+        "2496-2690mhz",
+        "4x4-mimo",
+        "rru",
+        "o-ran",
+        "ecpri",
+        "crossfire-x2ru"
+      ],
+      "icon": {
+        "name": "cell-site-small",
+        "emoji": "📡"
+      },
+      "nos": [
+        "ran-os",
+        "forgeos"
+      ],
+      "default_mode": "sim",
+      "emulation": {
+        "available": false,
+        "image": null,
+        "ram_mb": null
+      },
+      "ports": [
+        {
+          "pattern": "op{n}",
+          "count": 2,
+          "type": "sfp28",
+          "speed_mbps": 25000,
+          "role": "fronthaul-eCPRI",
+          "note": "OPS=ke DU/PTP switch, OPM=cascade; manual eksplisit rekomendasi 10G port + modul SFP+"
+        },
+        {
+          "pattern": "debug-eth0",
+          "count": 1,
+          "type": "eth",
+          "speed_mbps": null,
+          "role": "maintenance-gui"
+        }
+      ],
+      "power": {
+        "typical_w": null,
+        "max_w": null,
+        "psu": "single (integrated, DC feed diasumsikan dari kategori RRU, TIDAK dikonfirmasi tekstual)",
+        "feed": "UNVERIFIED"
+      },
+      "physical": {
+        "ru": 0,
+        "form_factor": "pole-mount"
+      },
+      "datasheet_note": "CrossFire X2RU (DRRU-R428): FCC ID 2AI7FR42841, mounting type (pole/wall) TIDAK disebutkan di manual — form_factor pole-mount dipakai sbg representasi non-rack default (kategori RRU outdoor standalone dikonfirmasi dari diagram koneksi ke 4x4 MIMO antenna eksternal + GPS antenna terpisah). chassisMm juga UNVERIFIED (dihilangkan di deviceTypes.ts). Band operasi 2496-2690MHz (LTE Band 41); 4x CH (RF antena, konektor UNVERIFIED) + 1x ALARM + 1x RET (reserved) tidak punya tipe pack. fccid.io mirror User Manual resmi Parallel Wireless Inc."
     }
   ]
 }
