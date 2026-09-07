@@ -38,6 +38,7 @@ import {
   cableLengthUpdatesForNode,
   cableMediaForVisual,
   canPlaceDevice,
+  canRackMount,
   DEFAULT_ENCLOSURE,
   dropDecision,
   ENCLOSURE_KEYS,
@@ -334,8 +335,8 @@ export function Rack3DElevationPanel() {
   // once and read this every event instead of being re-subscribed whenever
   // `bays`/`viewRacks` change, so a background refetch mid-drag can never
   // tear down the listener between pointerdown and pointerup.
-  const dragCtxRef = useRef({ bays, viewRacks, moveDevice, rackLabel });
-  dragCtxRef.current = { bays, viewRacks, moveDevice, rackLabel };
+  const dragCtxRef = useRef({ bays, viewRacks, moveDevice, rackLabel, deviceTypesById });
+  dragCtxRef.current = { bays, viewRacks, moveDevice, rackLabel, deviceTypesById };
   const currentSelNode = useRef(selNode);
   currentSelNode.current = selNode;
 
@@ -863,9 +864,20 @@ export function Rack3DElevationPanel() {
         const rackXs = Object.entries(built.registry.racks)
           .map(([key, v]) => ({ key, x: v.x }));
         const target = resolveDropTarget(rackXs, { x: hits[0].point.x, y: hits[0].point.y });
-        const { bays: curBays, viewRacks: curRacks, moveDevice: curMove } = dragCtxRef.current;
+        const { bays: curBays, viewRacks: curRacks, moveDevice: curMove, deviceTypesById: curTypes } = dragCtxRef.current;
         const rackObj = target ? curRacks.find((r) => r.id === target.rackKey) : undefined;
         const span = currentSelNode.current.ru_span ?? 1;
+        const dt = currentSelNode.current.device_type_id
+          ? curTypes.get(currentSelNode.current.device_type_id)
+          : undefined;
+        const formFactor = dt?.physical?.form_factor;
+        // Reject early, with a message naming *why* (QA: a silent no-op drop
+        // reads as a bug, not a rule) — a pole/wall/strand/ceiling device
+        // must never "succeed" into a 19" rack slot.
+        if (!canRackMount(formFactor)) {
+          setStatus(`${currentSelNode.current.name} bukan perangkat rackmount (${formFactor}) — tidak bisa dipasang ke rak`);
+          return;
+        }
         if (target && rackObj && canPlaceDevice(curBays, target.rackKey, target.ru, span, rackObj.ru_height ?? 42)) {
           setStatus(`Menempatkan ${currentSelNode.current.name} di U${target.ru}…`);
           curMove.mutate({ nodeId: currentSelNode.current.id, rackId: target.rackKey, ruStart: target.ru, ruSpan: span });

@@ -343,13 +343,29 @@ export function resolveDropTarget(
   return { rackKey: best.key, ru: Math.floor((hit.y - 0.055) / U) + 1 };
 }
 
+/** Outdoor-placement vocabulary (NG-PH3D, keputusan Surya 2026-09-06): a
+ *  device whose catalog `physical.form_factor` clearly names a non-rack
+ *  mount (pole/wall/strand/ceiling, or any `outdoor-*` marker) can never
+ *  belong in a 19" rack slot, no matter what the RU arithmetic says — an
+ *  RRU meant for a pole must not "succeed" into a rack silently. Anything
+ *  else, including `undefined` (data from before `form_factor` existed, or
+ *  a value not on this short list), is allowed — the entire existing
+ *  indoor catalog (rackmount/modular/desktop/etc.) must see zero change. */
+export function canRackMount(formFactor: string | undefined): boolean {
+  if (!formFactor) return true;
+  if (formFactor.startsWith('outdoor-')) return false;
+  return !['pole-mount', 'wall-mount', 'strand-mount', 'ceiling-mount'].includes(formFactor);
+}
+
 /** Would `span` RUs starting at `ru` in `rackKey` be a legal placement? Same
  *  two checks the backend's `update_node` makes (in-range, no RU overlap —
  *  memory.py) run client-side first, so an occupied or oversized drop is
  *  refused before any request goes out (Surya: "slot yang sudah terisi atau
  *  tidak muat ditolak dengan jelas sebelum request dikirim"). `excludeId` is
  *  the device being moved itself, which must not collide with its own
- *  current slot. */
+ *  current slot. `formFactor` gates non-rackmount devices (see
+ *  `canRackMount`); omitted by every caller that already knows the device
+ *  is a real rack occupant (drag-move of a device already placed). */
 export function canPlaceDevice(
   bays: RackBay[],
   rackKey: string,
@@ -357,7 +373,9 @@ export function canPlaceDevice(
   span: number,
   ruHeight: number,
   excludeId?: string,
+  formFactor?: string,
 ): boolean {
+  if (!canRackMount(formFactor)) return false;
   if (ru < 1 || ru + span - 1 > ruHeight) return false;
   const bay = bays.find((b) => b.key === rackKey);
   if (!bay) return false;
