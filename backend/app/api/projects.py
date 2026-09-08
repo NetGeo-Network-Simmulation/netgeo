@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends
 
 from app.api.deps import repo, translate_not_found
 from app.core.config import storagehub_enabled
-from app.models import Project, ProjectCreate, Topology
+from app.models import Project, ProjectCreate, Topology, project_capabilities
 from app.services import archive as archive_svc
 from app.services import storagehub_client
 from app.store import MemoryRepository
@@ -60,12 +60,17 @@ async def import_archive(body: dict, r: Annotated[MemoryRepository, Depends(repo
     return project
 
 
-@router.get("/projects/{project_id}", response_model=Project)
+@router.get("/projects/{project_id}")
 async def get_project(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
-        return await r.get_project(project_id)
+        proj = await r.get_project(project_id)
     except StoreNotFound as exc:
         raise translate_not_found(exc) from exc
+    # NG-N6: capabilities is derived from `mode`, not stored — see
+    # `project_capabilities`. No response_model here (unlike every other
+    # project route) specifically so this extra key isn't rejected by
+    # Project's `extra="forbid"`.
+    return {**proj.model_dump(mode="json"), "capabilities": project_capabilities(proj.mode)}
 
 
 @router.get("/projects/{project_id}/topology", response_model=Topology)

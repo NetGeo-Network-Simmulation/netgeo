@@ -15,7 +15,13 @@ from __future__ import annotations
 
 from ipaddress import ip_address
 
-from app.models import GradeCheck, GradeItem, GradeReport, Topology
+from app.models import (
+    GradeCheck,
+    GradeItem,
+    GradeReport,
+    Topology,
+    project_capabilities,
+)
 from app.services import netlab
 
 # OSPF neighbour state that counts as "up" (a formed adjacency). The engine
@@ -55,6 +61,11 @@ def grade(topo: Topology, checks: list[GradeCheck]) -> GradeReport:
         score_pct=score,
         earned_weight=round(earned, 6),
         total_weight=round(total, 6),
+        # NG-N6: checks above always run against the pure-Python sim engine
+        # (no emulated-NOS kernel exists yet), so for a pure-emul/mixed
+        # project this score is an approximation of what real devices would
+        # do, not an exact reading — flag it rather than degrade silently.
+        exact=project_capabilities(topo.project.mode)["grading_exact"],
     )
 
 

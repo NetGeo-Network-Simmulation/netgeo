@@ -53,3 +53,18 @@ class Conflict(AppException):
 class SimulationError(AppException):
     status_code = 422
     code = "SIMULATION_ERROR"
+
+
+class SeekUnavailable(AppException):
+    """Time-travel /seek asked of a project with no single deterministic
+    journal to replay (mode != "pure-sim", NG-N6). ``reason`` is shown to the
+    user verbatim by the frontend, so it must already be human-readable —
+    see :func:`app.core.errors.register_exception_handlers` for the response
+    shape, which intentionally does not use the standard error envelope."""
+
+    status_code = 409
+    code = "seek_unavailable"
+
+    def __init__(self, reason: str):
+        self.reason = reason
+        super().__init__(reason, code="seek_unavailable", status_code=409)

@@ -12,7 +12,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.exceptions.base import AppException
+from app.exceptions.base import AppException, SeekUnavailable
 from app.utils.response import error
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,16 @@ _STATUS_CODE_MAP = {
 
 
 def register_exception_handlers(app: FastAPI) -> None:
+    @app.exception_handler(SeekUnavailable)
+    async def seek_unavailable_handler(_: Request, exc: SeekUnavailable):
+        # NG-N6: lab.py's endpoints already return flat, un-enveloped dicts on
+        # the happy path (no {"success", "data"} wrapper) — this error body
+        # matches that local convention instead of the app-wide error()
+        # envelope, so the frontend can show `reason` with no code table.
+        return JSONResponse(
+            status_code=409, content={"error": exc.code, "reason": exc.reason}
+        )
+
     @app.exception_handler(AppException)
     async def app_exception_handler(_: Request, exc: AppException):
         return JSONResponse(
