@@ -17,6 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import repo, translate_not_found
 from app.exceptions.base import NotFound, SimulationError
+from app.models import project_capabilities
 from app.services import netlab, notify
 from app.store import MemoryRepository
 from app.store import NotFound as StoreNotFound
@@ -418,6 +419,7 @@ async def lab_status(project_id: str, r: Annotated[MemoryRepository, Depends(rep
             "project_id": project_id,
             "stats": lab.net.stats(),
             "events": lab.net.events_log[-50:],
+            "capabilities": project_capabilities(topo.project.mode),
         }
 
     return await _locked(project_id, work)

@@ -115,6 +115,7 @@ async def submit_activity(
         elapsed_s=body.elapsed_s,
         within_time=within,
         items=report.items,
+        exact=report.exact,
     )
     return await r.add_grade_result(result)
 

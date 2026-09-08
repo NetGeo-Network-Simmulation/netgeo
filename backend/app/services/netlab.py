@@ -59,7 +59,8 @@ from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 
 from fastapi.concurrency import run_in_threadpool
 
-from app.models import Topology
+from app.exceptions.base import SeekUnavailable
+from app.models import Topology, project_capabilities
 from app.services.events import get_bus
 from engine.netstack import Network
 from engine.netstack.cli import CliSession
@@ -598,7 +599,18 @@ class LabManager:
         """Move the lab's cursor to event ``target_seq`` (step-back included):
         rebuild, cap the scheduler at the target, replay the journal. Journal
         entries recorded after the cursor are discarded — new stimuli rewrite
-        the future, exactly like stepping back in Packet Tracer."""
+        the future, exactly like stepping back in Packet Tracer.
+
+        NG-N6: only valid for "pure-sim" projects — there is no single DES
+        kernel / journal to replay once any node is emulated (see
+        ``project_capabilities``, the one place this gate is decided)."""
+        if not project_capabilities(topo.project.mode)["seek"]:
+            mode = topo.project.mode
+            raise SeekUnavailable(
+                f"mode={mode}: tidak ada kernel DES tunggal / sim-time per "
+                "subgraph untuk node ter-emulasi, journal replay tidak "
+                "berlaku."
+            )
         lab = self.get(topo)
         target_seq = max(0, min(target_seq, lab.net.ledger.seq))
         net = build_network(topo, seed=lab.seed)

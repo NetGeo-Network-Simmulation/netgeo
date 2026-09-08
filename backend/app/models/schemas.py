@@ -285,6 +285,21 @@ class Project(_Base):
     mode: Literal["pure-sim", "pure-emul", "mixed"] = "pure-sim"
 
 
+def project_capabilities(mode: str) -> dict[str, bool]:
+    """Single source of truth for mode-gated features (NG-N6): both
+    time-travel /seek (journal replay needs one deterministic DES kernel) and
+    exact grading are only valid for "pure-sim". Every consumer (the /seek
+    guard, grading.grade(), the project/lab-status responses) calls this
+    instead of re-deriving the mode check.
+
+    Deliberately *not* a field/computed_field on :class:`Project` — that field
+    round-trips through ``Project(**dict)`` in archive export/import and state
+    persistence, both of which reject unknown keys (``extra="forbid"``); a
+    plain function sidesteps that entirely."""
+    exact = mode == "pure-sim"
+    return {"seek": exact, "grading_exact": exact}
+
+
 class ProjectCreate(_Base):
     name: str
     description: str = ""
@@ -575,6 +590,10 @@ class GradeReport(_Base):
     score_pct: float = 100.0
     earned_weight: float = 0.0
     total_weight: float = 0.0
+    # NG-N6: False when the project's mode has no exact simulation kernel to
+    # grade against (checks still ran, but the score is an approximation —
+    # never presented as precise without this flag, see Project.capabilities).
+    exact: bool = True
 
 
 class GradeSubmit(_Base):
@@ -602,6 +621,7 @@ class GradeResult(_Base):
     within_time: bool | None = None
     graded_at: datetime = Field(default_factory=_now)
     items: list[GradeItem] = Field(default_factory=list)
+    exact: bool = True  # NG-N6, see GradeReport.exact
 
 
 # --- fiber plant / FTTH (NG-FI-01/02/03) ------------------------------------
