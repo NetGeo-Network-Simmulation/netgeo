@@ -33,13 +33,25 @@ loop. Two shortcuts around that slow path (RSTP-b, §17.3):
   Listening/Learning chain (already armed in parallel) still completes it.
 - **Edge ports**: a port that has never received a BPDU is assumed to have
   no bridge on the other end and goes straight to forwarding. Receiving a
-  BPDU permanently revokes edge status and the port follows the normal
-  role/state machine (including the handshake above) from then on.
+  BPDU permanently revokes edge status (§8.4.4/§17.3 — this doubles as the
+  base "BPDU on an edge port" protection: it just rejoins normal STP, no
+  vendor-style err-disable) and the port follows the normal role/state
+  machine (including the handshake above) from then on.
+
+Topology Change (§17.31, ex-802.1w — see ``_signal_tc``): a non-edge port
+entering Forwarding is the only TC trigger (going to Blocking is not, and
+edge ports never trigger it). No separate TCN BPDU — the TC flag rides the
+ordinary BPDU for one tcWhile (2x Hello Time), flooding outward on every
+designated port except the one the change was detected/received on. Each
+hop reacting to that flag flushes its own MAC table (everywhere but the
+receiving port and any edge port) and re-arms its own tcWhile, cascading
+the flush through the whole tree.
 
 Simplifications vs. real 802.1w (documented, deliberate):
-- topology-change notifications (TC/TCA) are not modelled;
+- legacy-STP compatibility mode (separate TCN BPDU + TCA flag) is not
+  modelled — this bridge only ever speaks RST BPDUs;
 - BPDU max-age pruning uses the same dead-interval mechanism as hellos;
-- no BPDU guard / root guard, no MSTP / per-VLAN STP;
+- no BPDU guard / root guard / err-disable, no MSTP / per-VLAN STP;
 - every link is treated as point-to-point (no half-duplex/shared-media
   detection — there's no hub device in this engine anyway).
 """
@@ -64,6 +76,10 @@ STP_MAX_AGE = 20.0
 # freshly-designated port's convergence stays proportional to this module's
 # own BPDU cadence instead of the (much larger) textbook 15s default.
 STP_FORWARD_DELAY = STP_HELLO
+# 802.1D-2004 §17.31 tcWhile: how long a bridge keeps flagging TC on its
+# outgoing BPDUs after detecting/relaying a topology change. Standard value
+# is 2x Hello Time.
+STP_TC_WHILE = 2 * STP_HELLO
 
 
 @dataclass(slots=True)
@@ -121,6 +137,13 @@ class Switch(Device):
         # good (matches real hardware: only an admin/link-flap reset would
         # bring it back, which this engine doesn't need to model).
         self._not_edge: set[str] = set()
+        # RSTP Topology Change (§17.31): per-origin-port sequence-guard for
+        # tcWhile (same pattern as _delay_seq above), plus the set of ports
+        # currently *within* their tcWhile window -- a port in this set is
+        # the one TC was detected/received on, so it's excluded from
+        # carrying the TC flag back out (see _hello / _signal_tc).
+        self._tc_seq: dict[str, int] = {}
+        self._tc_active_origins: set[str] = set()
 
     # ----- identity ----------------------------------------------------------
     @property
@@ -167,6 +190,10 @@ class Switch(Device):
                 # peer learns it's safe to sync+agree instead of waiting
                 # out Forward Delay. Stops on its own once forwarding.
                 proposal=iface.stp_state != "forwarding",
+                # TC is live if some other port originated/relayed one that
+                # hasn't timed out yet -- never reflect it back out the
+                # port it came in on.
+                tc=any(origin != iface.name for origin in self._tc_active_origins),
             )
         net.scheduler.schedule_after(
             STP_HELLO,
@@ -193,6 +220,7 @@ class Switch(Device):
         *,
         proposal: bool = False,
         agreement: bool = False,
+        tc: bool = False,
     ) -> None:
         iface.transmit(
             net,
@@ -210,6 +238,7 @@ class Switch(Device):
                     forwarding=iface.stp_state == "forwarding",
                     proposal=proposal,
                     agreement=agreement,
+                    tc=tc,
                 ),
             ),
         )
@@ -338,7 +367,58 @@ class Switch(Device):
     def _enter_forwarding(self, net: Network, iface: Interface, seq: int) -> None:
         if self._delay_seq.get(iface.name) != seq:
             return
+        self._set_forwarding(net, iface)
+
+    def _set_forwarding(self, net: Network, iface: Interface) -> None:
+        """Move ``iface`` into Forwarding, and if it's a non-edge port that
+        wasn't already forwarding, signal an RSTP Topology Change (§17.31).
+        A non-edge port entering Forwarding is the *only* TC trigger in
+        RSTP -- no separate TCN BPDU, unlike legacy STP (see module
+        docstring); going to Blocking is not a trigger either. Shared by
+        every path that lands a port on Forwarding: the plain Forward
+        Delay chain above, the proposal/agreement fast path, and sync."""
+        if iface.stp_state == "forwarding":
+            return
+        is_edge = iface.name not in self._not_edge
         iface.stp_state = "forwarding"
+        if not is_edge:
+            self._signal_tc(net, iface)
+
+    def _signal_tc(self, net: Network, origin: Interface) -> None:
+        """RSTP Topology Change (802.1D-2004 §17.31, ex-802.1w). Two
+        callers converge here: a local non-edge port just entered
+        Forwarding (_set_forwarding), or a TC-flagged BPDU arrived on
+        ``origin`` (_handle_bpdu) -- both are "TC detected/received on
+        this port". Action: flush MAC entries learned on every other
+        non-edge port (edge ports are hosts, never bridges, so nothing
+        there could have moved -- and ``origin`` itself is left alone),
+        then flag TC on this bridge's outgoing BPDUs for one tcWhile so
+        the change propagates outward, except back out ``origin``.
+        Deliberately NOT modelled (out of scope for this slice, and only
+        meaningful in legacy-STP compatibility mode which this engine
+        doesn't have): TCN BPDUs / TCA."""
+        for key, port in list(self.mac_table.items()):
+            if port == origin.name or port not in self._not_edge:
+                continue
+            del self.mac_table[key]
+
+        self._tc_active_origins.add(origin.name)
+        self._tc_seq[origin.name] = self._tc_seq.get(origin.name, 0) + 1
+        seq = self._tc_seq[origin.name]
+        net.scheduler.schedule_after(
+            STP_TC_WHILE,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e: self._tc_while_expire(origin.name, seq),
+                node_id=self.node_id,
+            ),
+        )
+
+    def _tc_while_expire(self, port_name: str, seq: int) -> None:
+        if self._tc_seq.get(port_name) != seq:
+            return  # superseded -- a fresh TC re-armed tcWhile for this origin
+        self._tc_active_origins.discard(port_name)
 
     def _handle_bpdu(self, net: Network, iface: Interface, bpdu: BpduFrame) -> None:
         if not self.stp_enabled:
@@ -371,7 +451,10 @@ class Switch(Device):
             # instead of waiting out the Listening/Learning chain already
             # armed by _recompute_roles above.
             self._delay_seq[iface.name] = self._delay_seq.get(iface.name, 0) + 1
-            iface.stp_state = "forwarding"
+            self._set_forwarding(net, iface)
+
+        if bpdu.tc:
+            self._signal_tc(net, iface)
 
     def _sync_and_agree(self, net: Network, root_port: Interface) -> None:
         """Force our other non-edge designated ports to discarding first
@@ -384,7 +467,7 @@ class Switch(Device):
                 self._enter_blocking(other, "designated")
 
         self._delay_seq[root_port.name] = self._delay_seq.get(root_port.name, 0) + 1
-        root_port.stp_state = "forwarding"
+        self._set_forwarding(net, root_port)
         root_prio, root_mac, cost = self._current_root(net)
         self._send_bpdu(
             net,

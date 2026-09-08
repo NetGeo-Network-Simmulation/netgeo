@@ -354,8 +354,9 @@ class BpduFrame:
     port_role: str = "designated"          # role of the *sending* port
     learning: bool = False
     forwarding: bool = False
-    proposal: bool = False       # unused until RSTP-b (see class docstring)
-    agreement: bool = False      # unused until RSTP-b (see class docstring)
+    proposal: bool = False       # RSTP-b rapid transition handshake
+    agreement: bool = False      # RSTP-b rapid transition handshake
+    tc: bool = False             # topology change in progress (§17.31)
 
     @property
     def wire_size(self) -> int:
