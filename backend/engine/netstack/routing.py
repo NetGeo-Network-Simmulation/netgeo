@@ -189,27 +189,58 @@ class Route6:
 
 @dataclass(slots=True)
 class AclRule:
-    """A stateless access-list entry. ``None`` fields match anything."""
+    """A stateless access-list entry. ``None`` fields match anything.
+
+    One class serves both address families rather than a separate
+    Ipv6AclRule: ``proto`` (matched by name, e.g. "icmp" vs "icmpv6" — already
+    distinct values, see ``Ipv4Packet.proto_name``/``Ipv6Packet.proto_name``)
+    and ``dst_port``/``icmp_type`` apply to either family, while ``src``/
+    ``dst`` are IPv4-only and ``src6``/``dst6`` IPv6-only. A rule that sets a
+    v4-only address field never matches a v6 packet and vice versa (see
+    ``matches``) — no silent cross-family matching. ``icmp_type`` matches
+    ICMPv4 *and* ICMPv6 messages alike (both payload classes expose
+    ``.type``) so "deny ND" (type 135/136) and "permit echo" (128/129) can be
+    written as ordinary rules alongside ``proto="icmpv6"``.
+
+    Extension-header filtering (RFC 8200 Hop-by-Hop/Routing/Fragment/
+    Destination Options) is out of scope: ``proto`` on an ``Ipv6Packet`` is
+    only ever the value already stored on it (see ``Ipv6Packet.proto``,
+    which itself does not parse the next-header chain), never a header the
+    engine peels off itself.
+    """
 
     action: str = "permit"                     # permit | deny
-    proto: str | None = None                   # icmp|tcp|udp|ospf
+    proto: str | None = None                   # icmp|icmpv6|tcp|udp|ospf
     src: IPv4Network | None = None
     dst: IPv4Network | None = None
+    src6: IPv6Network | None = None
+    dst6: IPv6Network | None = None
     dst_port: int | None = None
+    icmp_type: int | None = None                # matches IcmpMessage/Icmpv6Message.type
 
-    def matches(self, pkt: Ipv4Packet) -> bool:
+    def matches(self, pkt: Ipv4Packet | Ipv6Packet) -> bool:
         if self.proto is not None and pkt.proto_name != self.proto:
             return False
-        if self.src is not None and pkt.src not in self.src:
-            return False
-        if self.dst is not None and pkt.dst not in self.dst:
-            return False
+        if isinstance(pkt, Ipv6Packet):
+            if self.src is not None or self.dst is not None:
+                return False  # v4-scoped rule, never matches v6 traffic
+            if self.src6 is not None and pkt.src not in self.src6:
+                return False
+            if self.dst6 is not None and pkt.dst not in self.dst6:
+                return False
+        else:
+            if self.src6 is not None or self.dst6 is not None:
+                return False  # v6-scoped rule, never matches v4 traffic
+            if self.src is not None and pkt.src not in self.src:
+                return False
+            if self.dst is not None and pkt.dst not in self.dst:
+                return False
         if self.dst_port is not None:
             l4 = pkt.payload
             port = getattr(l4, "dst_port", None)
             if port != self.dst_port:
                 return False
-        return True
+        return self.icmp_type is None or getattr(pkt.payload, "type", None) == self.icmp_type
 
     def as_dict(self) -> dict:
         return {
@@ -217,7 +248,10 @@ class AclRule:
             "proto": self.proto,
             "src": str(self.src) if self.src else "any",
             "dst": str(self.dst) if self.dst else "any",
+            "src6": str(self.src6) if self.src6 else None,
+            "dst6": str(self.dst6) if self.dst6 else None,
             "dst_port": self.dst_port,
+            "icmp_type": self.icmp_type,
         }
 
 
@@ -697,7 +731,7 @@ class Router(L3Device):
         if mpls.inner is not None:
             self._forward(net, iface, mpls.inner)
 
-    def _acl_permits(self, rules: list[AclRule] | None, pkt: Ipv4Packet) -> bool:
+    def _acl_permits(self, rules: list[AclRule] | None, pkt: Ipv4Packet | Ipv6Packet) -> bool:
         if not rules:
             return True
         for rule in rules:
@@ -820,6 +854,16 @@ class Router(L3Device):
 
     # ----- IPv6 ingress + forwarding pipeline ----------------------------------------
     def _on_ipv6(self, net: Network, iface: Interface, pkt: Ipv6Packet) -> None:
+        if not self._acl_permits(self.acl_in.get(iface.name), pkt):
+            net.record_drop("acl_deny_in")
+            # RFC 4443 §2.4(e.1): never send an ICMPv6 error about a packet
+            # destined to a multicast address (NS/RS/RA all are) — deny
+            # ND/RA here means it silently doesn't happen, exactly as a
+            # real filtered link behaves; a denied unicast packet (e.g. an
+            # echo) still gets the usual prohibited-unreachable.
+            if not pkt.dst.is_multicast:
+                self._send_icmpv6_error(net, pkt, icmp_type=1, code=1)
+            return
         if (
             self.owns_ip6(pkt.dst)
             or iface.joined_group(pkt.dst)
@@ -845,6 +889,12 @@ class Router(L3Device):
             self._send_icmpv6_error(net, pkt, icmp_type=1, code=0)
             return
         out, next_hop = resolved
+
+        if not self._acl_permits(self.acl_out.get(out.name), pkt):
+            net.record_drop("acl_deny_out")
+            self._send_icmpv6_error(net, pkt, icmp_type=1, code=1)
+            return
+
         self.forwarded += 1
         self._resolve_and_send6(net, out, next_hop, pkt)
 
@@ -1247,7 +1297,7 @@ class Firewall(Router):
         super().__init__(name, node_id, nos)
         self.default_policy = "permit"   # operators flip to "deny" for strictness
 
-    def _acl_permits(self, rules: list[AclRule] | None, pkt: Ipv4Packet) -> bool:
+    def _acl_permits(self, rules: list[AclRule] | None, pkt: Ipv4Packet | Ipv6Packet) -> bool:
         if not rules:
             return self.default_policy == "permit"
         return super()._acl_permits(rules, pkt)
