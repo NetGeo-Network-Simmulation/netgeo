@@ -412,6 +412,7 @@ class DhcpPool:
     range_end: int = 250
     lease_s: int = 86400
     leases: dict[str, IPv4Address] = field(default_factory=dict)  # mac -> ip
+    lease_seq: dict[str, int] = field(default_factory=dict)  # mac -> expiry-timer epoch (sequence-guard)
 
     def allocate(self, mac: str) -> IPv4Address | None:
         if mac in self.leases:
@@ -1387,6 +1388,30 @@ class Router(L3Device):
                 lease_s=pool.lease_s,
                 xid=msg.xid,
             ))
+            self._arm_lease_expiry(net, pool, msg.client_mac)
+
+    def _arm_lease_expiry(self, net: Network, pool: DhcpPool, mac: str) -> None:
+        """Start (or restart, on renewal) this lease's expiry timer. One timer
+        per mac, guarded by a per-mac epoch (same idiom as the fragment-
+        reassembly timeout's ``_frag_timer_seq``) so a stale timer from before
+        a renewal can never evict the freshly-renewed lease."""
+        seq = pool.lease_seq.get(mac, 0) + 1
+        pool.lease_seq[mac] = seq
+        net.scheduler.schedule_after(
+            pool.lease_s,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e, p=pool, m=mac, s=seq: self._lease_expire(p, m, s),
+                node_id=self.node_id,
+            ),
+        )
+
+    def _lease_expire(self, pool: DhcpPool, mac: str, seq: int) -> None:
+        if pool.lease_seq.get(mac) != seq:
+            return  # superseded by a renewal — stale, no-op
+        pool.leases.pop(mac, None)
+        pool.lease_seq.pop(mac, None)
 
     def _dhcp_send(
         self, net: Network, iface: Interface, client_mac: str, msg: DhcpMessage

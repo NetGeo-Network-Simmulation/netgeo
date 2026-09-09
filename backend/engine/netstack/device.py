@@ -577,6 +577,8 @@ class Host(L3Device):
         self.dns_server: IPv4Address | None = None
         self.dns_cache: dict[str, IPv4Address] = {}
         self._dhcp_xid = 0
+        self._dhcp_server_ip: dict[str, str] = {}   # iface.name -> server that granted the lease
+        self._dhcp_lease_seq: dict[str, int] = {}   # iface.name -> T1/T2/expiry epoch (sequence-guard)
         self._dns_xid = 0
         self._dns_waiting: dict[int, Callable[[IPv4Address | None], None]] = {}
 
@@ -858,7 +860,94 @@ class Host(L3Device):
                 self.default_gateway = IPv4Address(msg.gateway)
             if msg.dns:
                 self.dns_server = IPv4Address(msg.dns)
+            self._arm_dhcp_lease(net, iface, msg)
             net.on_dhcp_bound(self, iface, prefix)
+
+    # ----- DHCP lease lifetime (RFC 2131 §4.4.5: T1 renew, T2 rebind, expiry) ----
+    def _arm_dhcp_lease(self, net: Network, iface: Interface, msg: DhcpMessage) -> None:
+        """(Re)arm the T1/T2/expiry timers for this lease. All three share one
+        epoch number so a successful renewal — which re-arms all three with a
+        bumped epoch — silently retires the previous lease's still-pending
+        timers (same sequence-guard idiom as ARP aging's ``_arp_age_seq``)."""
+        if msg.server_ip:
+            self._dhcp_server_ip[iface.name] = msg.server_ip
+        lease_s = msg.lease_s or 86400
+        seq = self._dhcp_lease_seq.get(iface.name, 0) + 1
+        self._dhcp_lease_seq[iface.name] = seq
+        for delay, handler in (
+            (lease_s * 0.5, self._dhcp_renew),
+            (lease_s * 0.875, self._dhcp_rebind),
+            (lease_s, self._dhcp_expire),
+        ):
+            net.scheduler.schedule_after(
+                delay,
+                SimEvent(
+                    time=0.0,
+                    type=EventType.TIMER,
+                    handler=lambda _c, _e, i=iface, s=seq, h=handler: h(net, i, s),
+                    node_id=self.node_id,
+                ),
+            )
+
+    def _dhcp_epoch_current(self, iface: Interface, seq: int) -> bool:
+        return self._dhcp_lease_seq.get(iface.name) == seq
+
+    def _dhcp_renew(self, net: Network, iface: Interface, seq: int) -> None:
+        """T1: RENEWING — unicast DHCPREQUEST straight to the server that
+        granted the lease (RFC 2131 §4.4.5)."""
+        if not self._dhcp_epoch_current(iface, seq) or not iface.ip:
+            return
+        server_ip = self._dhcp_server_ip.get(iface.name)
+        if server_ip is None:
+            return
+        self._dhcp_xid = net.next_xid()
+        self.send_ip(
+            net,
+            Ipv4Packet(
+                src=iface.ip.ip,
+                dst=IPv4Address(server_ip),
+                proto=PROTO_UDP,
+                ttl=64,
+                payload=UdpSegment(
+                    src_port=68,
+                    dst_port=67,
+                    payload=DhcpMessage(
+                        op="request",
+                        client_mac=iface.mac,
+                        your_ip=str(iface.ip.ip),
+                        server_ip=server_ip,
+                        xid=self._dhcp_xid,
+                    ),
+                ),
+            ),
+        )
+
+    def _dhcp_rebind(self, net: Network, iface: Interface, seq: int) -> None:
+        """T2: REBINDING — renewal via unicast got no answer, so broadcast to
+        any server instead."""
+        if not self._dhcp_epoch_current(iface, seq) or not iface.ip:
+            return
+        self._dhcp_xid = net.next_xid()
+        self._broadcast_dhcp(
+            net,
+            iface,
+            DhcpMessage(
+                op="request",
+                client_mac=iface.mac,
+                your_ip=str(iface.ip.ip),
+                xid=self._dhcp_xid,
+            ),
+        )
+
+    def _dhcp_expire(self, net: Network, iface: Interface, seq: int) -> None:
+        """Lease ran out with no successful renewal: drop the address."""
+        if not self._dhcp_epoch_current(iface, seq):
+            return
+        iface.ips = []
+        self._dhcp_lease_seq.pop(iface.name, None)
+        self._dhcp_server_ip.pop(iface.name, None)
+        # ponytail: gateway/dns/DHCPRELEASE-on-shutdown are out of brief scope —
+        # add if a test ever needs them cleared on expiry too.
 
     # ----- DNS stub resolver ---------------------------------------------------------
     def resolve(
