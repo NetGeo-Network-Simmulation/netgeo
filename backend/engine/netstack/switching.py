@@ -505,7 +505,7 @@ class Switch(Device):
                 return
             vlan = iface.access_vlan
         else:  # trunk
-            vlan = frame.vlan if frame.vlan is not None else 1
+            vlan = frame.vlan if frame.vlan is not None else iface.native_vlan
             if not iface.vlan_allows(vlan):
                 net.record_drop("vlan_filtered")
                 return
@@ -542,8 +542,11 @@ class Switch(Device):
 
     @staticmethod
     def _egress(net: Network, out: Interface, frame: EthernetFrame, vlan: int) -> None:
-        # Tag on trunks, strip on access ports.
-        frame.vlan = vlan if out.vlan_mode == "trunk" else None
+        # Tag on trunks except the port's native VLAN (802.1Q), strip on access ports.
+        if out.vlan_mode == "trunk":
+            frame.vlan = None if vlan == out.native_vlan else vlan
+        else:
+            frame.vlan = None
         out.transmit(net, frame)
 
     # ----- introspection ---------------------------------------------------------------

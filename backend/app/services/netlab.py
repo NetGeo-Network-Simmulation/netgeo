@@ -12,7 +12,8 @@ Node ``intent`` fields understood by the builder (all optional):
     gateway6: "2001:db8::1"                # hosts: IPv6 default gateway
     slaac: true                            # hosts: autoconfigure v6 from RA
     dns: "192.168.1.1"                     # hosts: resolver address
-    vlans: {"<iface-name>": {"mode": "access"|"trunk", "vlan": 10}}
+    vlans: {"<iface-name>": {"mode": "access"|"trunk", "vlan": 10,
+                              "allowed": [10, 20], "native": 99}}
     static_routes: [{"prefix": "0.0.0.0/0", "next_hop": "10.0.0.1"}]
     static_routes6: [{"prefix": "::/0", "next_hop": "2001:db8::1",
                       "iface": null}]
@@ -133,6 +134,8 @@ def build_network(topo: Topology, seed: int = 0) -> Network:
                     iface.access_vlan = int(vcfg["vlan"])
                 if isinstance(vcfg.get("allowed"), list):
                     iface.trunk_vlans = {int(v) for v in vcfg["allowed"]}
+                if "native" in vcfg:
+                    iface.native_vlan = int(vcfg["native"])
             iface_owner[i.id] = (n.id, i.name)
 
         _apply_intent(net, dev, intent)
