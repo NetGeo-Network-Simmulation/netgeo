@@ -41,6 +41,8 @@ Node ``intent`` fields understood by the builder (all optional):
                              "gateway": "192.168.88.1", "dns": "..."}]}
     dns_zone: {"nas.lab": "192.168.1.40"}
     nat: {"inside": ["eth0"], "outside": "eth1"}
+    nptv6: {"internal": "fd01:203:405::/48", "external": "2001:db8:1::/48",
+            "inside": ["eth0"], "outside": "eth1"}   # RFC 6296, stateless 1:1
     acl: {"<iface-name>": {"in": [{"action": "deny", "proto": "icmp",
                                    "src": "10.0.0.0/8", "dst": null,
                                    "dst_port": null}], "out": [...]}}
@@ -367,6 +369,18 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
         dev.enable_nat(
             list(nat_cfg.get("inside") or []), str(nat_cfg["outside"]), port_forwards
         )
+
+    nptv6_cfg = intent.get("nptv6") or {}
+    if nptv6_cfg.get("internal") and nptv6_cfg.get("external") and nptv6_cfg.get("outside"):
+        try:
+            dev.enable_nptv6(
+                IPv6Network(nptv6_cfg["internal"]),
+                IPv6Network(nptv6_cfg["external"]),
+                list(nptv6_cfg.get("inside") or []),
+                str(nptv6_cfg["outside"]),
+            )
+        except (KeyError, ValueError) as exc:
+            logger.warning("%s: bad nptv6 config %r: %s", dev.name, nptv6_cfg, exc)
 
     for iface_name, directions in (intent.get("acl") or {}).items():
         for direction in ("in", "out"):
