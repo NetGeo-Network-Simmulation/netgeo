@@ -14,6 +14,7 @@ Node ``intent`` fields understood by the builder (all optional):
     dns: "192.168.1.1"                     # hosts: resolver address
     vlans: {"<iface-name>": {"mode": "access"|"trunk", "vlan": 10,
                               "allowed": [10, 20], "native": 99}}
+    arp: {"ttl": 1200}                     # ARP cache entry lifetime, seconds
     static_routes: [{"prefix": "0.0.0.0/0", "next_hop": "10.0.0.1"}]
     static_routes6: [{"prefix": "::/0", "next_hop": "2001:db8::1",
                       "iface": null}]
@@ -70,7 +71,7 @@ from app.models import Topology, project_capabilities
 from app.services.events import get_bus
 from engine.netstack import Network
 from engine.netstack.cli import CliSession
-from engine.netstack.device import Device, Host
+from engine.netstack.device import Device, Host, L3Device
 from engine.netstack.protocols.bgp import BgpProcess
 from engine.netstack.protocols.isis import IsisProcess
 from engine.netstack.protocols.mpls import L3vpnProcess, LdpProcess
@@ -188,6 +189,13 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
             )
         except (KeyError, ValueError) as exc:
             logger.warning("%s: bad lag config %r: %s", dev.name, lag, exc)
+
+    arp_cfg = intent.get("arp") or {}
+    if isinstance(dev, L3Device) and arp_cfg.get("ttl") is not None:
+        try:
+            dev.arp_ttl = float(arp_cfg["ttl"])
+        except (TypeError, ValueError) as exc:
+            logger.warning("%s: bad arp config %r: %s", dev.name, arp_cfg, exc)
 
     if isinstance(dev, Host):
         gw = intent.get("gateway")
