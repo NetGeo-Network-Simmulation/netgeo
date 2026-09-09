@@ -268,6 +268,91 @@ class NatBinding:
     static: bool = False
 
 
+def _v6_words(addr: IPv6Address) -> list[int]:
+    packed = int(addr)
+    return [(packed >> (16 * (7 - i))) & 0xFFFF for i in range(8)]
+
+
+def _v6_from_words(words: list[int]) -> IPv6Address:
+    packed = 0
+    for w in words:
+        packed = (packed << 16) | w
+    return IPv6Address(packed)
+
+
+def _ones_add(a: int, b: int) -> int:
+    """RFC 1071 16-bit one's-complement add (end-around carry)."""
+    s = a + b
+    while s > 0xFFFF:
+        s = (s & 0xFFFF) + 1
+    return s
+
+
+def _ones_sum(words: list[int]) -> int:
+    total = words[0]
+    for w in words[1:]:
+        total = _ones_add(total, w)
+    return total
+
+
+@dataclass(slots=True)
+class Nptv6Mapping:
+    """RFC 6296 IPv6-to-IPv6 Network Prefix Translation (NPTv6).
+
+    Deliberately NOT a ``NatBinding``: NPTv6 is stateless and algorithmic
+    (§3.2/§3.3) — no per-flow table, no ports, 1:1 always. Outbound and
+    inbound both derive from the same two prefixes, so there is nothing to
+    store per-flow; a binding table would fake statefulness this protocol
+    doesn't have.
+
+    Only word-aligned prefixes up to /48 are supported (the RFC's own
+    worked example, and the common real-world default). RFC 6296 §3.7's
+    longer-prefix (/49-/64) IID-search algorithm is not implemented.
+    # ponytail: add §3.7 if a /49-/64 deployment is ever needed.
+    """
+
+    internal: IPv6Network
+    external: IPv6Network
+    inside_ifaces: frozenset[str]
+    outside_iface: str
+    _word_idx: int = field(init=False, repr=False)
+    _adjustment: int = field(init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.internal.prefixlen != self.external.prefixlen:
+            raise ValueError(
+                "NPTv6 requires equal internal/external prefix lengths "
+                f"(RFC 6296 §3.1); got /{self.internal.prefixlen} vs "
+                f"/{self.external.prefixlen}"
+            )
+        plen = self.internal.prefixlen
+        if plen > 48 or plen % 16:
+            raise ValueError(
+                "NPTv6 here supports word-aligned prefixes up to /48 "
+                f"(/16, /32, /48); got /{plen}"
+            )
+        self._word_idx = plen // 16
+        inner_sum = _ones_sum(_v6_words(self.internal.network_address)[: self._word_idx])
+        outer_sum = _ones_sum(_v6_words(self.external.network_address)[: self._word_idx])
+        # sub1(a, b) per RFC 6296 appendix: a + ~b (one's complement).
+        self._adjustment = _ones_add(inner_sum, (~outer_sum) & 0xFFFF)
+
+    def _translate(self, addr: IPv6Address, new_prefix: IPv6Network, outbound: bool) -> IPv6Address:
+        words = _v6_words(addr)
+        words[: self._word_idx] = _v6_words(new_prefix.network_address)[: self._word_idx]
+        adj = self._adjustment if outbound else (~self._adjustment) & 0xFFFF
+        words[self._word_idx] = _ones_add(words[self._word_idx], adj)
+        return _v6_from_words(words)
+
+    def to_external(self, addr: IPv6Address) -> IPv6Address:
+        """Internal -> external (source rewrite on egress)."""
+        return self._translate(addr, self.external, outbound=True)
+
+    def to_internal(self, addr: IPv6Address) -> IPv6Address:
+        """External -> internal (destination rewrite on ingress)."""
+        return self._translate(addr, self.internal, outbound=False)
+
+
 @dataclass(slots=True)
 class DhcpPool:
     network: IPv4Network
@@ -333,6 +418,7 @@ class Router(L3Device):
         self.nat_outside: str | None = None
         self._nat_bindings: list[NatBinding] = []
         self._nat_next_key = 20000
+        self.nptv6: Nptv6Mapping | None = None
         # Services
         self.dhcp_pools: list[DhcpPool] = []
         self.dns_zone: dict[str, IPv4Address] = {}
@@ -883,12 +969,33 @@ class Router(L3Device):
             return
         pkt.hop_limit -= 1
 
+        # NPTv6 inbound: destination arriving from outside, addressed into
+        # the external prefix, must be translated back to internal *before*
+        # route lookup — the route table only knows the internal prefix.
+        if (
+            self.nptv6
+            and in_iface.name == self.nptv6.outside_iface
+            and pkt.dst in self.nptv6.external
+        ):
+            pkt.dst = self.nptv6.to_internal(pkt.dst)
+
         resolved = self.egress_for6(pkt.dst)
         if resolved is None:
             net.record_drop("no_route6")
             self._send_icmpv6_error(net, pkt, icmp_type=1, code=0)
             return
         out, next_hop = resolved
+
+        # NPTv6 outbound: source leaving via the configured outside
+        # interface, from within the internal prefix, is rewritten to the
+        # external prefix (stateless, algorithmic — RFC 6296 §3.2).
+        if (
+            self.nptv6
+            and in_iface.name in self.nptv6.inside_ifaces
+            and out.name == self.nptv6.outside_iface
+            and pkt.src in self.nptv6.internal
+        ):
+            pkt.src = self.nptv6.to_external(pkt.src)
 
         if not self._acl_permits(self.acl_out.get(out.name), pkt):
             net.record_drop("acl_deny_out")
@@ -1138,6 +1245,21 @@ class Router(L3Device):
         elif isinstance(l4, (UdpSegment, TcpSegment)):
             l4.dst_port = binding.inside_key
         return True
+
+    # ----- NPTv6 (RFC 6296) ---------------------------------------------------------------
+    def enable_nptv6(
+        self,
+        internal: IPv6Network,
+        external: IPv6Network,
+        inside: list[str],
+        outside: str,
+    ) -> None:
+        self.nptv6 = Nptv6Mapping(
+            internal=internal,
+            external=external,
+            inside_ifaces=frozenset(inside),
+            outside_iface=outside,
+        )
 
     # ----- DHCP server --------------------------------------------------------------------
     def add_dhcp_pool(self, pool: DhcpPool) -> None:
