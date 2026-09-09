@@ -39,8 +39,8 @@ Node ``intent`` fields understood by the builder (all optional):
     vxlan: {"access": {"<iface-name>": 10}}       # routers: VTEP; access port
           # -> VNI bindings. EVPN Type-2/Type-3 ride the iBGP peers (TCP:179);
           # loopback = VTEP IP; underlay reachability via OSPF/IS-IS/BGP.
-    dhcp_server: {"pools": [{"network": "192.168.88.0/24",
-                             "gateway": "192.168.88.1", "dns": "..."}]}
+    dhcp_server: {"pools": [{"network": "192.168.88.0/24", "gateway": "192.168.88.1",
+                             "dns": "...", "lease_s": 86400}]}
     dns_zone: {"nas.lab": "192.168.1.40"}
     nat: {"inside": ["eth0"], "outside": "eth1"}
     nptv6: {"internal": "fd01:203:405::/48", "external": "2001:db8:1::/48",
@@ -353,6 +353,7 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
                     network=IPv4Network(pool["network"]),
                     gateway=IPv4Address(pool["gateway"]),
                     dns=IPv4Address(pool["dns"]) if pool.get("dns") else None,
+                    lease_s=int(pool.get("lease_s", 86400)),
                 )
             )
         except (KeyError, ValueError) as exc:
