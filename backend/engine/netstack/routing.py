@@ -852,6 +852,33 @@ class Router(L3Device):
             if entry.action == "pop":           # LSP egress for this transport FEC
                 labels.pop(0)
                 continue                        # examine the next (VPN) label
+            if entry.action == "php":           # penultimate hop: pop, don't swap-to-3
+                labels.pop(0)
+                out = self.interfaces.get(entry.out_iface) if entry.out_iface else None
+                if out is None:
+                    net.record_drop("mpls_no_iface")
+                    return
+                if labels:                      # a label (e.g. VPN) survives underneath
+                    out.transmit(
+                        net,
+                        EthernetFrame(
+                            src_mac=out.mac,
+                            dst_mac=entry.nh_mac,
+                            ethertype=ETH_MPLS,
+                            payload=MplsPacket(labels=labels, inner=mpls.inner),
+                        ),
+                    )
+                elif mpls.inner is not None:    # implicit-null: bare packet to the egress
+                    out.transmit(
+                        net,
+                        EthernetFrame(
+                            src_mac=out.mac,
+                            dst_mac=entry.nh_mac,
+                            ethertype=ETH_IPV4,
+                            payload=mpls.inner,
+                        ),
+                    )
+                return
             out = self.interfaces.get(entry.out_iface) if entry.out_iface else None
             if out is None or entry.out_label is None:
                 net.record_drop("mpls_no_iface")

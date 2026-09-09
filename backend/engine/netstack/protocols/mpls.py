@@ -16,14 +16,24 @@ Two processes attach to a router:
   routes with the PE's iBGP peers, so a CE at one site reaches a CE at another
   site in the same VRF (and only the same VRF).
 
+Penultimate-hop-popping (RFC 3031 sec 3.16, RFC 3032 sec 2.1): the egress LSR
+advertises the reserved Implicit NULL label (3) for every FEC it terminates
+(its own connected prefixes). A label-3 binding never appears in a data-plane
+label stack -- receiving one tells the penultimate hop to pop its own label
+and forward *without* imposing 3, so the egress gets the bare inner packet
+(or, under L3VPN, the packet with only the VPN label left). ``LdpProcess``
+does the advertise/track side; :meth:`Router._mpls_forward` (in
+``routing.py``) does the pop-and-forward.
+
 Deliberate simplifications (ponytail — each names its ceiling + upgrade path):
 
 - ``# ponytail:`` LDP runs over raw-Ethernet flooded bindings, no UDP/TCP 646
   session, no keepalives. A lossless DES delivers them reliably; add a real
   session + label-withdraw when links can drop control PDUs.
-- ``# ponytail:`` ultimate-hop-popping only (the egress LSR pops its own label);
-  no penultimate-hop-popping / implicit-null. Upgrade = advertise label 3 for
-  connected FECs and pop one hop earlier.
+- ``# ponytail:`` only Implicit Null (3) is modelled; Explicit Null (0/2, RFC
+  3032 sec 2.1) is out of scope. Label bases default to 16+ so they never
+  collide with 0-3; if a caller ever passes a lower base, allocation would
+  need an explicit skip-list.
 - ``# ponytail:`` VPNv4 NLRI ride a side-channel VpnUpdate on TCP:179, sourced
   from the loopback to each iBGP peer loopback (peer set reused from the
   sibling ``BgpProcess`` config). We don't ride BGP's live session because the
@@ -58,6 +68,8 @@ if TYPE_CHECKING:  # pragma: no cover
     from engine.netstack.network import Network
 
 logger = logging.getLogger(__name__)
+
+LABEL_IMPLICIT_NULL = 3  # RFC 3032 sec 2.1 -- signalled, never carried on the wire
 
 
 def _schedule(net: Network, after: float, node_id: str, fn) -> None:
@@ -117,7 +129,14 @@ class LdpProcess:
         _schedule(net, self.interval, self.router.node_id, lambda: self._tick(net))
 
     def _advertise(self, net: Network) -> None:
-        binds = {str(p): self._local_label(p) for p in self._fecs()}
+        # PHP: we're the LSP egress for our own connected FECs, so advertise
+        # Implicit Null instead of a real local label -- the penultimate hop
+        # pops instead of swapping-to-us.
+        connected = {r.prefix for r in self.router.routes if r.source == "connected"}
+        binds = {
+            str(p): LABEL_IMPLICIT_NULL if p in connected else self._local_label(p)
+            for p in self._fecs()
+        }
         for name, iface in self.router.interfaces.items():
             if not iface.is_up or not iface.ip or name in self.router.iface_vrf:
                 continue
@@ -168,7 +187,12 @@ class LdpProcess:
             if out_label is None or adj is None:
                 continue
             mac, ifn = adj
-            entry = LfibEntry(str(p), "swap", out_label, nh, mac, ifn)
+            # PHP: next hop is the FEC's egress and signalled Implicit Null ->
+            # we're the penultimate hop, pop instead of swap-to-3.
+            if out_label == LABEL_IMPLICIT_NULL:
+                entry = LfibEntry(str(p), "php", None, nh, mac, ifn)
+            else:
+                entry = LfibEntry(str(p), "swap", out_label, nh, mac, ifn)
             lfib[self._local_label(p)] = entry
             fec[p] = entry
         self.router.lfib = lfib
