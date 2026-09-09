@@ -56,6 +56,12 @@ logger = logging.getLogger(__name__)
 ARP_TIMEOUT = 1.0        # seconds between ARP attempts
 ARP_RETRIES = 3          # attempts before pending packets are dropped
 ARP_MAX_PENDING = 32     # queued packets per unresolved next-hop
+# RFC 1122 §2.3.2.1 requires aging but sets no value; real stacks range from
+# ~4 min (some embedded/AP gear) to 4h (Cisco IOS default). 1200s (20 min) is
+# Juniper's default and a common middle ground — long enough that a converged
+# lab doesn't re-ARP mid-test, short enough that a MAC change is picked up
+# without waiting hours. Configurable per device via intent (see netlab.py).
+ARP_TTL = 1200.0
 
 
 class Device:
@@ -157,6 +163,12 @@ class L3Device(Device):
         self._arp_pending: dict[IPv4Address, list[Ipv4Packet]] = {}
         # next-hop ip -> request attempts so far
         self._arp_attempts: dict[IPv4Address, int] = {}
+        # entry lifetime; configurable via intent (netlab.py _apply_intent).
+        self.arp_ttl: float = ARP_TTL
+        # ip -> current aging-timer sequence (sequence-guard: a stale expiry
+        # callback from a superseded refresh must no-op, same idiom as
+        # switching.py's _delay_seq).
+        self._arp_age_seq: dict[IPv4Address, int] = {}
         # IPv6 neighbor cache — same shape and pending machinery as ARP.
         self.nd_cache: dict[IPv6Address, tuple[MacAddr, str]] = {}
         self._nd_pending: dict[IPv6Address, list[Ipv6Packet]] = {}
@@ -258,11 +270,36 @@ class L3Device(Device):
             for _pkt in stale:
                 net.record_drop("arp_timeout")
 
+    # ----- aging (RFC 1122 §2.3.2.1) ------------------------------------------
+    def _refresh_arp_age(self, net: Network, ip: IPv4Address) -> None:
+        """(Re)arm this entry's expiry timer. One timer per entry, guarded by
+        a per-ip sequence so a stale timer from before the last refresh can
+        never evict a freshly-learned entry (same idiom as switching.py's
+        _delay_seq/_tc_seq)."""
+        seq = self._arp_age_seq.get(ip, 0) + 1
+        self._arp_age_seq[ip] = seq
+        net.scheduler.schedule_after(
+            self.arp_ttl,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e, ip=ip, seq=seq: self._arp_expire(ip, seq),
+                node_id=self.node_id,
+            ),
+        )
+
+    def _arp_expire(self, ip: IPv4Address, seq: int) -> None:
+        if self._arp_age_seq.get(ip) != seq:
+            return  # superseded by a later refresh — stale, no-op
+        self.arp_table.pop(ip, None)
+        self._arp_age_seq.pop(ip, None)
+
     # ----- ARP ingress -------------------------------------------------------
     def _handle_arp(self, net: Network, iface: Interface, arp: ArpPacket) -> None:
         # Learn the sender either way (gratuitous learning, like real stacks).
         if str(arp.sender_ip) != "0.0.0.0":
             self.arp_table[arp.sender_ip] = (MacAddr(arp.sender_mac), iface.name)
+            self._refresh_arp_age(net, arp.sender_ip)
             self._flush_pending(net, arp.sender_ip)
 
         if arp.op == "request" and iface.has_ip(arp.target_ip):
