@@ -13,6 +13,7 @@ routes with their administrative distance.
 """
 from __future__ import annotations
 
+import zlib
 from dataclasses import dataclass, field, replace
 from ipaddress import (
     IPv4Address,
@@ -88,23 +89,61 @@ class Route:
         return d
 
 
-def _lpm(routes: list[Route], dst: IPv4Address) -> Route | None:
-    """Longest-prefix match over a route list; ties broken by (ad, metric).
-    Shared by the global RIB and every per-VRF RIB."""
-    best: Route | None = None
+def flow_key_v4(pkt: Ipv4Packet) -> bytes:
+    """Deterministic 5-tuple (src, dst, proto, src_port, dst_port) for ECMP
+    per-flow hashing, encoded as fixed-width bytes.
+
+    Degrades to a 3-tuple (no ports) for packets with no L4 ports — ICMP,
+    non-first fragments — rather than inventing fake ports. Byte order is
+    fixed here and nowhere else, so it need not match wire format."""
+    parts = [pkt.src.packed, pkt.dst.packed, pkt.proto.to_bytes(1, "big")]
+    sport = getattr(pkt.payload, "src_port", None)
+    dport = getattr(pkt.payload, "dst_port", None)
+    if sport is not None and dport is not None:
+        parts.append(sport.to_bytes(2, "big"))
+        parts.append(dport.to_bytes(2, "big"))
+    return b"".join(parts)
+
+
+def _lpm(
+    routes: list[Route], dst: IPv4Address, flow_key: bytes | None = None
+) -> Route | None:
+    """Longest-prefix match over a route list; ties broken by (ad, metric),
+    and — among routes still tied on (prefixlen, ad, metric), i.e. genuinely
+    equal-cost — by a deterministic per-flow hash (ECMP). Shared by the
+    global RIB and every per-VRF RIB.
+
+    ``flow_key`` is ``None`` for lookups with no packet context (BGP
+    next-hop resolution, ARP/DNS egress, reachability tool, ...): those keep
+    picking the first-installed route of the winning group, exactly as
+    before ECMP existed.
+
+    Hashing uses ``zlib.crc32``, never the builtin ``hash()`` — the builtin
+    is salted per-process by ``PYTHONHASHSEED``, which would make the chosen
+    path differ across runs and break journal replay determinism.
+    """
+    best_key: tuple[int, int, int] | None = None
+    candidates: list[Route] = []
     for r in routes:
         if dst not in r.prefix:
             continue
-        if (
-            best is None
-            or r.prefix.prefixlen > best.prefix.prefixlen
-            or (
-                r.prefix.prefixlen == best.prefix.prefixlen
-                and (r.ad, r.metric) < (best.ad, best.metric)
-            )
-        ):
-            best = r
-    return best
+        key = (-r.prefix.prefixlen, r.ad, r.metric)
+        if best_key is None or key < best_key:
+            best_key = key
+            candidates = [r]
+        elif key == best_key:
+            candidates.append(r)
+    if not candidates:
+        return None
+    if flow_key is None or len(candidates) == 1:
+        return candidates[0]
+    # Equal-cost group: pick a stable order independent of RIB insertion
+    # order (never rely on set/dict iteration order for this), then hash
+    # the flow onto it so every packet of the same flow lands on the same
+    # index every time.
+    ordered = sorted(candidates, key=lambda r: (str(r.next_hop), r.iface_name or ""))
+    idx = zlib.crc32(flow_key) % len(ordered)
+    return ordered[idx]
 
 
 @dataclass(slots=True)
@@ -143,8 +182,8 @@ class Vrf:
     vpn_label: int = 0
     routes: list[Route] = field(default_factory=list)
 
-    def lookup(self, dst: IPv4Address) -> Route | None:
-        return _lpm(self.routes, dst)
+    def lookup(self, dst: IPv4Address, flow_key: bytes | None = None) -> Route | None:
+        return _lpm(self.routes, dst, flow_key)
 
     def install(self, route: Route) -> None:
         self.routes = [
@@ -164,7 +203,18 @@ class Vrf:
 
 @dataclass(slots=True)
 class Route6:
-    """An IPv6 RIB entry — same shape as :class:`Route`."""
+    """An IPv6 RIB entry — same shape as :class:`Route`.
+
+    # ponytail: v6 ECMP deferred. ``lookup6`` below is a hand-duplicated LPM
+    # loop, not routed through the shared ``_lpm``/flow-hash used for v4, and
+    # ``egress_for6``/``_forward6`` never build a flow key — wiring ECMP
+    # through here means unifying lookup6 with _lpm *and* threading a v6
+    # flow key (Ipv6Packet has no direct L4-port access like Ipv4Packet) down
+    # through egress_for6 and its L3Device base override. Real work, not a
+    # free extension of the v4 path. Upgrade path: make lookup6 call _lpm
+    # (Route6 already has the required ad/metric/prefix/next_hop/iface_name
+    # fields) and add a flow_key6 param to lookup6/egress_for6/_forward6.
+    """
 
     prefix: IPv6Network
     next_hop: IPv6Address | None      # None = directly connected
@@ -503,12 +553,15 @@ class Router(L3Device):
             if not (r.source == source and (prefixes is None or r.prefix in prefixes))
         ]
 
-    def lookup(self, dst: IPv4Address) -> Route | None:
-        """Longest-prefix match; ties broken by admin distance then metric."""
-        return _lpm(self.routes, dst)
+    def lookup(self, dst: IPv4Address, flow_key: bytes | None = None) -> Route | None:
+        """Longest-prefix match; ties broken by admin distance/metric, then
+        (for a genuine equal-cost group) a deterministic per-flow hash."""
+        return _lpm(self.routes, dst, flow_key)
 
-    def egress_for(self, dst: IPv4Address) -> tuple[Interface, IPv4Address] | None:
-        route = self.lookup(dst)
+    def egress_for(
+        self, dst: IPv4Address, flow_key: bytes | None = None
+    ) -> tuple[Interface, IPv4Address] | None:
+        route = self.lookup(dst, flow_key)
         if route is None:
             return None
         next_hop = route.next_hop if route.next_hop is not None else dst
@@ -669,7 +722,7 @@ class Router(L3Device):
             return
         pkt.ttl -= 1
 
-        route = self.lookup(pkt.dst)
+        route = self.lookup(pkt.dst, flow_key_v4(pkt))
         if route is None:
             net.record_drop("no_route")
             self._send_icmp_error(net, pkt, icmp_type=3, code=0)
@@ -677,7 +730,7 @@ class Router(L3Device):
         next_hop = route.next_hop if route.next_hop is not None else pkt.dst
         out = self.interfaces.get(route.iface_name) if route.iface_name else None
         if out is None:
-            resolved = self.egress_for(pkt.dst)
+            resolved = self.egress_for(pkt.dst, flow_key_v4(pkt))
             if resolved is None:
                 net.record_drop("no_route")
                 self._send_icmp_error(net, pkt, icmp_type=3, code=0)
@@ -691,8 +744,9 @@ class Router(L3Device):
                     return
             elif in_iface.name == self.nat_outside:
                 self._nat_inbound(net, pkt)
-                # Destination may have changed; re-route.
-                resolved = self.egress_for(pkt.dst)
+                # Destination (and possibly port) may have changed; re-route
+                # with a freshly computed flow key.
+                resolved = self.egress_for(pkt.dst, flow_key_v4(pkt))
                 if resolved is None:
                     net.record_drop("no_route")
                     return
@@ -724,7 +778,7 @@ class Router(L3Device):
 
     def _vrf_deliver(self, net: Network, pkt: Ipv4Packet, vrf_name: str) -> None:
         vrf = self.vrfs.get(vrf_name)
-        route = vrf.lookup(pkt.dst) if vrf else None
+        route = vrf.lookup(pkt.dst, flow_key_v4(pkt)) if vrf else None
         if route is None:
             net.record_drop("no_route")
             self._send_icmp_error(net, pkt, icmp_type=3, code=0)
