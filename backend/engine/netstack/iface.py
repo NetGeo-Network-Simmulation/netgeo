@@ -110,6 +110,7 @@ class Interface:
         "lag_parent",
         "mac",
         "name",
+        "native_vlan",
         "queue_depth",
         "slaac",
         "stp_role",
@@ -136,6 +137,7 @@ class Interface:
         self.vlan_mode: str = "access"          # access | trunk
         self.access_vlan: int = 1
         self.trunk_vlans: set[int] | None = None  # None = allow all
+        self.native_vlan: int = 1               # trunk only: untagged <-> this VLAN
         self.enabled: bool = True
         self.attachment: LinkAttachment | None = None
         self.counters = IfaceCounters()
@@ -406,6 +408,7 @@ class Interface:
             "link_local": str(self.link_local),
             "vlan_mode": self.vlan_mode,
             "access_vlan": self.access_vlan,
+            "native_vlan": self.native_vlan,
             "up": self.is_up,
             "stp": {"state": self.stp_state, "role": self.stp_role},
             "counters": self.counters.as_dict(),

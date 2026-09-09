@@ -11,7 +11,7 @@ from ipaddress import IPv4Address, IPv4Network
 from app.models import Topology
 from engine.netstack import Network
 from engine.netstack.device import Host
-from engine.netstack.frames import PROTO_TCP, Ipv4Packet, TcpSegment
+from engine.netstack.frames import PROTO_TCP, EthernetFrame, Ipv4Packet, TcpSegment
 from engine.netstack.protocols.bgp import BgpProcess
 from engine.netstack.protocols.ospf import OspfProcess
 from engine.netstack.routing import AclRule, DhcpPool, Router
@@ -137,6 +137,104 @@ def test_vlan_trunk_carries_tagged_traffic():
     assert report.received == 3
     # Learned entries live in VLAN 10.
     assert any(row["vlan"] == 10 for row in sw1.mac_table_rows())
+
+
+def test_vlan_native_default_matches_legacy_hardcoded_vlan1():
+    """No native_vlan configured: an untagged frame on a trunk port still
+    classifies as VLAN 1 — identical to the old hardcoded behaviour."""
+    net = Network(seed=7)
+    sw = net.add_device(Switch("sw1"))
+    t1 = net.add_iface(sw, "gi0/24")
+    t1.vlan_mode = "trunk"
+    assert t1.native_vlan == 1  # default, unconfigured
+    frame = EthernetFrame(src_mac="02:00:00:00:00:01", dst_mac="ff:ff:ff:ff:ff:ff", vlan=None)
+    sw.on_frame(net, t1, frame)
+    assert any(row["vlan"] == 1 for row in sw.mac_table_rows())
+
+
+def test_vlan_native_untagged_on_wire_other_vlans_tagged():
+    """Native VLAN 99 crosses the trunk untagged; VLAN 5 stays tagged —
+    verified on the actual wire via the link capture, not just variables."""
+    net = Network(seed=7)
+    h1 = net.add_device(Host("h1"))
+    h2 = net.add_device(Host("h2"))
+    h3 = net.add_device(Host("h3"))
+    h4 = net.add_device(Host("h4"))
+    sw1 = net.add_device(Switch("sw1"))
+    sw2 = net.add_device(Switch("sw2"))
+    i1 = net.add_iface(h1, "eth0", ["10.0.99.1/24"])
+    i2 = net.add_iface(h2, "eth0", ["10.0.99.2/24"])
+    i3 = net.add_iface(h3, "eth0", ["10.0.5.1/24"])
+    i4 = net.add_iface(h4, "eth0", ["10.0.5.2/24"])
+    a1 = net.add_iface(sw1, "gi0/1")
+    a3 = net.add_iface(sw1, "gi0/2")
+    t1 = net.add_iface(sw1, "gi0/24")
+    a2 = net.add_iface(sw2, "gi0/1")
+    a4 = net.add_iface(sw2, "gi0/2")
+    t2 = net.add_iface(sw2, "gi0/24")
+    a1.access_vlan = 99
+    a2.access_vlan = 99
+    a3.access_vlan = 5
+    a4.access_vlan = 5
+    for t in (t1, t2):
+        t.vlan_mode = "trunk"
+        t.native_vlan = 99
+    net.connect("acc1", i1, a1)
+    net.connect("acc2", i2, a2)
+    net.connect("acc3", i3, a3)
+    net.connect("acc4", i4, a4)
+    net.connect("trunk", t1, t2)
+    assert net.ping("h1", "10.0.99.2", count=2, settle=5.0).received == 2
+    assert net.ping("h3", "10.0.5.2", count=2).received == 2
+
+    tx = [r for r in net.capture.records(link_id="trunk", limit=1000) if r.direction == "tx"]
+    native_src = str(h1.interfaces["eth0"].mac)
+    other_src = str(h3.interfaces["eth0"].mac)
+    native_frames = [r for r in tx if r.layers["eth"]["src"] == native_src]
+    other_frames = [r for r in tx if r.layers["eth"]["src"] == other_src]
+    assert native_frames and all(r.layers["eth"]["vlan"] is None for r in native_frames)
+    assert other_frames and all(r.layers["eth"]["vlan"] == 5 for r in other_frames)
+
+
+def test_vlan_mismatched_native_bridges_untagged_traffic():
+    """802.1Q behaviour, not a bug: differing native VLANs on the two trunk
+    ends silently move untagged traffic between VLAN numbers."""
+    net = Network(seed=7)
+    h1 = net.add_device(Host("h1"))
+    h2 = net.add_device(Host("h2"))
+    sw1 = net.add_device(Switch("sw1"))
+    sw2 = net.add_device(Switch("sw2"))
+    i1 = net.add_iface(h1, "eth0", ["10.0.0.1/24"])
+    i2 = net.add_iface(h2, "eth0", ["10.0.0.2/24"])
+    a1 = net.add_iface(sw1, "gi0/1")
+    t1 = net.add_iface(sw1, "gi0/24")
+    a2 = net.add_iface(sw2, "gi0/1")
+    t2 = net.add_iface(sw2, "gi0/24")
+    a1.access_vlan = 10
+    a2.access_vlan = 20
+    t1.vlan_mode = "trunk"
+    t2.vlan_mode = "trunk"
+    t1.native_vlan = 10
+    t2.native_vlan = 20
+    net.connect("acc1", i1, a1)
+    net.connect("acc2", i2, a2)
+    net.connect("trunk", t1, t2)
+    report = net.ping("h1", "10.0.0.2", count=3, settle=5.0)
+    assert report.received == 3  # crosses despite the VLAN-number mismatch
+
+
+def test_vlan_native_not_in_trunk_vlans_is_dropped():
+    """Native VLAN gets no special pass through the allowed-VLAN filter."""
+    net = Network(seed=7)
+    sw = net.add_device(Switch("sw1"))
+    t1 = net.add_iface(sw, "gi0/24")
+    t1.vlan_mode = "trunk"
+    t1.native_vlan = 99
+    t1.trunk_vlans = {10, 20}  # 99 not allowed
+    frame = EthernetFrame(src_mac="02:00:00:00:00:02", dst_mac="ff:ff:ff:ff:ff:ff", vlan=None)
+    sw.on_frame(net, t1, frame)
+    assert net.drops.get("vlan_filtered", 0) == 1
+    assert not sw.mac_table_rows()  # never learned — dropped before MAC learning
 
 
 def test_stp_blocks_redundant_path_and_traffic_survives():
