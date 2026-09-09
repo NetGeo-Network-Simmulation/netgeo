@@ -44,6 +44,9 @@ Node ``intent`` fields understood by the builder (all optional):
     acl: {"<iface-name>": {"in": [{"action": "deny", "proto": "icmp",
                                    "src": "10.0.0.0/8", "dst": null,
                                    "dst_port": null}], "out": [...]}}
+          # IPv6 rules use "src6"/"dst6" (IPv6Network strings) instead of
+          # "src"/"dst", and proto "icmpv6"; "icmp_type" matches
+          # IcmpMessage/Icmpv6Message.type (e.g. 135/136 = NDP NS/NA).
 """
 from __future__ import annotations
 
@@ -375,7 +378,12 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
                         proto=r.get("proto"),
                         src=IPv4Network(r["src"]) if r.get("src") else None,
                         dst=IPv4Network(r["dst"]) if r.get("dst") else None,
+                        src6=IPv6Network(r["src6"]) if r.get("src6") else None,
+                        dst6=IPv6Network(r["dst6"]) if r.get("dst6") else None,
                         dst_port=int(r["dst_port"]) if r.get("dst_port") else None,
+                        icmp_type=(
+                            int(r["icmp_type"]) if r.get("icmp_type") is not None else None
+                        ),
                     )
                 )
             if rules:
