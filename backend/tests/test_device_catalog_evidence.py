@@ -6,6 +6,7 @@ gone and every SKU carries a per-field evidence block instead of silence.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 CATALOG_PATH = (
@@ -35,3 +36,43 @@ def test_evidence_entries_only_use_allowed_statuses():
         for field, entry in device["evidence"].items():
             status = entry.get("status")
             assert status in ALLOWED_STATUSES, f"{device['id']}.{field}={status!r}"
+
+
+def test_no_device_uses_the_all_placeholder():
+    """K-D2: the old `{"_all": {...}}` shortcut claimed every field was unchecked
+    even after the 2026-09-08 audit proved 23/23 SKUs had in fact been checked.
+    It must never come back as a way to avoid writing per-field evidence.
+    """
+    data = _load()
+    for device in data["devices"]:
+        assert "_all" not in device["evidence"], device["id"]
+
+
+def test_evidence_keys_are_real_fields_on_the_device():
+    """Every key inside a device's `evidence` block must be a field that
+    actually exists on that device, so evidence can't silently drift from the
+    schema it claims to document. No exceptions needed: `model` (used by
+    cambium-epmp1000 and cambium-epmp3000, whose model numbers don't match
+    the vendor's official ordering info) is itself a regular top-level field
+    on every device, so it passes this check like any other.
+    """
+    data = _load()
+    for device in data["devices"]:
+        for field in device["evidence"]:
+            assert field in device, (
+                f"{device['id']}.evidence has key {field!r} which is not a "
+                "field on the device"
+            )
+
+
+def test_evidence_entries_with_a_source_url_have_a_retrieved_date():
+    data = _load()
+    date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+    for device in data["devices"]:
+        for field, entry in device["evidence"].items():
+            if "source_url" in entry:
+                retrieved = entry.get("retrieved_date")
+                assert retrieved, f"{device['id']}.{field} has source_url but no retrieved_date"
+                assert date_re.match(retrieved), (
+                    f"{device['id']}.{field}.retrieved_date={retrieved!r} not YYYY-MM-DD"
+                )
