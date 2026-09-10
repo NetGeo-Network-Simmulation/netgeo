@@ -65,6 +65,24 @@ def test_evidence_keys_are_real_fields_on_the_device():
             )
 
 
+def test_no_verified_evidence_still_claims_uncorrected():
+    """K-D3: 29 fields across 17 SKUs got their catalog values corrected to
+    match the vendor source their evidence cites. A `status: V` entry means
+    "the vendor value is known and the catalog now reflects it" — it must
+    never still say the old value was left in place, or the evidence would
+    be lying about its own correction (see device-catalog-correction-table.md).
+    """
+    data = _load()
+    for device in data["devices"]:
+        for field, entry in device["evidence"].items():
+            if entry.get("status") == "V":
+                note = entry.get("note", "")
+                assert "not corrected" not in note.lower(), (
+                    f"{device['id']}.{field} is status V but its note still "
+                    f"claims the value was not corrected: {note!r}"
+                )
+
+
 def test_evidence_entries_with_a_source_url_have_a_retrieved_date():
     data = _load()
     date_re = re.compile(r"^\d{4}-\d{2}-\d{2}$")
