@@ -39,11 +39,26 @@ LSA P-1c):
   (summaries are only *consumed* from the backbone, the RFC loop rule);
 - inter-area routes installed as ``O IA``-style entries (intra-area wins);
 - optional **default originate**: ABR injects 0.0.0.0/0 into leaf areas;
+- **Type-5 AS-external LSA / Type-4 ASBR-summary** (RFC 2328 §12.4.3-4): an
+  ASBR redistributes routing-table entries (``redistribute: {"static": {...}}``
+  config, matched against ``Route.source``) as Type-5 LSAs, injected into
+  every area the ASBR touches and relayed unmodified area-to-area by ABRs
+  (``_install_everywhere`` — unlike Type-3, the same LSA instance crosses
+  every boundary rather than being re-originated per area). **E1** cost =
+  external metric + internal cost to the ASBR; **E2** (default) cost =
+  external metric alone, with internal cost to the ASBR used only as a
+  tie-break, never folded into the installed metric. Preference order is
+  intra-area > inter-area > E1 > E2 (RFC 2328 §16.4.1). An ABR that can
+  reach an ASBR natively in one area originates a Type-4 describing that
+  cost into its other areas — without it, a Type-5 arriving elsewhere has
+  no path to compute to the ASBR and the external route can't install
+  there;
 - dead-interval neighbor expiry, LSA re-origination and route withdrawal.
 
-Not modelled (documented): NSSA/stub area types, LSA aging/refresh, virtual
-links, authentication, OSPFv3, ExStart/Exchange/Loading (LSAs sync in one
-shot on Full).
+Not modelled (documented): NSSA/stub area types and Type-7 LSAs, LSA
+aging/refresh, virtual links, authentication, OSPFv3, ExStart/Exchange/
+Loading (LSAs sync in one shot on Full), non-zero Type-5 forwarding address,
+and external route tags.
 """
 from __future__ import annotations
 
@@ -173,7 +188,55 @@ class NetworkLsa:
         return NetworkLsa(self.dr_ip, self.seq, self.mask, list(self.attached_routers))
 
 
-Lsa = RouterLsa | SummaryLsa | NetworkLsa
+@dataclass(slots=True)
+class AsExternalLsa:
+    """Type-5 AS-external LSA (RFC 2328 §12.4.3), originated by an ASBR for
+    a redistributed prefix. Floods the whole AS unmodified — ABRs relay it
+    into every area they're attached to instead of re-originating it like a
+    Type-3 summary (see ``_install_everywhere``)."""
+
+    router_id: str          # originating ASBR
+    seq: int
+    prefix: str              # "a.b.c.d/nn"
+    metric: int               # external (redistribution) metric
+    metric_type: int = 2      # 1 (E1: += internal cost to ASBR) | 2 (E2: external only)
+
+    @property
+    def key(self) -> str:
+        return f"ext|{self.router_id}|{self.prefix}"
+
+    @property
+    def wire_size(self) -> int:
+        return 36
+
+    def copy(self) -> AsExternalLsa:
+        return AsExternalLsa(self.router_id, self.seq, self.prefix, self.metric, self.metric_type)
+
+
+@dataclass(slots=True)
+class AsbrSummaryLsa:
+    """Type-4 ASBR-summary LSA (RFC 2328 §12.4.3): tells other areas how to
+    reach an ASBR. Originated once by the ABR that can see the ASBR natively
+    in one of its areas, then relayed AS-wide unmodified, same as Type-5."""
+
+    router_id: str    # originating ABR
+    seq: int
+    asbr_id: str      # the ASBR this LSA describes reachability to
+    metric: int       # originating ABR's own cost to the ASBR
+
+    @property
+    def key(self) -> str:
+        return f"asbr|{self.router_id}|{self.asbr_id}"
+
+    @property
+    def wire_size(self) -> int:
+        return 28
+
+    def copy(self) -> AsbrSummaryLsa:
+        return AsbrSummaryLsa(self.router_id, self.seq, self.asbr_id, self.metric)
+
+
+Lsa = RouterLsa | SummaryLsa | NetworkLsa | AsExternalLsa | AsbrSummaryLsa
 
 
 @dataclass(slots=True)
@@ -226,6 +289,7 @@ class OspfProcess:
         areas: dict[str, int] | None = None,
         default_originate: bool = False,
         priorities: dict[str, int] | None = None,
+        redistribute: dict[str, dict] | None = None,
     ) -> None:
         self.router = router
         self.router_id = router_id or self._pick_router_id()
@@ -235,6 +299,8 @@ class OspfProcess:
         self.areas = {k: int(v) for k, v in (areas or {}).items()}  # iface -> area
         self.default_originate = default_originate
         self.priorities = {k: int(v) for k, v in (priorities or {}).items()}  # iface -> priority
+        # source ("static"|"connected"|...) -> (metric, metric_type 1|2)
+        self.redistribute = self._parse_redistribute(redistribute)
         # (router_id, area) -> neighbor
         self.neighbors: dict[tuple[str, int], _Neighbor] = {}
         # iface name -> DR/BDR election state
@@ -243,6 +309,10 @@ class OspfProcess:
         self.lsdb: dict[int, dict[str, Lsa]] = {}
         # (area, prefix) -> our originated summary (change detection)
         self._my_summaries: dict[tuple[int, str], SummaryLsa] = {}
+        # prefix -> our originated Type-5 (ASBR redistribution, change detection)
+        self._my_externals: dict[str, AsExternalLsa] = {}
+        # asbr_id -> our originated Type-4 (ABR only, change detection)
+        self._my_asbr_summaries: dict[tuple[int, str], AsbrSummaryLsa] = {}
         self._seq = 0
         self._started = False
         self._spf_pending = False
@@ -251,6 +321,20 @@ class OspfProcess:
     def _pick_router_id(self) -> str:
         ips = self.router.all_ips()
         return str(max(i.ip for i in ips)) if ips else self.router.name
+
+    @staticmethod
+    def _parse_redistribute(redistribute: dict[str, dict] | None) -> dict[str, tuple[int, int]]:
+        return {
+            str(src): (int((cfg or {}).get("metric", 20)), int((cfg or {}).get("metric_type", 2)))
+            for src, cfg in (redistribute or {}).items()
+        }
+
+    def set_redistribute(self, net: Network, redistribute: dict[str, dict] | None) -> None:
+        """Runtime toggle — lets a scenario pull static/connected routes back
+        out of OSPF (or change what's redistributed) without tearing down
+        and rebuilding the process."""
+        self.redistribute = self._parse_redistribute(redistribute)
+        self._originate_external_lsas(net)
 
     def iface_area(self, iface_name: str) -> int:
         return self.areas.get(iface_name, BACKBONE)
@@ -298,6 +382,7 @@ class OspfProcess:
                 self._arm_wait_timer(net, iface.name, self.iface_area(iface.name))
         for area in self.my_areas():
             self._originate_lsa(net, area, flood=False)
+        self._originate_external_lsas(net, flood=False)
         self._tick(net)
 
     def _tick(self, net: Network) -> None:
@@ -678,6 +763,106 @@ class OspfProcess:
         self._flood(net, lsa, area, exclude_rid=None)
         self._schedule_spf(net)
 
+    def _install_everywhere(self, net: Network, lsa: Lsa, flood: bool = True) -> None:
+        """Inject an AS-scoped LSA (Type-5, or a relayed/originated Type-4)
+        into every area this router touches. Unlike Type-3, these aren't
+        re-originated per area — the same LSA instance just has to reach
+        every area's LSDB so ABRs relay it on unchanged (RFC 2328 §12.4.3-4)."""
+        for area in self.my_areas():
+            db = self._area_db(area)
+            current = db.get(lsa.key)
+            if current is not None and current.seq >= lsa.seq:
+                continue
+            db[lsa.key] = lsa.copy()
+            if flood:
+                self._flood(net, lsa, area, exclude_rid=None)
+
+    def _originate_external_lsas(self, net: Network, flood: bool = True) -> None:
+        """ASBR redistribution (RFC 2328 §12.4.3): match routing-table entries
+        against ``self.redistribute`` (source -> (metric, metric_type)) and
+        originate one Type-5 per redistributed prefix. Withdrawal (config
+        change, or the redistributed route disappearing) uses the same
+        LSInfinity trick as Type-3 summaries."""
+        wanted: dict[str, tuple[int, int]] = {}
+        for route in self.router.routes:
+            cfg = self.redistribute.get(route.source)
+            if cfg is not None:
+                wanted[str(route.prefix)] = cfg
+
+        for prefix, (metric, mtype) in wanted.items():
+            current = self._my_externals.get(prefix)
+            if current is not None and (current.metric, current.metric_type) == (metric, mtype):
+                continue
+            self._seq += 1
+            lsa = AsExternalLsa(self.router_id, self._seq, prefix, metric, mtype)
+            self._my_externals[prefix] = lsa
+            self._install_everywhere(net, lsa, flood=flood)
+
+        for prefix, lsa in list(self._my_externals.items()):
+            if prefix in wanted or lsa.metric >= LS_INFINITY:
+                continue
+            self._seq += 1
+            dead = AsExternalLsa(self.router_id, self._seq, prefix, LS_INFINITY, lsa.metric_type)
+            self._my_externals[prefix] = dead
+            self._install_everywhere(net, dead, flood=flood)
+
+        self._schedule_spf(net)
+
+    def _originate_asbr_summaries(
+        self,
+        net: Network,
+        asbr_cost_by_area: dict[int, dict[str, int]],
+        asbr_native_by_area: dict[int, dict[str, int]],
+    ) -> None:
+        """Type-4 (RFC 2328 §12.4.3): mirrors Type-3 summarization exactly
+        (``_originate_summaries``) — re-originated per target area, not
+        blindly relayed like Type-5. A backbone ABR also re-advertises what
+        it learned about an ASBR from one leaf area's Type-4 into its other
+        leaf areas, so a multi-hop area chain converges the same way
+        inter-area prefixes do. Without a Type-4 in an area, a Type-5
+        arriving there has no path to compute to the ASBR that originated
+        it, so the external route can't install (§16.3)."""
+        if not self.is_abr:
+            return
+        wanted: dict[tuple[int, str], int] = {}   # (into_area, asbr_id) -> metric
+        backbone_asbrs: dict[str, int] = dict(asbr_cost_by_area.get(BACKBONE, {}))
+
+        for area in self.my_areas():
+            if area == BACKBONE:
+                for leaf in self.my_areas():
+                    if leaf == BACKBONE:
+                        continue
+                    for asbr, cost in asbr_cost_by_area.get(leaf, {}).items():
+                        cur = wanted.get((BACKBONE, asbr))
+                        if cur is None or cost < cur:
+                            wanted[(BACKBONE, asbr)] = cost
+            else:
+                for asbr, cost in backbone_asbrs.items():
+                    if asbr in asbr_native_by_area.get(area, {}):
+                        continue  # already directly known there
+                    wanted[(area, asbr)] = cost
+
+        for (area, asbr), cost in sorted(wanted.items()):
+            if asbr == self.router_id:
+                continue
+            current = self._my_asbr_summaries.get((area, asbr))
+            if current is not None and current.metric == cost:
+                continue
+            self._seq += 1
+            lsa = AsbrSummaryLsa(self.router_id, self._seq, asbr, cost)
+            self._my_asbr_summaries[(area, asbr)] = lsa
+            self._area_db(area)[lsa.key] = lsa
+            self._flood(net, lsa, area, exclude_rid=None)
+
+        for (area, asbr), lsa in list(self._my_asbr_summaries.items()):
+            if (area, asbr) in wanted or lsa.metric >= LS_INFINITY:
+                continue
+            self._seq += 1
+            dead = AsbrSummaryLsa(self.router_id, self._seq, asbr, LS_INFINITY)
+            self._my_asbr_summaries[(area, asbr)] = dead
+            self._area_db(area)[dead.key] = dead
+            self._flood(net, dead, area, exclude_rid=None)
+
     def _flood(
         self, net: Network, lsa: Lsa, area: int, exclude_rid: str | None
     ) -> None:
@@ -721,6 +906,14 @@ class OspfProcess:
                 db[lsa.key] = lsa
                 self._flood(net, lsa, area, exclude_rid=sender_rid)
                 changed = True
+                if isinstance(lsa, AsExternalLsa):
+                    # Type-5 floods the whole AS unmodified, not just this
+                    # area — an ABR relays the same instance on into its
+                    # other areas. Type-4 differs (RFC 2328 §12.4.3): each
+                    # ABR *re-originates its own*, scoped to its own areas,
+                    # exactly like a Type-3 summary — see
+                    # ``_originate_asbr_summaries``, not a blind relay here.
+                    self._install_everywhere(net, lsa)
         if changed:
             self._schedule_spf(net)
 
@@ -809,16 +1002,28 @@ class OspfProcess:
     def _run_spf(self, net: Network) -> None:
         self._spf_pending = False
         local_prefixes = {ip.network for ip in self.router.all_ips()}
-        # prefix -> (next_hop, iface, metric, is_intra)
-        desired: dict[IPv4Network, tuple[IPv4Address, str, int, bool]] = {}
+        # prefix -> (next_hop, iface, metric, rank, tiebreak)
+        # rank: 0=intra-area, 1=inter-area (Type-3), 2=E1, 3=E2 (RFC 2328 §16.4.1)
+        desired: dict[IPv4Network, tuple[IPv4Address, str, int, int, int]] = {}
         # area -> {prefix: metric} of *intra-area* reachable prefixes (for ABR
         # summarization) — includes our own connected prefixes in that area.
         intra_by_area: dict[int, dict[str, int]] = {}
+        # area -> {asbr_id: cost} best cost to each ASBR *when standing in
+        # that area* — native RouterLsa reachability, or via a Type-4 seen
+        # there. Feeds Type-4 (re-)origination into this router's other
+        # areas, exactly like intra_by_area feeds Type-3.
+        asbr_cost_by_area: dict[int, dict[str, int]] = {}
+        # area -> {asbr_id: cost}, native reachability only (no Type-4
+        # involved) — the "already known there, skip" check for Type-4
+        # origination, same role intra_by_area plays for Type-3.
+        asbr_native_by_area: dict[int, dict[str, int]] = {}
 
         for area in self.my_areas():
             dist, first_hop = self._spf_area(area)
             db = self._area_db(area)
             intra: dict[str, int] = {}
+            area_asbr_cost: dict[str, int] = {}
+            area_asbr_native: dict[str, int] = {}
             for iface in self._enabled_ifaces():
                 if self.iface_area(iface.name) == area:
                     for ip in iface.ips:
@@ -828,15 +1033,15 @@ class OspfProcess:
                 fh = first_hop.get(rid)
                 return self.neighbors.get((fh, area)) if fh else None
 
-            def offer(prefix: IPv4Network, nh, iface_name, total: int, is_intra: bool):
-                """Install preference: intra beats inter, then lower metric."""
+            def offer(prefix: IPv4Network, nh, iface_name, total: int, rank: int, tiebreak: int = 0):
+                """Install preference (RFC 2328 §16.4.1): lower rank always
+                wins outright, then lower total; ``tiebreak`` (E2's forwarding
+                cost to the ASBR) only breaks an exact (rank, total) tie and
+                is never folded into the installed metric."""
                 cur = desired.get(prefix)
-                if (
-                    cur is None
-                    or (is_intra and not cur[3])
-                    or (is_intra == cur[3] and total < cur[2])
-                ):
-                    desired[prefix] = (nh, iface_name, total, is_intra)
+                key = (rank, total, tiebreak)
+                if cur is None or key < (cur[3], cur[2], cur[4]):
+                    desired[prefix] = (nh, iface_name, total, rank, tiebreak)
 
             for lsa in db.values():
                 if isinstance(lsa, RouterLsa):
@@ -856,7 +1061,7 @@ class OspfProcess:
                             intra[target] = total
                         if prefix in local_prefixes:
                             continue
-                        offer(prefix, nbr.ip, nbr.iface_name, total, True)
+                        offer(prefix, nbr.ip, nbr.iface_name, total, 0)
                 elif isinstance(lsa, SummaryLsa):
                     # Consume summaries only from the backbone unless we are
                     # an internal (single-area) router — the RFC loop rule.
@@ -873,11 +1078,55 @@ class OspfProcess:
                     prefix = IPv4Network(lsa.prefix)
                     if prefix in local_prefixes:
                         continue
-                    offer(prefix, nbr.ip, nbr.iface_name, abr_dist + lsa.metric, False)
+                    offer(prefix, nbr.ip, nbr.iface_name, abr_dist + lsa.metric, 1)
+                elif isinstance(lsa, AsExternalLsa):
+                    # Type-5/Type-4 are AS-wide (not backbone-gated like
+                    # Type-3) — consumed in every area we have them in.
+                    asbr = lsa.router_id
+                    if asbr == self.router_id or lsa.metric >= LS_INFINITY:
+                        continue
+                    native = dist.get(asbr)
+                    via_rid, internal_cost = asbr, native
+                    if internal_cost is None:
+                        # Not natively reachable here — only a Type-4 from an
+                        # ABR in this area can bridge us to the ASBR; without
+                        # one this LSA is unusable in this area (§16.3).
+                        best: tuple[int, str] | None = None
+                        for t4 in db.values():
+                            if (
+                                not isinstance(t4, AsbrSummaryLsa)
+                                or t4.asbr_id != asbr
+                                or t4.metric >= LS_INFINITY
+                            ):
+                                continue
+                            abr_dist = dist.get(t4.router_id)
+                            if abr_dist is None:
+                                continue
+                            cand = abr_dist + t4.metric
+                            if best is None or cand < best[0]:
+                                best = (cand, t4.router_id)
+                        if best is None:
+                            continue
+                        internal_cost, via_rid = best
+                    else:
+                        area_asbr_native[asbr] = min(area_asbr_native.get(asbr, internal_cost), internal_cost)
+                    area_asbr_cost[asbr] = min(area_asbr_cost.get(asbr, internal_cost), internal_cost)
+                    nbr = nbr_for(via_rid)
+                    if nbr is None:
+                        continue
+                    prefix = IPv4Network(lsa.prefix)
+                    if prefix in local_prefixes:
+                        continue
+                    if lsa.metric_type == 1:
+                        offer(prefix, nbr.ip, nbr.iface_name, lsa.metric + internal_cost, 2)
+                    else:
+                        offer(prefix, nbr.ip, nbr.iface_name, lsa.metric, 3, tiebreak=internal_cost)
             intra_by_area[area] = intra
+            asbr_cost_by_area[area] = area_asbr_cost
+            asbr_native_by_area[area] = area_asbr_native
 
         self.router.withdraw_routes("ospf")
-        for prefix, (nh, iface_name, metric, _intra) in desired.items():
+        for prefix, (nh, iface_name, metric, _rank, _tiebreak) in desired.items():
             self.router.install_route(
                 Route(
                     prefix=prefix,
@@ -890,21 +1139,24 @@ class OspfProcess:
 
         if self.is_abr:
             self._originate_summaries(net, desired, intra_by_area)
+        self._originate_asbr_summaries(net, asbr_cost_by_area, asbr_native_by_area)
 
     # ----- ABR summarization (type-3) ---------------------------------------------
     def _originate_summaries(
         self,
         net: Network,
-        desired: dict[IPv4Network, tuple[IPv4Address, str, int, bool]],
+        desired: dict[IPv4Network, tuple[IPv4Address, str, int, int, int]],
         intra_by_area: dict[int, dict[str, int]],
     ) -> None:
         wanted: dict[tuple[int, str], int] = {}   # (into_area, prefix) -> metric
 
         backbone_prefixes: dict[str, int] = dict(intra_by_area.get(BACKBONE, {}))
-        # Inter-area prefixes learned via backbone summaries are re-advertised
-        # into leaf areas so multi-hop area chains (1—0—2) converge.
-        for prefix, (_nh, _if, metric, is_intra) in desired.items():
-            if not is_intra:
+        # Inter-area (Type-3) prefixes learned via backbone summaries are
+        # re-advertised into leaf areas so multi-hop area chains (1—0—2)
+        # converge. External (E1/E2, rank 2/3) routes are excluded — those
+        # are re-flooded verbatim as Type-5/Type-4, never repackaged as Type-3.
+        for prefix, (_nh, _if, metric, rank, _tb) in desired.items():
+            if rank == 1:
                 backbone_prefixes.setdefault(str(prefix), metric)
 
         for area in self.my_areas():
