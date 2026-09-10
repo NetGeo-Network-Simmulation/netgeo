@@ -23,7 +23,10 @@ Node ``intent`` fields understood by the builder (all optional):
             "priority": 120, "adv_interval": 1.0, "preempt": true}]
     lag: [{"name": "po1", "members": ["eth1", "eth2"], "mode": "lacp"}]
     ospf: {"enabled": true, "router_id": "1.1.1.1", "hello": 10,
-           "areas": {"eth0": 0, "eth1": 1}, "default_originate": false}
+           "areas": {"eth0": 0, "eth1": 1}, "default_originate": false,
+           "redistribute": {"static": {"metric": 20, "metric_type": 2}}}
+           # redistribute: source ("static"|"connected") -> Type-5 metric +
+           # metric_type (1=E1 adds internal cost to the ASBR, 2=E2 default)
     isis: {"enabled": true, "system_id": "1921.6800.1001", "level": 2,
            "hello": 10, "interfaces": ["eth0", "eth1"]}
            # "interfaces" may instead be {"eth0": 20, "eth1": 10} for per-iface
@@ -255,6 +258,7 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
                 str(k): int(v) for k, v in (ospf_cfg.get("areas") or {}).items()
             },
             default_originate=bool(ospf_cfg.get("default_originate", False)),
+            redistribute=ospf_cfg.get("redistribute"),
         )
 
     isis_cfg = intent.get("isis") or {}
