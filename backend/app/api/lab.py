@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict
 
 from app.api.deps import repo, translate_not_found
 from app.exceptions.base import NotFound, SimulationError
-from app.models import project_capabilities
+from app.models import Link, Node, NodeMode, Topology, project_capabilities
 from app.services import netlab, notify
 from app.store import MemoryRepository
 from app.store import NotFound as StoreNotFound
@@ -102,11 +102,103 @@ def _resolve_dst(lab: netlab.Lab, ref: str) -> str:
     raise NotFound(f"cannot resolve destination '{ref}' to an IP address")
 
 
+def _topo_node(topo: Topology, ref: str) -> Node | None:
+    """Find a stored ``Node`` by id or name — same lookup ``lab.net.find_device``
+    does inside the engine, but against the pre-build model, where ``Node.mode``
+    (sim|emul) is still visible (the engine ``Device`` built from it is not:
+    ``netlab.build_network`` never threads ``mode`` through)."""
+    for n in topo.nodes:
+        if n.id == ref or n.name == ref:
+            return n
+    return None
+
+
+def _direct_link(topo: Topology, a: Node, b: Node) -> Link | None:
+    """The link directly wiring ``a`` and ``b``'s interfaces, if any."""
+    a_ifaces = {i.id for i in a.interfaces}
+    b_ifaces = {i.id for i in b.interfaces}
+    for link in topo.links:
+        ends = {link.a_iface, link.b_iface}
+        if ends & a_ifaces and ends & b_ifaces:
+            return link
+    return None
+
+
+async def _emul_ping(src: Node, dst: Node, link: Link, count: int) -> dict:
+    """N-5: real ICMP echo between two ``mode=emul`` nodes over a real podman
+    container pair. Ephemeral by design — the containers and the per-link
+    network this spawns exist only for this call and are always torn down in
+    ``finally``, so there is no lifecycle to manage and no way to leak a
+    container: a crash mid-ping still lets ``destroy``/``destroy_link`` run
+    (both are idempotent — see ``test_podman_adaptor.py``/``test_link_e2e.py``).
+    Deliberately bypasses ``Lab``/the journal entirely: this never touches the
+    DES kernel, so it can't leave a false record for ``/seek`` to replay.
+    """
+    from podman.errors import APIError
+
+    from engine.emulation.ip_alloc import link_subnet
+    from engine.emulation.podman_adaptor import (
+        ImageNotLocal,
+        PodmanAdaptor,
+        PodmanSocketUnreachable,
+        UnknownKind,
+    )
+    from engine.model import InterfaceModel, LinkModel
+    from engine.netstack.device import Device as EmulDevice
+
+    src_iface = next(
+        (i for i in src.interfaces if i.id in (link.a_iface, link.b_iface)), None
+    )
+    dst_iface = next(
+        (i for i in dst.interfaces if i.id in (link.a_iface, link.b_iface)), None
+    )
+    if src_iface is None or dst_iface is None:
+        raise SimulationError(f"link {link.id!r} does not wire {src.name!r} to {dst.name!r}")
+
+    adaptor = PodmanAdaptor()
+    src_dev = EmulDevice(name=src.name, node_id=src.id, nos=str(src.nos), mode="emul")
+    dst_dev = EmulDevice(name=dst.name, node_id=dst.id, nos=str(dst.nos), mode="emul")
+    try:
+        await adaptor.spawn(src_dev)
+        await adaptor.spawn(dst_dev)
+        await adaptor.wire_link(
+            LinkModel(id=link.id, a_iface=src_iface.id, b_iface=dst_iface.id),
+            InterfaceModel(id=src_iface.id, node_id=src.id, name=src_iface.name),
+            InterfaceModel(id=dst_iface.id, node_id=dst.id, name=dst_iface.name),
+        )
+        _cidr, _gw, _ip_a, ip_b = link_subnet(link.id)
+        result = await adaptor.ping(src.id, ip_b, count=count)
+        return {**result, "src": src.id, "dst": dst.id, "path": "emulation"}
+    except (PodmanSocketUnreachable, UnknownKind, ImageNotLocal, APIError) as exc:
+        raise SimulationError(f"emulation ping failed: {exc}") from exc
+    finally:
+        await adaptor.destroy_link(link.id)
+        await adaptor.destroy(src_dev.node_id)
+        await adaptor.destroy(dst_dev.node_id)
+
+
 @router.post("/{project_id}/ping")
 async def lab_ping(
     project_id: str, body: PingRequest, r: Annotated[MemoryRepository, Depends(repo)]
 ):
     topo = await _topo(r, project_id)
+
+    src_node = _topo_node(topo, body.src)
+    if src_node is not None and src_node.mode == NodeMode.emul:
+        dst_node = _topo_node(topo, body.dst)
+        if dst_node is None or dst_node.mode != NodeMode.emul:
+            raise SimulationError(
+                f"mixed-mode ping unsupported: src={src_node.name!r} is mode=emul but "
+                f"dst={body.dst!r} is not a mode=emul node in this project (N-5 scope: "
+                "both endpoints must be emulated)"
+            )
+        link = _direct_link(topo, src_node, dst_node)
+        if link is None:
+            raise SimulationError(
+                f"no direct link between {src_node.name!r} and {dst_node.name!r}: "
+                "multi-hop emulation ping is out of scope (N-5)"
+            )
+        return await _emul_ping(src_node, dst_node, link, min(body.count, 50))
 
     def work():
         lab = _lab_for(topo)

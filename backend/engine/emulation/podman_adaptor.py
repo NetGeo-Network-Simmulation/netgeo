@@ -10,6 +10,7 @@ rather than silently no-op.
 from __future__ import annotations
 
 import os
+import re
 import socket as _socket
 
 from podman import PodmanClient
@@ -65,6 +66,24 @@ class ImageNotLocal(RuntimeError):
             f"NetGeo never pulls EULA-gated images — download it yourself per the "
             f"vendor's license (see docs/byoi/{kind}.md), then `podman pull {image}`."
         )
+
+
+def _parse_busybox_ping(output: str, sent: int) -> dict:
+    """Parse Alpine/busybox ``ping -c`` output (the FRR image's shell) into
+    the shape ``PingReport.as_dict()`` uses for sim-mode pings."""
+    rtts = [round(float(m), 3) for m in re.findall(r"time=([\d.]+)\s*ms", output)]
+    m = re.search(r"(\d+) packets transmitted, (\d+) packets received", output)
+    received = int(m.group(2)) if m else len(rtts)
+    return {
+        "sent": sent,
+        "received": received,
+        "loss_pct": round(100.0 * (sent - received) / sent, 1) if sent else 0.0,
+        "rtts_ms": rtts,
+        "min_ms": min(rtts) if rtts else None,
+        "avg_ms": round(sum(rtts) / len(rtts), 3) if rtts else None,
+        "max_ms": max(rtts) if rtts else None,
+        "errors": [] if received else ["no reply"],
+    }
 
 
 class PodmanAdaptor(EmulationAdaptor):
@@ -181,6 +200,22 @@ class PodmanAdaptor(EmulationAdaptor):
             return EmulationStatus.ABSENT
         container.reload()
         return EmulationStatus.RUNNING if container.status == "running" else EmulationStatus.STOPPED
+
+    async def ping(self, node_id: str, dest_ip: str, count: int = 4) -> dict:
+        client = self._get_client()
+        try:
+            container = client.containers.get(f"{CONTAINER_PREFIX}{node_id}")
+        except NotFound:
+            raise NotFound(f"no running container for node {node_id!r}") from None
+        # demux=True: exec_run's combined-stream bytes are docker/podman's
+        # multiplexed frame format (8-byte binary header per chunk) — decoding
+        # that as UTF-8 text corrupts/crashes on the header bytes. demux gives
+        # back already-deframed (stdout, stderr).
+        _exit_code, (stdout, _stderr) = container.exec_run(
+            ["ping", "-c", str(count), "-W", "2", dest_ip], demux=True
+        )
+        text = (stdout or b"").decode(errors="replace")
+        return _parse_busybox_ping(text, count)
 
     async def attach_console(self, node_id: str):
         raise NotImplementedError("attach_console lands with ws.py wiring")
