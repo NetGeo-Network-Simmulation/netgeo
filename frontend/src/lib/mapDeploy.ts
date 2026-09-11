@@ -64,9 +64,11 @@ const RACK_KINDS = new Set<NodeKind>(['olt', 'switch', 'router', 'firewall', 'se
 
 /**
  * Auto-name: `KIND-N` where N = count of existing nodes of that kind + 1.
- * Matches the pattern used by placeDevice for consistency.
+ * Matches the pattern used by placeDevice for consistency. Exported so
+ * other real placement paths (the rack-view Add Device picker) name nodes
+ * the same way instead of inventing a second scheme.
  */
-function autoName(nodes: Iterable<NodeModel>, kind: NodeKind): string {
+export function autoName(nodes: Iterable<NodeModel>, kind: NodeKind): string {
   const prefix = kind.toUpperCase() + '-';
   let n = 0;
   for (const node of nodes) {
