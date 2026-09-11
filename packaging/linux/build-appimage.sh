@@ -33,14 +33,21 @@ fi
 mkdir -p "$TOOLS_DIR"
 LINUXDEPLOY="$TOOLS_DIR/linuxdeploy-x86_64.AppImage"
 PLUGIN="$TOOLS_DIR/linuxdeploy-plugin-appimage-x86_64.AppImage"
+# ponytail: pinned dated release tags, not "continuous" (a rolling tag —
+# the file behind it changes over time, so a rebuild months later would
+# silently pack a different linuxdeploy/appimagetool). Bump these two
+# tags deliberately when a newer one is needed.
 for pair in \
-    "$LINUXDEPLOY https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage" \
-    "$PLUGIN https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage"
+    "$LINUXDEPLOY https://github.com/linuxdeploy/linuxdeploy/releases/download/1-alpha-20251107-1/linuxdeploy-x86_64.AppImage" \
+    "$PLUGIN https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/1-alpha-20250213-1/linuxdeploy-plugin-appimage-x86_64.AppImage"
 do
     dest="${pair%% *}"; url="${pair#* }"
     if [ ! -f "$dest" ]; then
         echo "Fetching $(basename "$dest") ..."
-        curl -L -o "$dest" -s "$url"
+        # -f: fail (non-zero exit) on HTTP errors instead of writing the
+        # error page body to $dest and reporting success — that was a
+        # silent-corruption bug, not just a missing retry.
+        curl -fL -o "$dest" -s "$url"
         chmod +x "$dest"
     fi
 done

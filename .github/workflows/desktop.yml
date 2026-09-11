@@ -4,8 +4,8 @@
 # Builds the PyInstaller all-in-one bundle (D1 edition, docs/design/13) for
 # Windows and Linux, wraps it into an install-ready artifact per platform
 # (Windows: Inno Setup .exe installer; Linux: tarball + packaging/linux/
-# install.sh), and uploads both the raw onedir bundle and the wrapped
-# artifact. No AppImage/.deb/.rpm yet — that remains a later track. No
+# install.sh + AppImage), and uploads both the raw onedir bundle and the
+# wrapped artifacts. No .deb/.rpm yet — that remains a later track. No
 # signing yet — see the stub step below.
 #
 # Trigger: manual + release tags only (not every push — desktop builds are
@@ -115,6 +115,24 @@ jobs:
           path: packaging/netgeo-linux-x86_64.tar.gz
           if-no-files-found: error
 
+      # build-appimage.sh normally chains after build-in-container.sh
+      # (podman, for building on a non-Ubuntu dev machine — see that
+      # script). This runner already IS glibc-2.35 Ubuntu, so the onedir
+      # bundle from the "PyInstaller build" step above (packaging/dist/
+      # netgeo) is passed straight in via the script's $1 override —
+      # no container needed here, no script rewrite either.
+      - name: Build Linux AppImage
+        if: matrix.os == 'ubuntu-22.04'
+        run: ./packaging/linux/build-appimage.sh packaging/dist/netgeo
+
+      - name: Upload Linux AppImage
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgeo-appimage-linux-unsigned
+          path: packaging/NetGeo-x86_64.AppImage
+          if-no-files-found: error
+
       # -----------------------------------------------------------------
       # Windows code signing — SIGNPATH STUB, NOT WIRED UP.
       #
@@ -141,12 +159,6 @@ jobs:
   # tagging a version produces something the public can actually download
   # (previously: 12 tagged releases, zero assets — CI artifacts expire
   # after 90 days and aren't public downloads).
-  #
-  # AppImage is NOT included here — packaging/linux/build-appimage.sh runs
-  # locally only (podman + linuxdeploy download), wiring it into CI is a
-  # separate, bigger slice. Until then, ship it to a release manually:
-  #   ./packaging/linux/build-in-container.sh && ./packaging/linux/build-appimage.sh
-  #   gh release upload <tag> packaging/NetGeo-x86_64.AppImage
   # ---------------------------------------------------------------------
   release:
     needs: build
@@ -163,6 +175,11 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: netgeo-installer-linux-unsigned
+          path: dist-release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: netgeo-appimage-linux-unsigned
           path: dist-release
 
       - uses: softprops/action-gh-release@f3cad8bcbf209fe591aa1823e372c5d96b7fc800 # v2.3.1
