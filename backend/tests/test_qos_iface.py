@@ -174,3 +174,87 @@ def test_enabled_path_per_class_tail_drop():
     net.ping("h1", "10.3.0.2", count=10, interval=0.0)
     # With depth_per_class=1 on a slow link some BE frames must be tail-dropped
     assert net.drops.get("queue_overflow", 0) > 0
+
+
+# ---------------------------------------------------------------------------
+# Token-bucket policing (E-5 preview / CONFORMANCE-QoS-B)
+# ---------------------------------------------------------------------------
+
+def test_police_unit_burst_then_drop_then_refill():
+    """Direct unit test of Interface._police: burst admitted, then the bucket
+    empties and drops, then refills deterministically as sim time advances."""
+    net = Network(seed=1)
+    h1 = net.add_device(Host("h1"))
+    h2 = net.add_device(Host("h2"))
+    i1 = net.add_iface(h1, "eth0", ["10.5.0.1/30"])
+    net.add_iface(h2, "eth0", ["10.5.0.2/30"])
+
+    rate_bps = 8_000.0   # 1000 bytes/sec
+    burst = 1000          # bucket holds exactly one 1000-byte frame
+
+    net.scheduler.now = 0.0
+    assert i1._police(net, QosClass.BE, rate_bps, burst, 1000) is True   # burst spent
+    assert i1._police(net, QosClass.BE, rate_bps, burst, 1) is False     # bucket empty
+
+    # Advance sim time by 0.5s -> 500 bytes refilled, still short of 1000
+    net.scheduler.now = 0.5
+    assert i1._police(net, QosClass.BE, rate_bps, burst, 600) is False
+    assert i1._police(net, QosClass.BE, rate_bps, burst, 500) is True
+
+    # A separate class (EF) has its own bucket, unaffected by BE's depletion
+    net.scheduler.now = 0.5
+    assert i1._police(net, QosClass.EF, rate_bps, burst, 1000) is True
+
+
+def test_police_gated_off_when_class_unconfigured():
+    """police_bps entry left None means that class is never policed."""
+    net = Network(seed=2)
+    h1 = net.add_device(Host("h1"))
+    h2 = net.add_device(Host("h2"))
+    i1 = net.add_iface(h1, "eth0", ["10.6.0.1/30"])
+    i2 = net.add_iface(h2, "eth0", ["10.6.0.2/30"])
+    att = net.connect("link", i1, i2, bandwidth_bps=10_000_000)
+    att.qos = QosConfig(enabled=True, police_bps=(None, None, None))
+
+    rep = net.ping("h1", "10.6.0.2", count=5, interval=0.0)
+    assert net.drops.get("qos_policed", 0) == 0
+    assert rep.received == 5
+
+
+def test_police_drops_over_rate_on_metered_class():
+    """A tightly-policed BE class drops pings that exceed the configured rate;
+    the drop is attributed to the policer (qos_policed), not the queue."""
+    net = Network(seed=3)
+    h1 = net.add_device(Host("h1"))
+    h2 = net.add_device(Host("h2"))
+    i1 = net.add_iface(h1, "eth0", ["10.7.0.1/30"])
+    i2 = net.add_iface(h2, "eth0", ["10.7.0.2/30"])
+    # Fast link (queueing is not the bottleneck) but BE metered to a trickle.
+    att = net.connect("link", i1, i2, bandwidth_bps=10_000_000)
+    att.qos = QosConfig(
+        enabled=True, depth_per_class=64,
+        police_bps=(None, None, 800.0),  # BE: 100 bytes/sec, tiny burst
+        police_burst_bytes=100,
+    )
+
+    net.ping("h1", "10.7.0.2", count=10, interval=0.0, run_after=False)
+    net.run_for(2.0)
+
+    assert net.drops.get("qos_policed", 0) > 0
+    assert i1.counters.drops_policed_by_class[int(QosClass.BE)] > 0
+
+
+def test_police_disabled_qos_never_polices():
+    """Defensive: QoS disabled entirely means the policer never runs, even if
+    police_bps were somehow set on the (unused) config."""
+    net = Network(seed=4)
+    h1 = net.add_device(Host("h1"))
+    h2 = net.add_device(Host("h2"))
+    i1 = net.add_iface(h1, "eth0", ["10.8.0.1/30"])
+    i2 = net.add_iface(h2, "eth0", ["10.8.0.2/30"])
+    att = net.connect("link", i1, i2, bandwidth_bps=10_000_000)
+    att.qos = QosConfig(enabled=False, police_bps=(1.0, 1.0, 1.0), police_burst_bytes=1)
+
+    rep = net.ping("h1", "10.8.0.2", count=5, interval=0.0)
+    assert net.drops.get("qos_policed", 0) == 0
+    assert rep.received == 5

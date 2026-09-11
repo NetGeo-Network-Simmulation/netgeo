@@ -72,9 +72,11 @@ class IfaceCounters:
     drops_loss: int = 0
     drops_mtu: int = 0
     drops_down: int = 0
+    drops_policed: int = 0
     # Per-class counters (len 3: EF=0, AF=1, BE=2) — additive; zero when QoS disabled.
     tx_by_class: list = field(default_factory=_three_zeros)
     drops_queue_by_class: list = field(default_factory=_three_zeros)
+    drops_policed_by_class: list = field(default_factory=_three_zeros)
 
     def as_dict(self) -> dict:
         return {
@@ -87,9 +89,11 @@ class IfaceCounters:
                 "loss": self.drops_loss,
                 "mtu": self.drops_mtu,
                 "down": self.drops_down,
+                "policed": self.drops_policed,
             },
             "tx_by_class": list(self.tx_by_class),
             "drops_queue_by_class": list(self.drops_queue_by_class),
+            "drops_policed_by_class": list(self.drops_policed_by_class),
         }
 
 
@@ -97,7 +101,9 @@ class Interface:
     """A device port. Owns addressing, VLAN config and the egress queue."""
 
     __slots__ = (
+        "_bucket_ts",
         "_queues",
+        "_tokens",
         "_transmitting",
         "access_vlan",
         "attachment",
@@ -146,6 +152,10 @@ class Interface:
         # former _queue_prio / _queue_be split for disabled-path parity.
         self._queues: tuple[deque[EthernetFrame], ...] = (deque(), deque(), deque())
         self._transmitting = False
+        # Token-bucket policing state per class (EF/AF/BE); tokens=None means
+        # not yet primed (bucket starts full on first use of that class).
+        self._tokens: list = [None, None, None]
+        self._bucket_ts: list = [0.0, 0.0, 0.0]
         self.queue_depth = queue_depth
         self.stp_state: str = "forwarding"       # forwarding | learning | listening | blocking
         self.stp_role: str = "designated"        # root | designated | alternate | backup | blocked
@@ -228,6 +238,19 @@ class Interface:
         cls = classify(_frame_priority(frame), qos_cfg)
         queue = self._queues[cls]
 
+        # Policing: token bucket per class, checked before queue admission.
+        # Only active when QoS is enabled and a rate is configured for this
+        # class (police_bps[cls] is not None) — unconfigured classes are
+        # unmetered, same opt-in shape as depth_per_class.
+        if qos_cfg.enabled:
+            rate = qos_cfg.police_bps[int(cls)]
+            if rate is not None and not self._police(net, cls, rate, qos_cfg.police_burst_bytes, frame.size_bytes):
+                self.counters.drops_policed += 1
+                self.counters.drops_policed_by_class[int(cls)] += 1
+                net.record_drop("qos_policed")
+                net.capture.record(net.now, att.id, self.qualified_name, "drop", frame)
+                return
+
         # Depth check: disabled path uses shared depth (legacy); enabled path
         # enforces per-class depth so EF/AF cannot be crowded out by BE.
         if qos_cfg.enabled:
@@ -259,6 +282,34 @@ class Interface:
             )
         if not self._transmitting:
             self._start_next(net)
+
+    def _police(self, net: Network, cls: QosClass, rate_bps: float, burst_bytes: int, size_bytes: int) -> bool:
+        """Token-bucket policer (RFC-2698-style single bucket) for one class.
+
+        Refill is computed lazily from elapsed *simulation* time (``net.now``)
+        at each call — no wall clock, no periodic timer, so it stays
+        deterministic and replay-safe without needing a sequence-guarded
+        timer at all (this is not a heap-scheduled event; it's a pure
+        function of the already-deterministic sim clock).
+
+        Bucket starts full (burst_bytes) the first time this class is used.
+        A frame that doesn't fit is dropped whole — no partial consumption —
+        so classes stay independent and a big frame can't starve a later
+        small one by leaving the bucket in a fractional state.
+        """
+        idx = int(cls)
+        tokens = self._tokens[idx]
+        if tokens is None:
+            tokens = float(burst_bytes)
+        else:
+            elapsed = net.now - self._bucket_ts[idx]
+            tokens = min(float(burst_bytes), tokens + elapsed * (rate_bps / 8.0))
+        self._bucket_ts[idx] = net.now
+        if tokens < size_bytes:
+            self._tokens[idx] = tokens
+            return False
+        self._tokens[idx] = tokens - size_bytes
+        return True
 
     def _fragment_and_transmit(self, net: Network, frame: EthernetFrame, mtu: int) -> None:
         """DF=0 and oversized: split into RFC 791 sec 3.2 fragments and
