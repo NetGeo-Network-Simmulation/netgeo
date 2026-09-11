@@ -11,8 +11,12 @@
  * (mapDeploy.ts), the command palette (CommandPalette.tsx), or their /rf
  * and /fiber deep links (uiStore.ts VIEW_PATHS, unaffected by this list).
  *
+ * Diagnostics is likewise NOT a member (Surya decision, 2026-09-11): it's a
+ * panel of the topology workspace, not a navigation destination. Reach it
+ * from StatusBar's drawer toggle or the command palette's "Open Diagnostics".
+ *
  * Groups (fixed IA, do not redesign): Projects · Design(topology/plant/
- * config) · Map(map) · Simulate(twin/edu/scenarios/diagnostics) ·
+ * config) · Map(map) · Simulate(twin/edu/scenarios) ·
  * Operate(problems/reports). Settings stays a separate bottom button.
  */
 import {
@@ -26,7 +30,6 @@ import {
   FileBarChart2,
   FlaskConical,
   GraduationCap,
-  Activity,
   Settings2,
   type LucideIcon,
 } from 'lucide-react';
@@ -36,7 +39,7 @@ import { zc } from '@/theme/z';
 
 export type RailMember =
   | { key: string; label: string; icon: LucideIcon; view: ViewMode }
-  | { key: string; label: string; icon: LucideIcon; action: 'scenarios' | 'diagnostics' };
+  | { key: string; label: string; icon: LucideIcon; action: 'scenarios' };
 
 export interface RailGroup {
   key: string;
@@ -79,7 +82,6 @@ export const GROUPS: RailGroup[] = [
       { key: 'twin', label: 'Digital Twin', icon: Boxes, view: 'twin' },
       { key: 'edu', label: 'Education Lab', icon: GraduationCap, view: 'edu' },
       { key: 'labs', label: 'Labs', icon: FlaskConical, action: 'scenarios' },
-      { key: 'diag', label: 'Diagnostics', icon: Activity, action: 'diagnostics' },
     ],
   },
   {
@@ -106,14 +108,7 @@ export function activateMember(member: RailMember): void {
     ui.setViewMode(member.view);
     return;
   }
-  if (member.action === 'scenarios') {
-    ui.openModal('scenarios');
-  } else {
-    // Diagnostics is a drawer tab (topology/map only) — hop to topology if the
-    // current workspace can't host the drawer, then open it.
-    if (ui.viewMode !== 'topology' && ui.viewMode !== 'map') ui.setViewMode('topology');
-    ui.openDrawer('diagnostics');
-  }
+  ui.openModal('scenarios');
 }
 
 const SETTINGS = { key: 'settings', label: 'Settings', icon: Settings2 };

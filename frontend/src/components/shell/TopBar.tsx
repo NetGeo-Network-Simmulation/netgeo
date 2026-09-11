@@ -60,17 +60,11 @@ function NetGeoMark() {
 function SubNavStrip() {
   const viewMode = useUiStore((s) => s.viewMode);
   const activeModal = useUiStore((s) => s.activeModal);
-  const drawerOpen = useUiStore((s) => s.drawerOpen);
-  const drawerTab = useUiStore((s) => s.drawerTab);
 
   const group = GROUPS.find((g) => isGroupActive(g, viewMode));
   if (!group || group.members.length < 2) return null;
 
-  const isMemberActive = (m: RailMember): boolean => {
-    if ('view' in m) return viewMode === m.view;
-    if (m.action === 'scenarios') return activeModal === 'scenarios';
-    return drawerOpen && drawerTab === 'diagnostics';
-  };
+  const isMemberActive = (m: RailMember): boolean => ('view' in m ? viewMode === m.view : activeModal === 'scenarios');
 
   return (
     <div
