@@ -28,4 +28,11 @@ describe('NavigationRail auto-hide dock', () => {
   it('reveals on hover of the hot-zone (group-hover), the mouse path', () => {
     expect(src).toContain('group-hover/dock:opacity-100');
   });
+
+  it('keeps a permanently-visible peek sliver — collapsed must never mean invisible', () => {
+    // The peek div must NOT carry opacity-0/group-hover/group-focus-within:
+    // it has to render at full opacity regardless of dock state, or the
+    // "mana dock mengambangnya?" regression is back.
+    expect(src).toMatch(/rail-chassis pointer-events-none absolute inset-y-0 left-0 w-3\b/);
+  });
 });
