@@ -135,3 +135,37 @@ jobs:
       - name: Submit Windows signing request (SignPath, DISABLED)
         if: false
         run: echo "signing not wired up yet — see comment above"
+
+  # ---------------------------------------------------------------------
+  # Publish the artifacts this job already built to a GitHub Release, so
+  # tagging a version produces something the public can actually download
+  # (previously: 12 tagged releases, zero assets — CI artifacts expire
+  # after 90 days and aren't public downloads).
+  #
+  # AppImage is NOT included here — packaging/linux/build-appimage.sh runs
+  # locally only (podman + linuxdeploy download), wiring it into CI is a
+  # separate, bigger slice. Until then, ship it to a release manually:
+  #   ./packaging/linux/build-in-container.sh && ./packaging/linux/build-appimage.sh
+  #   gh release upload <tag> packaging/NetGeo-x86_64.AppImage
+  # ---------------------------------------------------------------------
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: netgeo-installer-windows-unsigned
+          path: dist-release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: netgeo-installer-linux-unsigned
+          path: dist-release
+
+      - uses: softprops/action-gh-release@f3cad8bcbf209fe591aa1823e372c5d96b7fc800 # v2.3.1
+        with:
+          files: dist-release/*
+          fail_on_unmatched_files: true
