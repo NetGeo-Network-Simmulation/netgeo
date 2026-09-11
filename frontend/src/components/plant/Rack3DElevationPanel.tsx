@@ -26,14 +26,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Cable, DoorClosed, Move, Plus, Server, Tag, Zap } from 'lucide-react';
 import * as THREE from 'three';
-import type { Rack } from '@/api/types';
-import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiError } from '@/api/client';
+import type { NodeKind, Rack } from '@/api/types';
+import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiError, type DeviceType } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { cn } from '@/lib/cn';
+import { autoName } from '@/lib/mapDeploy';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
 import { loadBootAssets } from '@/lib/three/bootAssets';
 import { mountElevationM, structureSpecFor } from '@/lib/three/outdoorPlacement';
+import { RackDevicePicker } from './RackDevicePicker';
 import { UnrackedDevicesPanel } from './UnrackedDevicesPanel';
 import {
   adaptTopology,
@@ -99,6 +101,20 @@ const RACK_SIZES = [10, 12, 18, 24, 36, 42, 48];
 
 type Mode = 'cable' | 'adddev' | null;
 type Face = 'front' | 'back';
+
+/** DeviceType.icon -> NodeKind (Q1: the Add Device picker, below). Icon is
+ *  supposed to double as the kind string (device_types.py `icon=kind`), but
+ *  one builtin entry drifted — `builtin-fw`'s icon is "fw", NodeKind only
+ *  has "firewall" — and a few catalog icons (tower/onu) never had a matching
+ *  NodeKind at all. Rather than guess, only device types whose icon resolves
+ *  through this table are offered here — every create this picker sends is
+ *  guaranteed a real, valid `kind`.
+ *  ponytail: fixing "fw" at the data source is a backend edit, out of scope
+ *  for this UI slice — this table is the smallest correct workaround. */
+const KIND_BY_ICON: Record<string, NodeKind> = {
+  router: 'router', switch: 'switch', host: 'host', ap: 'ap', cpe: 'cpe',
+  olt: 'olt', firewall: 'firewall', fw: 'firewall', server: 'server', cloud: 'cloud',
+};
 
 export function Rack3DElevationPanel() {
   const projectId = useUiStore((s) => s.projectId);
@@ -170,6 +186,17 @@ export function Rack3DElevationPanel() {
   // pack port data (rack faceplate rendering, not a second /device-types fetch).
   const deviceTypesById = useMemo(
     () => new Map((deviceTypesQ.data ?? []).map((dt) => [dt.id, dt])),
+    [deviceTypesQ.data],
+  );
+  // Q1: catalog entries the Add Device picker may offer — real rack-mount
+  // candidates only (same canRackMount gate the drag-in-from-tray flow
+  // already enforces) with a resolvable NodeKind (KIND_BY_ICON above),
+  // alphabetical so search has a stable order to filter.
+  const pickableTypes = useMemo(
+    () =>
+      (deviceTypesQ.data ?? [])
+        .filter((dt) => dt.icon != null && KIND_BY_ICON[dt.icon] && canRackMount(dt.physical?.form_factor))
+        .sort((a, b) => a.name.localeCompare(b.name)),
     [deviceTypesQ.data],
   );
 
@@ -318,17 +345,23 @@ export function Rack3DElevationPanel() {
     onError: (e) => setError((e as unknown as ApiError).message || 'Gagal menyimpan kabel.'),
   });
 
-  // Tambah perangkat (NG-PH3D P2): create → place, mirroring
-  // the create → PATCH RU pattern used throughout this panel.
+  // Tambah perangkat (NG-PH3D P2, Q1): create → place, mirroring the
+  // create → PATCH RU pattern used throughout this panel. `deviceType` is
+  // whatever the user picked in RackDevicePicker — carries its own kind
+  // (via KIND_BY_ICON) and ru_span (its catalog `physical.ru`, else 1),
+  // instead of the old hardcoded switch/1U/`NG-N` name.
+  const [devicePicker, setDevicePicker] = useState<{ rackId: string; ruStart: number; px: { x: number; y: number } } | null>(null);
   const addDevice = useMutation({
-    mutationFn: async (v: { rackId: string; ruStart: number }) => {
-      const n = (topoQ.data?.nodes ?? []).filter((x) => x.name.startsWith('NG-')).length;
+    mutationFn: async (v: { rackId: string; ruStart: number; deviceType: DeviceType }) => {
+      const kind = KIND_BY_ICON[v.deviceType.icon!]!;
+      const name = autoName(topoQ.data?.nodes ?? [], kind);
       const created = await nodesApi.create({
-        project_id: projectId!, name: `NG-${n + 1}`, kind: 'switch', x: 0, y: 0,
+        project_id: projectId!, name, kind, x: 0, y: 0, device_type_id: v.deviceType.id,
       });
-      return nodesApi.update(created.id, { rack_id: v.rackId, ru_start: v.ruStart, ru_span: 1 });
+      const ruSpan = v.deviceType.physical?.ru ?? 1;
+      return nodesApi.update(created.id, { rack_id: v.rackId, ru_start: v.ruStart, ru_span: ruSpan });
     },
-    onSuccess: () => { setError(null); invalidate(); },
+    onSuccess: () => { setError(null); setDevicePicker(null); invalidate(); },
     onError: (e) => setError((e as unknown as ApiError).message || 'Gagal menambah perangkat.'),
   });
 
@@ -699,11 +732,13 @@ export function Rack3DElevationPanel() {
     createPatch.mutate({ aIface, bIface, media: m, lengthM });
   }, [pick, adapted, createPatch]);
 
-  /** Add device: click a free U on a rack, get a 1U switch there
-   *  (NG-PH3D P2: POST /nodes + PATCH placement). `rackKey` is the real
-   *  backend rack id — every shown bay is a real rack now, so unlike the
-   *  old A/B slots there's no "empty bay" case left to guard against. */
-  const handleAddDevice = useCallback((rackKey: string, y: number) => {
+  /** Add device: click a free U on a rack, then pick which real catalog
+   *  device goes there (Q1 — was a hardcoded 1U switch: NG-PH3D P2 originally,
+   *  POST /nodes + PATCH placement, now via RackDevicePicker). `rackKey` is
+   *  the real backend rack id — every shown bay is a real rack now, so
+   *  unlike the old A/B slots there's no "empty bay" case left to guard
+   *  against. `px` anchors the picker popover at the click point. */
+  const handleAddDevice = useCallback((rackKey: string, y: number, px: { x: number; y: number }) => {
     const built = builtRef.current;
     const rack = built?.registry.racks[rackKey];
     const bay = bays.find((b) => b.key === rackKey);
@@ -717,9 +752,27 @@ export function Rack3DElevationPanel() {
       setStatus(`U${u} sudah terisi — pilih U yang kosong`);
       return;
     }
-    setStatus(`Menambahkan perangkat di U${u}…`);
-    addDevice.mutate({ rackId: rackKey, ruStart: u });
-  }, [bays, addDevice]);
+    setStatus(`Pilih perangkat untuk U${u}…`);
+    setDevicePicker({ rackId: rackKey, ruStart: u, px });
+  }, [bays]);
+
+  /** RackDevicePicker's onPick: re-validate with the device's real ru_span
+   *  (the free-U check above only proved the single clicked U is free —
+   *  a multi-U chassis can still collide with a neighbor or run off the
+   *  rail) before sending the request, same "reject before it's sent" rule
+   *  canPlaceDevice already enforces for drag-move elsewhere in this file. */
+  const pickDeviceType = useCallback((dt: DeviceType) => {
+    if (!devicePicker) return;
+    const { rackId, ruStart } = devicePicker;
+    const ruSpan = dt.physical?.ru ?? 1;
+    const rackObj = viewRacks.find((r) => r.id === rackId);
+    if (!rackObj || !canPlaceDevice(bays, rackId, ruStart, ruSpan, rackObj.ru_height ?? 42, undefined, dt.physical?.form_factor)) {
+      setStatus(`${dt.name} (${ruSpan}U) tidak muat di U${ruStart} — pilih perangkat lain atau slot lain`);
+      return;
+    }
+    setStatus(`Menambahkan ${dt.name} di U${ruStart}…`);
+    addDevice.mutate({ rackId, ruStart, deviceType: dt });
+  }, [devicePicker, viewRacks, bays, addDevice]);
 
   useEffect(() => {
     const renderer = rendererRef.current;
@@ -876,7 +929,10 @@ export function Rack3DElevationPanel() {
           const dx = Math.abs(any.point.x - rk.x);
           if (dx < bd) { bd = dx; best = k; }
         }
-        if (best && bd < 0.45) handleAddDevice(best, any.point.y);
+        if (best && bd < 0.45) {
+          const r = canvas.getBoundingClientRect();
+          handleAddDevice(best, any.point.y, { x: e.clientX - r.left, y: e.clientY - r.top });
+        }
         return;
       }
       const devId = hitDevice(hits);
@@ -1189,6 +1245,20 @@ export function Rack3DElevationPanel() {
             hint={racks.length > 0
               ? 'This site has no racks yet — create one above, or switch Site to see another one’s racks.'
               : 'Create a rack using the toolbar above — placed devices render as RU-accurate 3D blocks.'}
+          />
+        )}
+        {devicePicker && (
+          <RackDevicePicker
+            px={devicePicker.px}
+            rackLabel={(() => {
+              const r = viewRacks.find((x) => x.id === devicePicker.rackId);
+              return r ? rackLabel(r) : devicePicker.rackId;
+            })()}
+            ruStart={devicePicker.ruStart}
+            types={pickableTypes}
+            busy={addDevice.isPending}
+            onPick={pickDeviceType}
+            onClose={() => { setDevicePicker(null); setStatus('Dibatalkan — tidak ada perubahan dikirim'); }}
           />
         )}
       </div>
