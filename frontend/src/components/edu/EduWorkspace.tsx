@@ -14,7 +14,6 @@ import { ArrowLeft, PenLine, GraduationCap } from 'lucide-react';
 import { TopologyCanvas } from '@/components/canvas/TopologyCanvas';
 import { useEduStore } from '@/store/eduStore';
 import { cn } from '@/lib/cn';
-import { zc } from '@/theme/z';
 import { ActivityListPanel } from './ActivityListPanel';
 import { ActivityAuthorPanel } from './ActivityAuthorPanel';
 import { ActivityStudentPanel } from './ActivityStudentPanel';
@@ -30,10 +29,8 @@ export function EduWorkspace() {
   return (
     <>
       <div className="absolute inset-0">
-        <TopologyCanvas />
+        <TopologyCanvas topLeftExtra={mode !== 'browse' ? <EduModeBar /> : undefined} />
       </div>
-
-      {mode !== 'browse' && <EduModeBar />}
 
       {mode === 'browse' ? (
         <ActivityListPanel />
@@ -46,8 +43,11 @@ export function EduWorkspace() {
   );
 }
 
-/** Top-left toolbar: back-to-list, plus an Author|Student segmented switch for
- *  the selected activity (hidden while composing a brand-new, unsaved draft). */
+/** Toolbar row: back-to-list, plus an Author|Student segmented switch for the
+ *  selected activity (hidden while composing a brand-new, unsaved draft).
+ *  Rendered as `TopologyCanvas`'s `topLeftExtra` (see EduWorkspace), so it
+ *  stacks above the canvas's own overlay-chips/toolbar row instead of a
+ *  second absolutely-positioned layer landing in the same corner. */
 function EduModeBar() {
   const mode = useEduStore((s) => s.mode);
   const selectedId = useEduStore((s) => s.selectedId);
@@ -56,7 +56,7 @@ function EduModeBar() {
   const selectForStudent = useEduStore((s) => s.selectForStudent);
 
   return (
-    <div className={cn('pointer-events-auto absolute left-3 top-3 flex items-center gap-2', zc.workspace)}>
+    <div className="flex items-center gap-2">
       <button
         onClick={toBrowse}
         aria-label="Back to activities"

@@ -1,13 +1,16 @@
 /**
- * TwinStepper — the top pill row. A *visual state indicator* (design), not a
- * wizard: the current stage is derived from what the twin already contains
- * (deriveStepIndex). The only action here is Import Config, the twin's entry
- * point.
+ * TwinStepper — the twin's step-progress row. A *visual state indicator*
+ * (design), not a wizard: the current stage is derived from what the twin
+ * already contains (deriveStepIndex). The only action here is Import Config,
+ * the twin's entry point.
+ *
+ * Rendered as `TopologyCanvas`'s `topLeftExtra` (see TwinWorkspace), so it
+ * stacks above the canvas's own overlay-chips/toolbar row inside one
+ * coordinated container instead of a second absolutely-positioned layer.
  */
 import { Check, FileInput } from 'lucide-react';
 import { TWIN_STEPS } from './twinLogic';
 import { cn } from '@/lib/cn';
-import { zc } from '@/theme/z';
 
 export function TwinStepper({
   stepIndex,
@@ -17,8 +20,8 @@ export function TwinStepper({
   onImport: () => void;
 }) {
   return (
-    <div className={cn('pointer-events-none absolute left-0 right-[360px] top-0 flex items-center gap-3 p-3', zc.workspace)}>
-      <ol className="glass pointer-events-auto flex items-center gap-1 rounded-full border border-fg/10 px-2 py-1.5 shadow-glass">
+    <div className="flex flex-wrap items-center gap-2">
+      <ol className="glass flex flex-wrap items-center gap-1 rounded-full border border-fg/10 px-2 py-1.5 shadow-glass">
         {TWIN_STEPS.map((step, i) => {
           const done = i < stepIndex;
           const active = i === stepIndex;
@@ -54,11 +57,9 @@ export function TwinStepper({
         })}
       </ol>
 
-      <div className="flex-1" />
-
       <button
         onClick={onImport}
-        className="glass pointer-events-auto flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3.5 py-2 text-xs font-semibold text-accent shadow-glass transition-colors hover:bg-accent/25"
+        className="glass flex shrink-0 items-center gap-1.5 rounded-full border border-accent/40 bg-accent/15 px-3.5 py-2 text-xs font-semibold text-accent shadow-glass transition-colors hover:bg-accent/25"
       >
         <FileInput className="h-4 w-4" /> Import Config
       </button>
