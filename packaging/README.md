@@ -104,7 +104,8 @@ downloads across re-runs — this environment's egress was measured at
   `/api/health` → 200, built JS asset → 200.
 - Same binary, shipped to a fresh **Ubuntu 24.04.4 VM** (headless,
   1 vCPU/3.3 GB): `install.sh` as non-root, `NETGEO_NO_BROWSER=1`, `/` → 200,
-  `/api/health` → `{"status":"ok","app":"NetGeo","version":"1.2.99","channel":"beta"}`,
+  `/api/health` → `{"status":"ok","app":"NetGeo","version":"1.2.99","channel":"beta"}`
+  (app version at test time, not current — see `backend/app/core/config.py` `APP_VERSION`),
   built JS asset (`/assets/index-BTJLwYj6.js`) → 200. `uninstall.sh` ran
   twice cleanly (idempotent), VM left with zero `netgeo` remnants.
 - `objdump -T` across every bundled `.so` tops out at `GLIBC_2.35` — matches
@@ -204,11 +205,15 @@ cd packaging && pyinstaller netgeo.spec
 cd windows && iscc netgeo.iss
 ```
 
-Produces `packaging/windows/dist-installer/netgeo-1.2.99-setup.exe`:
-installs to `%LOCALAPPDATA%\NetGeo`, Start Menu shortcut + optional Desktop
-shortcut, registers an uninstaller, `PrivilegesRequired=lowest` (no admin
-prompt). CI now builds this on `windows-latest` (Inno Setup is preinstalled
-on that runner image) and uploads it as `netgeo-installer-windows-unsigned`.
+Produces `packaging/windows/dist-installer/netgeo-<version>-setup.exe`, where
+`<version>` is `backend/app/core/config.py`'s `APP_VERSION` (CI passes it via
+`iscc /DMyAppVersion=...`; a manual `iscc netgeo.iss` with no override falls
+back to the constant in `netgeo.iss`, which may be stale — pass `/DMyAppVersion=`
+explicitly for a manual build). Installs to `%LOCALAPPDATA%\NetGeo`, Start
+Menu shortcut + optional Desktop shortcut, registers an uninstaller,
+`PrivilegesRequired=lowest` (no admin prompt). CI now builds this on
+`windows-latest` (Inno Setup is preinstalled on that runner image) and
+uploads it as `netgeo-installer-windows-unsigned`.
 **Surya needs to test this on an actual Windows machine** — double-click,
 confirm SmartScreen "Run anyway" flow, Start Menu entry, uninstall cleanup —
 before it's considered verified.

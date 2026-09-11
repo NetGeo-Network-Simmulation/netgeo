@@ -14,7 +14,14 @@
 ; NOT YET TESTED on a real Windows machine — see packaging/README.md.
 
 #define MyAppName "NetGeo"
-#define MyAppVersion "1.2.99"
+; CI passes the real version via `iscc /DMyAppVersion=<x.y.z> netgeo.iss`,
+; read from backend/app/core/config.py (the source of truth) — see
+; .github/workflows/desktop.yml. This fallback only fires on a manual build
+; with no /D flag; keep it reasonably current, but it is never what a
+; release ships (CI always overrides it).
+#ifndef MyAppVersion
+  #define MyAppVersion "1.2.118"
+#endif
 #define MyAppExeName "netgeo.exe"
 #define MyBundleDir "..\dist\netgeo"
 

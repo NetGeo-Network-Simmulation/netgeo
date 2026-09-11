@@ -85,10 +85,19 @@ jobs:
             echo "C:\Program Files (x86)\Inno Setup 6" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           }
 
+      - name: Read app version from source of truth
+        # backend/app/core/config.py APP_VERSION — see that file's comment.
+        if: matrix.os == 'windows-latest'
+        id: appver
+        shell: pwsh
+        run: |
+          $m = Select-String -Path backend/app/core/config.py -Pattern '^APP_VERSION = "([^"]+)"'
+          echo "version=$($m.Matches[0].Groups[1].Value)" >> $env:GITHUB_OUTPUT
+
       - name: Build Windows installer (Inno Setup, unsigned)
         if: matrix.os == 'windows-latest'
         working-directory: packaging/windows
-        run: iscc netgeo.iss
+        run: iscc /DMyAppVersion=${{ steps.appver.outputs.version }} netgeo.iss
 
       - name: Upload Windows installer
         if: matrix.os == 'windows-latest'
