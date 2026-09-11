@@ -61,6 +61,63 @@ cd backend && .venv/bin/python -m pytest -m podman tests/test_podman_adaptor.py 
 - **Tanpa jejak AI**: tidak ada trailer `Co-Authored-By:` untuk asisten AI, tidak ada baris "Generated with …". Commit harus tampil sebagai karya kontributor manusianya.
 - Bump versi kalau slice menyentuh app (bukan hanya docs/CI): edit `backend/app/core/config.py` + `frontend/package.json`, naik `v1.<minor>.<NNN>` (NNN jalan terus, jangan reset). Tag `v1.<minor>.<NNN>` di commit bump.
 
+## Developer Certificate of Origin (DCO)
+
+NetGeo berlisensi Apache-2.0. Untuk menjaga opsi lisensi ke depan tetap
+bersih, tiap commit harus ditandatangani (`Signed-off-by:`) sebagai
+pernyataan bahwa kamu berhak mengirim kontribusi itu:
+
+```bash
+git commit -s -m "scope: pesan commit"
+```
+
+`-s` menambahkan baris `Signed-off-by: Nama Kamu <email@kamu>` di akhir
+pesan commit — pakai nama + email yang sama dengan commit author (lihat
+"Aturan commit" di atas). Lupa `-s`? Tambahkan belakangan dengan
+`git commit --amend -s` (sebelum push) tanpa mengubah isi commit.
+
+Dengan menandatangani, kamu menyatakan (teks DCO 1.1 resmi, developercertificate.org):
+
+```
+Developer Certificate of Origin
+Version 1.1
+
+Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
+
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+Developer's Certificate of Origin 1.1
+
+By making a contribution to this project, I certify that:
+
+(a) The contribution was created in whole or in part by me and I
+    have the right to submit it under the open source license
+    indicated in the file; or
+
+(b) The contribution is based upon previous work that, to the best
+    of my knowledge, is covered under an appropriate open source
+    license and I have the right under that license to submit that
+    work with modifications, whether created in whole or in part
+    by me, under the same open source license (unless I am
+    permitted to submit under a different license), as indicated
+    in the file; or
+
+(c) The contribution was provided directly to me by some other
+    person who certified (a), (b) or (c) and I have not modified
+    it.
+
+(d) I understand and agree that this project and the contribution
+    are public and that a record of the contribution (including all
+    personal information I submit with it, including my sign-off) is
+    maintained indefinitely and may be redistributed consistent with
+    this project or the open source license(s) involved.
+```
+
+Belum ada bot/CI check yang menolak PR tanpa sign-off — penegakan otomatis
+menyusul kalau Surya memutuskan begitu. Untuk sekarang ini murni dokumentasi,
+supaya alur PR yang sedang berjalan tidak mendadak terblokir.
+
 ## Yang tidak boleh di-commit
 
 - `docs/` (folder lokal-only, di `.gitignore`): berisi catatan internal, screenshot, hostname/IP, kredensial. `dev-docs/` (di root, di luar `docs/`) adalah folder terpisah yang justru **wajib** ter-track — dokumentasi kontributor publik.
