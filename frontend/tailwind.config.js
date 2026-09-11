@@ -54,12 +54,18 @@ export default {
         success: { DEFAULT: '#27C28B', dark: '#15805C' },
         warning: { DEFAULT: '#F5A623', dark: '#9E6300' },
         danger: { DEFAULT: '#FF4D4F', dark: '#A01012' },
-        info: { DEFAULT: '#27B5C2', dark: '#0E7C88' },
+        // DEFAULT kept in sync with theme/tokens.ts semantic.info (dark-mode
+        // value; brightened 2026-09-11 for WCAG AA text contrast, see there).
+        info: { DEFAULT: '#38BBC7', dark: '#0E7C88' },
         ink: {
           DEFAULT: '#101626',
           soft: '#566076',
           muted: '#8A93A6',
         },
+        // Printed-document surface (Reports Center preview iframe): a report
+        // page is paper, always white — deliberately NOT theme-aware, even in
+        // dark mode. Named so it reads as intent, not a stray raw bg-white.
+        paper: '#FFFFFF',
         // Node-kind palette (also exported as CSS vars in theme/tokens.ts).
         node: {
           router: '#2F6BFF',

@@ -1157,12 +1157,12 @@ export function Rack3DElevationPanel() {
       )}
 
       {error && (
-        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400">
+        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-danger/10 px-3 py-1.5 text-xs text-danger">
           <AlertTriangle size={13} /> {error}
         </div>
       )}
       {topoQ.isError && (
-        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400">
+        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-danger/10 px-3 py-1.5 text-xs text-danger">
           <AlertTriangle size={13} /> Gagal memuat topologi project.
         </div>
       )}

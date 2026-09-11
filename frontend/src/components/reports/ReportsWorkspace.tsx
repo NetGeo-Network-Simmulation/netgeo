@@ -273,12 +273,14 @@ function SummaryPreview({ loading, error, html }: { loading: boolean; error: unk
       empty={!html}
       emptyMsg="No report content — add devices and fiber paths to this project, then reopen."
     >
-      {/* Sandboxed WITHOUT allow-scripts — style-isolated, cannot execute JS. */}
+      {/* Sandboxed WITHOUT allow-scripts — style-isolated, cannot execute JS.
+          bg-paper (not a theme token): this preview renders a document meant
+          to be printed on paper, so it stays white even in dark mode. */}
       <iframe
         title="Project report preview"
         sandbox=""
         srcDoc={html}
-        className="mx-auto block h-[1100px] w-full max-w-[720px] rounded-sm border border-fg/10 bg-white shadow-glass-lg"
+        className="mx-auto block h-[1100px] w-full max-w-[720px] rounded-sm border border-fg/10 bg-paper shadow-glass-lg"
       />
     </PreviewGate>
   );
