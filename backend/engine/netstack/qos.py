@@ -32,6 +32,10 @@ class QosConfig:
     ef_min_dscp: int = 40     # matches legacy PRIORITY_DSCP_THRESHOLD
     af_min_dscp: int = 8
     depth_per_class: int = 32  # tail-drop per class when enabled
+    # Token-bucket policing, per class (EF/AF/BE), bits/sec; None = unmetered.
+    # Only checked when enabled=True — same gate as the per-class depth check.
+    police_bps: tuple = (None, None, None)
+    police_burst_bytes: int = 8192  # shared bucket depth (~5-6 full-size frames)
 
 
 def classify(dscp: int, cfg: QosConfig) -> QosClass:
