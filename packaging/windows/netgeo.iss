@@ -20,7 +20,7 @@
 ; with no /D flag; keep it reasonably current, but it is never what a
 ; release ships (CI always overrides it).
 #ifndef MyAppVersion
-  #define MyAppVersion "1.2.118"
+  #define MyAppVersion "1.2.119"
 #endif
 #define MyAppExeName "netgeo.exe"
 #define MyBundleDir "..\dist\netgeo"
