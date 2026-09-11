@@ -5,10 +5,12 @@
  * links are drawn by dragging between device ports). Group is reserved for a
  * later phase and is disabled so it never reads as a dead control.
  *
- * The topology workspace renders from x=0 (AppShell) and the nav rail is
- * an auto-hide dock that only overlays content while revealed
- * (NavigationRail.tsx), so this bottom-pinned dock just needs a plain
- * `left-4` margin like every other workspace bar (slice/ui-dock-autohide).
+ * The topology workspace bleeds its canvas to x=0 (AppShell), and the
+ * floating nav rail is vertically centered (NavigationRail.tsx) — this dock
+ * sits at `bottom-4`, well outside the rail's vertical band, so it just
+ * needs a plain `left-4` margin (slice/ui-edge-fit, Surya QA 2026-09-07:
+ * this used to borrow `CHROME_INSET`'s 136px meant for chrome the rail
+ * actually floats over, leaving a dead gap at the left edge for no reason).
  */
 import { MousePointer2, Spline, Group as GroupIcon, Plus, Trash2 } from 'lucide-react';
 import { useTopoUiStore } from '@/store/topoUiStore';
