@@ -123,13 +123,35 @@ export function NavigationRail() {
   const activeModal = useUiStore((s) => s.activeModal);
 
   return (
-    <nav
-      aria-label="Primary"
-      className={cn(
-        'rail-chassis pointer-events-auto absolute left-6 top-1/2 flex w-[76px] -translate-y-1/2 flex-col items-center gap-1 overflow-hidden rounded-xl border py-4',
-        zc.workspace,
-      )}
-    >
+    // Auto-hide dock (Surya QA 2026-09-11: "dash to dock tanpa animasi" —
+    // hidden by default so every workspace gets the full x=0 width, no
+    // reserved-space tax anywhere; see AppShell.tsx). Reveals on hover of
+    // the hot-zone strip below OR the instant any rail button receives
+    // keyboard focus (`group-focus-within`). No easing/duration utility
+    // anywhere in this subtree — the opacity/pointer-events flip is a
+    // plain class swap, so it's an instant snap, matching the explicit "no
+    // animation" request; don't "fix" that by adding easing.
+    <div className="group/dock pointer-events-none absolute inset-y-0 left-0 w-[100px]">
+      {/* Hot-zone: 24px strip flush with the rail's own left-6 offset (no
+          dead gap between "hoverable" and "visible"). Mouse-only trigger —
+          keyboard users reveal the rail by tabbing straight into it (see
+          `nav` below): its buttons stay in tab order and keyboard-activated
+          (Enter/Space) even while invisible, because `pointer-events-none`
+          only blocks mouse hit-testing, never focus or synthetic keyboard
+          activation. That's also why hiding the rail this way is safe for
+          the canvas underneath: a real click at this position falls through
+          to the workspace below instead of hitting an invisible button. */}
+      <div className="pointer-events-auto absolute inset-y-0 left-0 w-6" aria-hidden />
+
+      <nav
+        aria-label="Primary"
+        className={cn(
+          'rail-chassis pointer-events-none absolute left-6 top-1/2 flex w-[76px] -translate-y-1/2 flex-col items-center gap-1 overflow-hidden rounded-xl border py-4 opacity-0',
+          'group-hover/dock:pointer-events-auto group-hover/dock:opacity-100',
+          'group-focus-within/dock:pointer-events-auto group-focus-within/dock:opacity-100',
+          zc.popover,
+        )}
+      >
       {/* Metal-grain overlay — decorative, procedural (no raster asset). */}
       <div className="rail-grain pointer-events-none absolute inset-0" aria-hidden />
 
@@ -178,7 +200,8 @@ export function NavigationRail() {
         <span className="text-[9px] font-bold tracking-widest">NETGEO</span>
         <span className="font-mono text-[8px]">NG-5X</span>
       </div>
-    </nav>
+      </nav>
+    </div>
   );
 }
 
