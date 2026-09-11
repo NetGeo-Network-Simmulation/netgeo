@@ -535,14 +535,14 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
           <Panel position="top-center" className="!m-3">
             <div
               role="alert"
-              className="flex items-center gap-1.5 rounded-lg border border-fg/10 bg-red-500/10 px-3 py-1.5 text-xs text-red-400 shadow-glass backdrop-blur"
+              className="flex items-center gap-1.5 rounded-lg border border-fg/10 bg-danger/10 px-3 py-1.5 text-xs text-danger shadow-glass backdrop-blur"
             >
               <AlertTriangle size={13} className="shrink-0" />
               {cableError}
               <button
                 onClick={() => setCableError(null)}
                 aria-label="Dismiss"
-                className="ml-1 text-red-400/70 hover:text-red-400"
+                className="ml-1 text-danger/70 hover:text-danger"
               >
                 <X size={12} />
               </button>

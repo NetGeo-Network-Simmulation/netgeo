@@ -2133,7 +2133,7 @@ function WeatherBar() {
   if (rainRate === 0) return null;
   return (
     <div className={cn('pointer-events-none absolute left-1/2 top-4 -translate-x-1/2', zc.workspace)}>
-      <div className="flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-900/60 px-4 py-1.5 text-xs text-blue-200 backdrop-blur">
+      <div className="flex items-center gap-2 rounded-full border border-info/30 bg-info/20 px-4 py-1.5 text-xs text-info backdrop-blur">
         <span>🌧</span>
         <span>
           {rainRateLabel(rainRate)} — {rainRate} mm/hr · Rain fade active

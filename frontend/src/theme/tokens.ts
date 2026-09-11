@@ -28,7 +28,10 @@ export const semantic = {
   success: '#27C28B',
   warning: '#F5A623',
   danger: '#FF4D4F',
-  info: '#27B5C2',
+  // Brightened from #27B5C2 (audit 2026-09-11: text-info on its own bg-info/20
+  // chip fill measured 4.42:1 on dark charcoal, just under WCAG AA 4.5:1 for
+  // normal text — see tailwind.config.js `info.DEFAULT`, kept in sync).
+  info: '#38BBC7',
 } as const;
 
 /** Node-kind accent colors — mirror tailwind `colors.node` + used by canvas. */
