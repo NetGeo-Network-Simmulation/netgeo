@@ -95,7 +95,7 @@ export function ActivityStudentPanel() {
   if (!activity) {
     // Selected id points at nothing (e.g. it was just deleted) — recover, don't blank.
     return (
-      <aside className={cn('glass-strong pointer-events-auto absolute left-3 top-16 w-[340px] max-w-[calc(100vw-5rem)] rounded-2xl border border-fg/12 p-5 text-center shadow-glass-lg', zc.workspace)}>
+      <aside className={cn('glass-strong pointer-events-auto absolute left-3 top-36 w-[340px] max-w-[calc(100vw-5rem)] rounded-2xl border border-fg/12 p-5 text-center shadow-glass-lg', zc.workspace)}>
         <p className="text-sm text-fg/70">This activity is no longer available.</p>
         <button onClick={toBrowse} className="mt-3 text-xs font-semibold text-accent hover:underline">
           Back to activities
@@ -135,10 +135,12 @@ export function ActivityStudentPanel() {
         </div>
       )}
 
-      {/* Objectives dock (left, per PNG). */}
+      {/* Objectives dock (left, per PNG). top-36 clears the canvas's own
+          top-left column (mode bar + overlay chips + toolbar row, now
+          stacked together — see TopologyCanvas topLeftExtra). */}
       <aside
         aria-label="Objectives"
-        className={cn('glass-strong pointer-events-auto absolute left-3 top-16 bottom-16 flex w-[340px] max-w-[calc(100vw-5rem)] flex-col rounded-2xl border border-fg/12 shadow-glass-lg', zc.workspace)}
+        className={cn('glass-strong pointer-events-auto absolute left-3 top-36 bottom-16 flex w-[340px] max-w-[calc(100vw-5rem)] flex-col rounded-2xl border border-fg/12 shadow-glass-lg', zc.workspace)}
       >
         <header className="flex items-start gap-2 border-b border-fg/10 px-4 py-3">
           <div className="min-w-0 flex-1">

@@ -280,123 +280,130 @@ export function ProblemsWorkspace() {
   }
 
   return (
-    <div className="absolute inset-0 flex bg-surface">
-      {/* Left: problem list */}
-      <div className="flex min-w-0 flex-1 flex-col border-r border-fg/10">
-        {/* Header */}
-        <div className="flex flex-col gap-4 border-b border-fg/10 bg-panel px-6 pt-5 pb-4">
-          <div className="flex items-end justify-between gap-4">
-            <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Problems</h1>
-            <div className="flex items-center gap-3">
-              <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
-                <Search className="h-4 w-4 text-fg/40" aria-hidden />
-                <input
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                  placeholder="Search nodes, problems…"
-                  aria-label="Search problems"
-                  className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
-                />
-              </label>
-              <button
-                onClick={ackAll}
-                disabled={counts.all === 0}
-                className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-              >
-                Acknowledge all
-              </button>
-            </div>
-          </div>
-          {/* Filter chips */}
-          <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
-            <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
-            <FilterChip
-              active={filter === 'critical'}
-              onClick={() => setFilter('critical')}
-              label="Critical"
-              count={counts.critical}
-              icon={CircleAlert}
-              tone="text-danger"
-            />
-            <FilterChip
-              active={filter === 'warning'}
-              onClick={() => setFilter('warning')}
-              label="Warning"
-              count={counts.warning}
-              icon={AlertTriangle}
-              tone="text-warning"
-            />
-            <FilterChip
-              active={filter === 'info'}
-              onClick={() => setFilter('info')}
-              label="Info"
-              count={counts.info}
-              icon={Info}
-              tone="text-accent"
-            />
-          </div>
-        </div>
-
-        {/* Table / empty */}
-        <div className="ng-scroll min-h-0 flex-1 overflow-auto p-6">
-          {isLoading ? (
-            <p className="p-4 text-sm text-fg/40">Deriving problems…</p>
-          ) : counts.all === 0 ? (
-            <div className="grid h-full place-items-center text-center">
-              <div className="max-w-sm space-y-2">
-                <ShieldCheck className="mx-auto h-9 w-9 text-success" aria-hidden />
-                <p className="text-sm text-fg/70">No problems detected</p>
-                <p className="text-xs leading-relaxed text-fg/40">
-                  Every link is up and every device is addressed. New faults appear here as soon as the topology changes.
-                </p>
+    <div className="absolute inset-0 flex justify-center bg-surface">
+      {/* Cap the two-pane split so the table doesn't stretch edge-to-edge on
+          wide monitors (~1900px) — width was previously unbounded flex-1. */}
+      <div className="flex h-full w-full max-w-[1400px]">
+        {/* Left: problem list */}
+        <div className="flex min-w-0 flex-1 flex-col border-r border-fg/10">
+          {/* Header */}
+          <div className="flex flex-col gap-4 border-b border-fg/10 bg-panel px-6 pt-5 pb-4">
+            <div className="flex items-end justify-between gap-4">
+              <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Problems</h1>
+              <div className="flex items-center gap-3">
+                <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
+                  <Search className="h-4 w-4 text-fg/40" aria-hidden />
+                  <input
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                    placeholder="Search nodes, problems…"
+                    aria-label="Search problems"
+                    className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
+                  />
+                </label>
+                <button
+                  onClick={ackAll}
+                  disabled={counts.all === 0}
+                  className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+                >
+                  Acknowledge all
+                </button>
               </div>
             </div>
-          ) : visible.length === 0 ? (
-            <p className="p-4 text-sm text-fg/40">No problem matches the current filter.</p>
+            {/* Filter chips */}
+            <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
+              <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
+              <FilterChip
+                active={filter === 'critical'}
+                onClick={() => setFilter('critical')}
+                label="Critical"
+                count={counts.critical}
+                icon={CircleAlert}
+                tone="text-danger"
+              />
+              <FilterChip
+                active={filter === 'warning'}
+                onClick={() => setFilter('warning')}
+                label="Warning"
+                count={counts.warning}
+                icon={AlertTriangle}
+                tone="text-warning"
+              />
+              <FilterChip
+                active={filter === 'info'}
+                onClick={() => setFilter('info')}
+                label="Info"
+                count={counts.info}
+                icon={Info}
+                tone="text-accent"
+              />
+            </div>
+          </div>
+
+          {/* Table / empty */}
+          <div className="ng-scroll min-h-0 flex-1 overflow-auto p-6">
+            {isLoading ? (
+              <p className="p-4 text-sm text-fg/40">Deriving problems…</p>
+            ) : counts.all === 0 ? (
+              <div className="grid h-full place-items-center text-center">
+                <div className="max-w-sm space-y-2">
+                  <ShieldCheck className="mx-auto h-9 w-9 text-success" aria-hidden />
+                  <p className="text-sm text-fg/70">No problems detected</p>
+                  <p className="text-xs leading-relaxed text-fg/40">
+                    Every link is up and every device is addressed. New faults appear here as soon as the topology changes.
+                  </p>
+                </div>
+              </div>
+            ) : visible.length === 0 ? (
+              <p className="p-4 text-sm text-fg/40">No problem matches the current filter.</p>
+            ) : (
+              <div className="overflow-hidden rounded-lg border border-fg/10">
+                <table className="w-full border-collapse text-left">
+                  <thead>
+                    <tr className="border-b border-fg/10 bg-recess/30 text-[12px] text-fg/55">
+                      <th className="w-10 px-4 py-2 font-normal" aria-label="Severity" />
+                      <th className="px-4 py-2 font-normal">Problem</th>
+                      <th className="px-4 py-2 font-normal">Affected node</th>
+                      <th className="px-4 py-2 font-normal">Detected</th>
+                      <th className="px-4 py-2 font-normal">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono text-[12px]">
+                    {visible.map((p) => (
+                      <ProblemRow
+                        key={p.id}
+                        problem={p}
+                        active={p.id === selected?.id}
+                        acked={acks.has(p.id)}
+                        onSelect={() => setSelectedId(p.id)}
+                      />
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Right: inspector */}
+        <aside className="flex w-[360px] shrink-0 flex-col bg-panel">
+          {selected ? (
+            <Inspector
+              problem={selected}
+              acked={acks.has(selected.id)}
+              onAck={() => ack(selected.id)}
+              onOpenTopology={() => openInTopology(selected.nodeId)}
+            />
           ) : (
-            <div className="overflow-hidden rounded-lg border border-fg/10">
-              <table className="w-full border-collapse text-left">
-                <thead>
-                  <tr className="border-b border-fg/10 bg-recess/30 text-[12px] text-fg/55">
-                    <th className="w-10 px-4 py-2 font-normal" aria-label="Severity" />
-                    <th className="px-4 py-2 font-normal">Problem</th>
-                    <th className="px-4 py-2 font-normal">Affected node</th>
-                    <th className="px-4 py-2 font-normal">Detected</th>
-                    <th className="px-4 py-2 font-normal">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="font-mono text-[12px]">
-                  {visible.map((p) => (
-                    <ProblemRow
-                      key={p.id}
-                      problem={p}
-                      active={p.id === selected?.id}
-                      acked={acks.has(p.id)}
-                      onSelect={() => setSelectedId(p.id)}
-                    />
-                  ))}
-                </tbody>
-              </table>
+            <div className="grid h-full place-items-center p-6 text-center">
+              <div className="max-w-[15rem] space-y-2 text-fg/40">
+                <ShieldCheck className="mx-auto h-8 w-8" aria-hidden />
+                <p className="text-xs leading-relaxed">Select a problem to see its evidence and suggested actions.</p>
+              </div>
             </div>
           )}
-        </div>
+        </aside>
       </div>
-
-      {/* Right: inspector */}
-      <aside className="flex w-[360px] shrink-0 flex-col bg-panel">
-        {selected ? (
-          <Inspector
-            problem={selected}
-            acked={acks.has(selected.id)}
-            onAck={() => ack(selected.id)}
-            onOpenTopology={() => openInTopology(selected.nodeId)}
-          />
-        ) : (
-          <div className="grid h-full place-items-center p-6 text-center text-fg/40">
-            <p className="text-xs leading-relaxed">Select a problem to see its evidence and suggested actions.</p>
-          </div>
-        )}
-      </aside>
     </div>
   );
 }

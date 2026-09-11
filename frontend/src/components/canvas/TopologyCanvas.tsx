@@ -11,7 +11,7 @@
  * cheap. Node moves are committed locally immediately, pushed to the server
  * on drag-stop only (not on every frame).
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
   ReactFlow,
   Background,
@@ -58,7 +58,7 @@ const EDGE_DASH: Record<LinkType, string | undefined> = {
   virtual: '1 6',
 };
 
-export function TopologyCanvas() {
+export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = {}) {
   const rfRef = useRef<ReactFlowInstance<Node<DeviceNodeData>, Edge> | null>(null);
   const nodesMap = useTopologyStore((s) => s.nodes);
   const linksMap = useTopologyStore((s) => s.links);
@@ -551,7 +551,13 @@ export function TopologyCanvas() {
         )}
 
         <Panel position="top-left" className="!m-3">
-          <div className="flex flex-col gap-2">
+          {/* One flex-col owns every top-left element (design 12-UI §2.4): a
+              workspace (twin/edu) can inject its own bar via `topLeftExtra` and
+              it stacks above the canvas's own chips/toolbar row with a
+              coordinated gap — never a second absolutely-positioned layer that
+              happens to land in the same corner. */}
+          <div className="flex flex-col items-start gap-2">
+            {topLeftExtra}
             <OverlayChips />
             <div className="flex items-start gap-2">
               <CanvasToolbar

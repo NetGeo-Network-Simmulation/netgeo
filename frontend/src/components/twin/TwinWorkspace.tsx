@@ -54,7 +54,7 @@ export function TwinWorkspace() {
   return (
     <>
       <div className="absolute inset-0">
-        <TopologyCanvas />
+        <TopologyCanvas topLeftExtra={<TwinStepper stepIndex={stepIndex} onImport={openImport} />} />
       </div>
 
       {/* Empty-state guidance — shared WorkspaceEmptyState (design 12-UI §2.6). */}
@@ -67,7 +67,6 @@ export function TwinWorkspace() {
         />
       )}
 
-      <TwinStepper stepIndex={stepIndex} onImport={openImport} />
       <LinkInferencePanel
         proposals={proposals}
         resolved={resolved}

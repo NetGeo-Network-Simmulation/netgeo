@@ -38,7 +38,10 @@ export function ActivityAuthorPanel() {
   return (
     <aside
       aria-label="Author activity"
-      className={`glass-strong pointer-events-auto absolute left-3 top-16 bottom-3 ${zc.workspace} flex w-[360px] max-w-[calc(100vw-5rem)] flex-col rounded-2xl border border-fg/12 shadow-glass-lg`}
+      // top-36 clears the canvas's own top-left column (mode bar + overlay
+      // chips + toolbar row, now stacked together — see TopologyCanvas
+      // topLeftExtra), not just the mode bar alone.
+      className={`glass-strong pointer-events-auto absolute left-3 top-36 bottom-3 ${zc.workspace} flex w-[360px] max-w-[calc(100vw-5rem)] flex-col rounded-2xl border border-fg/12 shadow-glass-lg`}
     >
       <header className="flex items-center gap-2 border-b border-fg/10 px-4 py-3">
         <h2 className="text-sm font-semibold text-fg/90">Author activity</h2>
