@@ -118,49 +118,13 @@ export function NavigationRail() {
   const activeModal = useUiStore((s) => s.activeModal);
 
   return (
-    // Auto-hide dock (Surya QA 2026-09-11: "dash to dock tanpa animasi" —
-    // collapsed by default so every workspace gets the full x=0 width, no
-    // reserved-space tax anywhere; see AppShell.tsx). Reveals on hover of
-    // the hot-zone strip below OR the instant any rail button receives
-    // keyboard focus (`group-focus-within`). No easing/duration utility
-    // anywhere in this subtree — the opacity/pointer-events flip is a
-    // plain class swap, so it's an instant snap, matching the explicit "no
-    // animation" request; don't "fix" that by adding easing.
-    //
-    // Collapsed is NOT invisible (Surya build review 2026-09-11: "mana dock
-    // mengambangnya?" — opacity-0 by default gave zero visual cue anything
-    // was there). A 12px "peek" sliver of the chassis itself stays visible
-    // at all times; see the div below.
-    <div className="group/dock pointer-events-none absolute inset-y-0 left-0 w-[88px]">
-      {/* Peek: a permanently-visible 12px slice of the dock chassis, flush
-          with the left edge, so there's always something to see and reach
-          for. Decorative only (aria-hidden, pointer-events-none) — the
-          hot-zone below owns the hit-target, so this never steals a click
-          meant for the canvas. Reuses `.rail-chassis` (same bg/border
-          tokens as the real chassis below) instead of any raw color. */}
-      <div className="rail-chassis pointer-events-none absolute inset-y-0 left-0 w-3 rounded-r-lg border" aria-hidden />
-
-      {/* Hot-zone: 12px strip flush with the peek above and the rail's own
-          left-3 offset (no dead gap between "hoverable" and "visible").
-          Mouse-only trigger — keyboard users reveal the rail by tabbing
-          straight into it (see `nav` below): its buttons stay in tab order
-          and keyboard-activated (Enter/Space) even while collapsed, because
-          `pointer-events-none` only blocks mouse hit-testing, never focus or
-          synthetic keyboard activation. That's also why the collapsed rail
-          is safe for the canvas underneath: a real click past the 12px peek
-          falls through to the workspace below instead of hitting an
-          invisible button. */}
-      <div className="pointer-events-auto absolute inset-y-0 left-0 w-3" aria-hidden />
-
-      <nav
-        aria-label="Primary"
-        className={cn(
-          'rail-chassis pointer-events-none absolute left-3 top-1/2 flex w-[76px] -translate-y-1/2 flex-col items-center gap-1 overflow-hidden rounded-xl border py-4 opacity-0',
-          'group-hover/dock:pointer-events-auto group-hover/dock:opacity-100',
-          'group-focus-within/dock:pointer-events-auto group-focus-within/dock:opacity-100',
-          zc.popover,
-        )}
-      >
+    <nav
+      aria-label="Primary"
+      className={cn(
+        'rail-chassis pointer-events-auto absolute left-6 top-1/2 flex w-[76px] -translate-y-1/2 flex-col items-center gap-1 overflow-hidden rounded-xl border py-4',
+        zc.workspace,
+      )}
+    >
       {/* Metal-grain overlay — decorative, procedural (no raster asset). */}
       <div className="rail-grain pointer-events-none absolute inset-0" aria-hidden />
 
@@ -209,8 +173,7 @@ export function NavigationRail() {
         <span className="text-[9px] font-bold tracking-widest">NETGEO</span>
         <span className="font-mono text-[8px]">NG-5X</span>
       </div>
-      </nav>
-    </div>
+    </nav>
   );
 }
 
