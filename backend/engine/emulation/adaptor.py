@@ -85,6 +85,15 @@ class EmulationAdaptor(ABC):
         """Current lifecycle state of the backing container."""
 
     @abstractmethod
+    async def ping(self, node_id: str, dest_ip: str, count: int = 4) -> dict:
+        """Run a real ICMP echo from the container backing ``node_id`` toward
+        ``dest_ip`` (N-5). Shape mirrors ``PingReport.as_dict()`` (sim mode)
+        closely enough that the API layer returns one JSON body regardless of
+        which path answered: ``sent``, ``received``, ``loss_pct``, ``rtts_ms``,
+        ``min_ms``, ``avg_ms``, ``max_ms``, ``errors``.
+        """
+
+    @abstractmethod
     async def attach_console(self, node_id: str):
         """Return an async byte stream for ``/ws/console/{node_id}`` relay.
 
@@ -125,6 +134,18 @@ class NullEmulationAdaptor(EmulationAdaptor):
 
     async def status(self, node_id: str) -> EmulationStatus:
         return EmulationStatus.ABSENT
+
+    async def ping(self, node_id: str, dest_ip: str, count: int = 4) -> dict:
+        return {
+            "sent": count,
+            "received": 0,
+            "loss_pct": 100.0,
+            "rtts_ms": [],
+            "min_ms": None,
+            "avg_ms": None,
+            "max_ms": None,
+            "errors": ["no emulation runtime configured"],
+        }
 
     async def attach_console(self, node_id: str):
         async def _empty():
