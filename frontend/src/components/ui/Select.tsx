@@ -46,6 +46,12 @@ export interface SelectProps {
    *  look app-wide was the point (this replaces 6 competing bg recipes). */
   className?: string;
   'aria-label'?: string;
+  /** 'bottom' (default) opens the listbox below the trigger; 'top' opens it
+   *  above. Callers anchored near the viewport's bottom edge (a floating
+   *  bottom-center bar, say) have no room to grow downward — the listbox
+   *  would spill past the edge and read as covering the bar's own controls.
+   *  Pick 'top' there instead of measuring at runtime. */
+  menuPosition?: 'bottom' | 'top';
 }
 
 export function Select({
@@ -57,6 +63,7 @@ export function Select({
   id,
   className,
   'aria-label': ariaLabel,
+  menuPosition = 'bottom',
 }: SelectProps) {
   const [open, setOpen] = useState(false);
   const [activeIndex, setActiveIndex] = useState(-1);
@@ -170,7 +177,8 @@ export function Select({
           aria-label={ariaLabel}
           id={`${baseId}-listbox`}
           className={cn(
-            'panel absolute left-0 top-[calc(100%+4px)] max-h-60 min-w-full overflow-auto rounded-md border border-fg/15 py-1 shadow-glass-lg animate-fade-in',
+            'panel absolute left-0 max-h-60 min-w-full overflow-auto rounded-md border border-fg/15 py-1 shadow-glass-lg animate-fade-in',
+            menuPosition === 'top' ? 'bottom-[calc(100%+4px)]' : 'top-[calc(100%+4px)]',
             zc.popover,
           )}
         >
