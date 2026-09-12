@@ -2,13 +2,15 @@
 
 # NetGeo
 
-**Self-hosted network simulation, planning & digital-twin platform**
+**Self-hosted network simulation, RF/GIS planning & digital-twin platform**
 
-*Packet-realistic simulation · RF/fiber planning · config-import digital twin — one cross-platform app.*
+*You draw a topology. It runs a real netstack underneath — routing tables, DR/BDR elections,
+pcapng captures — and when a real FRR router disagrees with the sim, that's a bug report, not
+a footnote.*
 
 [![CI](https://github.com/NetGeo-Network-Simmulation/netgeo/actions/workflows/backend.yml/badge.svg)](https://github.com/NetGeo-Network-Simmulation/netgeo/actions)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Version](https://img.shields.io/badge/version-1.2.37-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.123-brightgreen)
 ![Channel](https://img.shields.io/badge/channel-beta-blueviolet)
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![React](https://img.shields.io/badge/react-18-61dafb)
@@ -17,18 +19,60 @@
 
 ---
 
-## Installation
+## What this is
 
-**Prerequisites:** Git, Docker + Docker Compose, and a free port **8090** (override with `HTTP_PORT`).
-On Linux the installer auto-installs Docker (Fedora, Ubuntu, Debian, RHEL, Arch); on Windows/macOS install Docker Desktop first.
+A network engineer who has stared at one too many "topology diagrams" that were really just boxes
+and lines built NetGeo. It is a simulator, an RF/fiber planner, and a config-import digital twin,
+in one app: draw a topology (or import a real Cisco/MikroTik config), watch it run a deterministic
+netstack — VLANs, OSPF, BGP, NAT, ACLs — capture the packets, and ask it "can A reach B" and get
+an actual answer with evidence, not a guess.
 
-**One command (Linux / macOS)** — clones the repo and runs the installer:
+For network students, instructors grading labs, and ISP/network engineers who want to plan or
+sanity-check a topology without touching production gear.
+
+---
+
+## Install it
+
+NetGeo ships in five forms. Two work today. Read the table before you pick one — the sizes are
+large on purpose (a real native window bundles a real Qt runtime; that is not a bug to "optimize
+away").
+
+| # | Form | Frontend | Backend | Map | Status |
+|---|---|---|---|---|---|
+| 1 | Native, fully offline | native window | local | open-source tiles | **not yet** — window is real, tiles still hit the internet by default |
+| 2 | Native + Google Maps | native window | local | Google Maps API | **not built** — no integration exists |
+| 3 | Native + remote backend | native window | your server | online | **not built** — launcher always starts a local backend |
+| 4 | Headless | browser | local | online or local | **works today** — `--no-window` (see below) |
+| 5 | Full online | browser | your server | online | **works today** — this is the Docker install below |
+
+### Download a release (fastest path)
+
+Grab the latest tag's assets from [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.123):
+
+| Asset | Size | What it is |
+|---|---|---|
+| `NetGeo-x86_64.AppImage` | 231.6 MB | Native Qt window, Linux, no install step — `chmod +x`, run it |
+| `netgeo-1.2.123-setup.exe` | 157.9 MB | Windows installer, native window — **built, never run-tested on real Windows** |
+| `netgeo-linux-x86_64.tar.gz` | 253.5 MB | Onedir bundle, Linux, extract and run `netgeo` |
+
+All three are the native-window path (forms #1/#2/#3 above, minus the parts not built yet — today
+they behave like form #4, backend local, map online). See `packaging/README.md` for what each
+asset contains and how it's built.
+
+### Docker / server install (form #5 — full online)
+
+This is what you want for a shared, browser-accessed instance.
+
+**Prerequisites:** Git, Docker + Docker Compose, a free port **8090** (override with `HTTP_PORT`).
+On Linux the installer auto-installs Docker (Fedora, Ubuntu, Debian, RHEL, Arch); on Windows/macOS
+install Docker Desktop first.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/bootstrap.sh | bash
 ```
 
-**Manual (all platforms)**:
+or manually:
 
 ```bash
 git clone https://github.com/NetGeo-Network-Simmulation/netgeo.git
@@ -37,7 +81,8 @@ cd netgeo
 .\install.ps1         # Windows PowerShell
 ```
 
-The installer generates secrets, builds the full stack (PostgreSQL + FastAPI backend + React frontend behind an nginx gateway), waits for `/api/health`, and prints the URLs:
+The installer generates secrets, builds the stack (PostgreSQL + FastAPI + React behind nginx),
+waits for `/api/health`, and prints:
 
 ```
 On this machine  ->  http://localhost:8090
@@ -45,20 +90,16 @@ On the network   ->  http://<LAN-IP>:8090
 API docs         ->  http://<LAN-IP>:8090/docs
 ```
 
-**Common options:**
-
 | Command | Effect |
 |---|---|
-| `./install.sh` | Build + start |
-| `./install.sh --rebuild` | Force rebuild (no cache) |
+| `./install.sh --rebuild` | Force rebuild, no cache |
 | `./install.sh --down` | Stop the stack |
 | `./install.sh --reset` | Stop and delete all data |
 | `HTTP_PORT=9000 ./install.sh` | Use a different port |
-| `./uninstall.sh` | Uninstall (keep data + system config) |
-| `./uninstall.sh --purge` | Full clean — also remove data volumes, local images, the update-watcher service, the firewall rule, and `/var/lib/netgeo` (Docker engine & Tailscale kept) |
+| `./uninstall.sh` | Uninstall, keep data + system config |
+| `./uninstall.sh --purge` | Full clean — data volumes, local images, update-watcher, firewall rule, `/var/lib/netgeo` |
 
-> Already deleted the repo folder? `--purge` still cleans up — it finds NetGeo's
-> Docker footprint by name, no compose files needed:
+> Deleted the repo folder already? `--purge` still finds NetGeo's Docker footprint by name:
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/NetGeo-Network-Simmulation/netgeo/main/uninstall.sh | sudo bash -s -- --purge --yes
 > ```
@@ -82,37 +123,90 @@ npm run dev                                 # http://localhost:5180
 
 </details>
 
+### Headless mode (form #4)
+
+Backend runs local, UI opens in your regular browser instead of a native window — the honest
+choice when you don't want a desktop dependency, or you're on a box with no display at all:
+
+```bash
+python packaging/launcher.py --no-window
+NETGEO_NO_WINDOW=1 python packaging/launcher.py   # same thing, for systemd units
+```
+
+### Offline map region
+
+The backend can serve basemap tiles from a local `.mbtiles` file instead of the internet
+(`GET /api/maps/tiles/{z}/{x}/{y}`); the frontend switches to it automatically when one exists and
+falls back to online tiles the moment it doesn't — no curated regions are hosted anywhere, so you
+bring the file or a URL to fetch it from:
+
+```bash
+./install.sh --offline-map=/path/to/region.mbtiles
+./install.sh --offline-map-url=https://example.org/region.mbtiles
+./install.sh --no-offline-map          # skip, no prompt
+```
+
+The Windows installer asks the same question in a wizard page. To add or remove a map after the
+fact, just drop or delete the file — no installer needed:
+
+```bash
+mkdir -p ~/.config/netgeo
+cp my-region.mbtiles ~/.config/netgeo/offline-map.mbtiles   # install
+rm ~/.config/netgeo/offline-map.mbtiles                      # remove, back to online tiles
+```
+
+Full detail (file locations, fallback rules, how the Windows wizard is wired) is in
+[`packaging/README.md`](packaging/README.md).
+
 ---
 
-## Features
+## What makes the engine worth trusting
 
-A pure-Python engine (no native dependencies — runs on Linux, Windows, and ARM) drives a desktop-class web UI.
+Most simulators are self-consistent — they only ever check themselves against themselves. NetGeo
+also runs an **oracle test**: the identical topology, once on our deterministic Python engine,
+once on a real **FRR 10.7.0** container, compared on exactly what the RFC pins down (not CLI
+formatting, not timing).
 
-- **Packet-realistic simulation** — a deterministic discrete-event netstack: L2 (MAC learning, 802.1Q VLANs, STP, LAG/LACP), L3 (longest-prefix routing, NAT44, ACLs, DHCP, DNS), dynamic routing (**OSPF** multi-area, **BGP** with route-reflectors & communities), VRRP, and full **IPv4 + IPv6** dual-stack. Every link is captured for packet inspection and every run is bit-for-bit reproducible for a given seed.
+| Comparison | RFC-mandated outcome | Result |
+|---|---|---|
+| OSPF DR/BDR election (RFC 2328 §9.4/§7.3), non-preemptive | Who gets elected, and that a late higher-priority router doesn't unseat the incumbent | **Match** |
+| BGP best-path — shortest AS-path | Route with the shorter AS-path wins | **Match** |
+| BGP best-path — eBGP over iBGP | eBGP-learned route preferred over iBGP-learned, all else equal | **Match** |
 
-- **Live CLI & diagnostics** — each device speaks a Cisco-like or MikroTik-like CLI over its real tables (`show ip route`, `show ip ospf neighbor`, `ping`, `traceroute`, …). Ping / traceroute / capture APIs, pcapng export with a display-filter inspector, and a **simulation mode** with an event ledger you can replay and step back through.
+Zero mismatches on the cases tested so far. See
+[`backend/tests/ORACLE_HARNESS.md`](backend/tests/ORACLE_HARNESS.md) for how a case is built and
+why some comparisons (raw MED/local-pref/origin ordering) aren't oracle-testable yet — the sim has
+no config knob to force those attributes through a real message flow, which is a documented gap,
+not a hidden one.
 
-- **Digital twin** — import a running device config (**Cisco IOS-like** or **MikroTik RouterOS**, including OSPF/BGP) into the model; link inference wires devices that share a subnet into a connected twin; the **reachability engine** answers *"can A reach B?"* with evidence — ping result, traceroute path, and the source router's routing decision.
+Beyond that: a pure-Python engine (no native deps — runs on Linux, Windows, ARM) driving L2 (MAC
+learning, 802.1Q, STP, LACP), L3 (longest-prefix routing, NAT44, ACLs, DHCP, DNS), OSPF multi-area,
+BGP with route-reflectors and communities, VRRP, dual-stack IPv4+IPv6, DSCP-based QoS queueing,
+a Cisco/MikroTik-like CLI per device, pcapng export, and a config-import digital twin with a
+reachability engine that answers "can A reach B" with the actual routing decision as evidence.
+Full feature list: [`dev-docs/ARCHITECTURE.md`](dev-docs/ARCHITECTURE.md).
 
-- **Map deploy** — click a point on the GIS map and choose **Wireless** (AP / CPE) or **Cabled** (router / switch / OLT): the device is created as a real topology node at those coordinates, auto-linked to its nearest upstream, and rack-mounted kinds are slotted into the site rack automatically. Map markers and link lines render straight from the live topology.
+Starts in under 3 seconds, idles below 300 MB RAM.
 
-- **RF planning** — FSPL / Hata / COST-231 propagation, coverage rasters, and point-to-point / point-to-multipoint link budgets with automatic product selection.
+---
 
-- **Fiber & FTTH** — GPON loss-budget planner with splitter tables, plus bill-of-materials and HTML report generation.
+## What's not here
 
-- **Physical plant** — sites, racks, and cabling with rack-unit placement, a rack elevation view, and cable-length-driven propagation delay.
+Said out loud on purpose — a missing feature you can plan around beats a claimed one that breaks
+on you:
 
-- **Education** — author lab activities and auto-grade a student's topology (interface addressing, VLANs, OSPF adjacency, reachability), with timed and shareable labs.
-
-- **Addressing & config** — auto-addressing wizard with a dry-run preview step (shows planned assignments before committing), one-click dual-stack (IPv4 + IPv6 ULA) assignment, whole-project vendor config export, and a config regeneration diff view.
-
-- **Traffic & QoS** — DSCP classify/mark with three strict-priority classes (EF/AF/BE), per-class queueing that shapes delay and drop as a link saturates, and per-class counters surfaced in the event ledger and `show qos` CLI.
-
-- **Workspace UI** — an n8n/Figma-style topology canvas (floating bezier edges, port dots, hover-to-connect, drag-to-reconnect edge endpoints, live dashed connection preview, minimap) plus dedicated workspaces — Projects Portal, Config Center, Problem Center, and Reports Center — in matching dark & light themes. Device icons are customizable: import your own SVG/PNG symbols (GNS3-style) and assign them per node.
-
-- **Projects** — multi-project workspace with export/import archives, real-time collaboration channel, JWT + WebSocket auth, and in-app self-update from GitHub releases.
-
-Designed to start in under 3 seconds and idle below 300 MB RAM.
+- No IS-IS, MPLS, Segment Routing, or EVPN.
+- No QoS traffic shaping beyond DSCP classify/mark/queue (no policers, no shaper hierarchies).
+- No full TCP state machine — the netstack simulates reachability and routing, not a byte-accurate
+  transport stack.
+- No DNS64/NAT64.
+- BGP local-pref/origin-type/MED tie-breaks are not independently config-able yet (see the oracle
+  gap above) — the sim always originates with local-pref 100, origin IGP, MED 0.
+- Windows installer (`netgeo-1.2.123-setup.exe`) has never been run on a real Windows machine —
+  built and inspected, not verified end-to-end.
+- No multi-tenant isolation on the full-online form (#5) — one shared instance, one set of data.
+- Distribution forms #1 (true offline maps), #2 (Google Maps), #3 (remote backend for the native
+  window) don't exist yet — see the table above.
 
 ---
 
@@ -120,28 +214,21 @@ Designed to start in under 3 seconds and idle below 300 MB RAM.
 
 **Backend:** Python 3.12+, FastAPI (async), Pydantic, PostgreSQL, Pytest.
 **Frontend:** React 18 + TypeScript, Vite, Zustand, React Flow, Tailwind CSS.
-**Infra:** Docker + Docker Compose behind an nginx gateway.
-
----
-
-## Roadmap (post-1.0)
-
-Picked by demand, not order: IS-IS / MPLS / Segment Routing / EVPN-VXLAN, twin drift-diff & telemetry overlay, RF interference & Monte-Carlo, a GNS3-class emulation bridge, and an MCP-compatible AI assistant.
+**Infra:** Docker + Docker Compose behind nginx; native packaging via PyInstaller + Qt (pywebview).
 
 ---
 
 ## Contributing
 
-Pull requests are welcome. Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** — it covers local setup,
-the commands CI runs, and the branch/PR workflow. For architecture, the engine's determinism
-contract, adding a protocol, testing, and the frontend structure, see **[dev-docs/](dev-docs/)**.
+Start with **[CONTRIBUTING.md](CONTRIBUTING.md)** — local setup, the commands CI runs, the branch/PR
+workflow. For architecture, the engine's determinism contract, adding a protocol, and the frontend
+structure, see **[dev-docs/](dev-docs/)**.
 
-In short: work on a branch (`<scope>/<intent>`), keep `main` green, and open a PR. `main` is protected —
-direct pushes are rejected, and the `test` (backend lint + pytest) and `build` (frontend typecheck +
-build) checks must pass before a PR can merge.
+Work on a branch (`<scope>/<intent>`), keep `main` green, open a PR. `main` is protected — the
+`test` (backend lint + pytest) and `build` (frontend typecheck + build) checks must pass before
+merge.
 
-Bug reports and feature ideas go to [Issues](https://github.com/NetGeo-Network-Simmulation/netgeo/issues) using the
-templates provided.
+Bugs and ideas: [Issues](https://github.com/NetGeo-Network-Simmulation/netgeo/issues).
 
 ---
 
