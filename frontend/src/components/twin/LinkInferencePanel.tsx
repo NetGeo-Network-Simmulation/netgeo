@@ -8,6 +8,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Check, X, Zap, Loader2, Link2 } from 'lucide-react';
 import { linksApi, twinApi, type ApiError } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
+import { useTopologyStore } from '@/store/topologyStore';
 import { zc } from '@/theme/z';
 import type { LinkProposal } from './twinLogic';
 
@@ -26,10 +27,15 @@ export function LinkInferencePanel({
   const queryClient = useQueryClient();
   const total = resolved + proposals.length;
 
+  // QA-visual #3: apply the created link to the shared topology store the
+  // instant the backend confirms it, instead of only invalidating the query —
+  // invalidate alone left the canvas/map waiting on a full topology refetch
+  // before the new link became visible.
   const accept = useMutation({
     mutationFn: (p: LinkProposal) =>
       linksApi.create({ project_id: projectId!, a_iface: p.aIface.id, b_iface: p.bIface.id }),
-    onSuccess: () => {
+    onSuccess: (link) => {
+      useTopologyStore.getState().upsertLink(link);
       void queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
       onResolved();
     },
@@ -37,7 +43,10 @@ export function LinkInferencePanel({
 
   const inferAll = useMutation({
     mutationFn: () => twinApi.inferLinks(projectId!),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ['topology', projectId] }),
+    onSuccess: (links) => {
+      for (const link of links) useTopologyStore.getState().upsertLink(link);
+      void queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
+    },
   });
 
   const acceptErr = accept.error as ApiError | null;
