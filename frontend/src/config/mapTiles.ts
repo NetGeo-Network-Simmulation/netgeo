@@ -8,6 +8,7 @@
  *   import { MAP_TILES } from '@/config/mapTiles';
  *   map.addSource('base', { type: 'raster', tiles: [...], tileSize: 256 });
  */
+import { API_BASE } from '@/api/client';
 
 export interface TileLayerConfig {
   url: string;
@@ -76,4 +77,50 @@ const LEGACY_TILE_FALLBACK: Record<string, MapTileKey> = {
 export function normalizeMapLayer(key: string): MapTileKey {
   if (key in MAP_TILES) return key as MapTileKey;
   return LEGACY_TILE_FALLBACK[key] ?? DEFAULT_TILE;
+}
+
+/* -------------------------------------------------------------------------- */
+/* OFFLINE-MAP-2 — local MBTiles basemap (native full-offline distribution,   */
+/* memory netgeo-distribusi-lima-bentuk variant #1). Backend (OFFLINE-MAP-1)  */
+/* reports whether an operator-installed region file exists via              */
+/* GET /api/maps/status; when it does, it becomes THE basemap tile source —  */
+/* not a third switcher entry. A device carries at most one installed region */
+/* file, so both Satellite/Street buttons resolve to the same local pixels   */
+/* while offline (Surya: "offline adalah sumber tile, bukan jenis peta").    */
+/* -------------------------------------------------------------------------- */
+
+/** Shape of GET /api/maps/status (backend/app/services/offline_maps.py). */
+export interface OfflineMapStatus {
+  available: boolean;
+  region: string | null;
+  attribution: string | null;
+  min_zoom?: number | null;
+  max_zoom?: number | null;
+}
+
+/** The offline tile endpoint sits behind the same bearer-token auth as every
+ *  other API route (unlike the external Esri/OSM providers above, which need
+ *  no header) — MapView's `transformRequest` matches requests against this
+ *  prefix to attach the Authorization header MapLibre's own fetch wouldn't
+ *  otherwise send. */
+export const OFFLINE_TILE_PREFIX = `${API_BASE}/maps/tiles/`;
+
+/** Decide which tiles actually back the basemap: the local file when the
+ *  operator installed one, else the online provider for `mapLayer` — exactly
+ *  today's behavior, unchanged (the safety net). Pure function so the
+ *  decision is unit-testable without a MapLibre/DOM instance. */
+export function resolveBaseTile(
+  mapLayer: MapTileKey,
+  offline: OfflineMapStatus | null | undefined,
+): TileLayerConfig & { offline: boolean } {
+  const cfg: TileLayerConfig = MAP_TILES[mapLayer];
+  if (offline?.available) {
+    return {
+      url: `${OFFLINE_TILE_PREFIX}{z}/{x}/{y}`,
+      attribution: offline.attribution || 'Offline map data',
+      maxZoom: offline.max_zoom ?? cfg.maxZoom,
+      offline: true,
+    };
+  }
+  return { url: cfg.url, subdomains: cfg.subdomains, maxZoom: cfg.maxZoom, attribution: cfg.attribution, offline: false };
 }
