@@ -1,77 +1,84 @@
-# NetGeo desktop packaging (C1-a skeleton)
+*English version: [README.en.md](README.en.md)*
 
-All-in-one native launcher for the D1 edition (see
-`docs/design/13-DISTRIBUTION-PLAN.md`, local-only, not in this repo listing).
-This is a **kerangka** — the simplest thing that runs, not a finished product.
+# Paket desktop NetGeo (kerangka C1-a)
 
-## What's here
+Launcher native all-in-one untuk edisi D1 (lihat
+`docs/design/13-DISTRIBUTION-PLAN.md`, lokal-only, tidak ada di listing repo
+ini). Ini **kerangka** — hal paling sederhana yang jalan, bukan produk jadi.
 
-- `launcher.py` — runs the existing FastAPI app (`backend/app/main.py`)
-  on a free localhost port, mounts `frontend/dist` as static files on the
-  same port, opens it in a native pywebview window (WebKitGTK on Linux).
-  Single process, single port. Verified working both as a plain script and
-  as the PyInstaller binary below (frontend served 200, `/api/health` 200,
-  clean shutdown). See "System prerequisites" below for the native-window
-  fallback behavior.
-- `icons/` — `netgeo.ico` (16/32/48/64/128/256 multi-size, for Windows) and
-  `netgeo-{128,256,512}.png` (Linux), rasterized from
-  `frontend/public/netgeo.svg` with ImageMagick (`magick`).
-- `netgeo.spec` — PyInstaller onedir spec bundling the launcher + `backend/app`
-  (including its non-Python data files, `app/data/*.json`) + `frontend/dist` +
-  `icons/` + the Windows icon. Builds and runs successfully on this machine
-  (`pyinstaller netgeo.spec`, output in `packaging/dist/netgeo/`, gitignored).
-- `requirements.txt` — pins `pyinstaller==6.22.2` (build-time only) and
-  `pywebview==6.2.1` (runtime dependency of `launcher.py`; don't add either
-  to `backend/requirements.txt`).
-- `linux/` — per-user desktop integration: `netgeo.desktop` (XDG entry),
-  `install.sh` / `uninstall.sh`, `build-in-container.sh` (portable Linux
-  build via rootless Podman — see "Installing" below, **use this, not a
-  direct `pyinstaller netgeo.spec` on this machine**), `build-appimage.sh`
-  (wraps that bundle into a single-file `NetGeo-x86_64.AppImage` via
-  `linuxdeploy` + `linuxdeploy-plugin-appimage`, downloaded on demand into
-  `packaging/linux/.appimage-tools/`, gitignored).
-- `windows/netgeo.iss` — Inno Setup script producing a per-user
-  `netgeo-<version>-setup.exe` (Start Menu + optional Desktop shortcut,
-  uninstaller, no admin rights required).
-- `../.github/workflows/desktop.yml` — builds the unsigned onedir bundle on
-  `windows-latest` + `ubuntu-22.04` (pinned, not `ubuntu-latest` — see
-  comment in the workflow for why), then wraps it into an install-ready
-  artifact per platform (Windows: Inno Setup `.exe`; Linux: tarball of the
-  bundle + `linux/`), uploads both. Triggers: `workflow_dispatch` and `v*`
-  tags only (not every push). Windows *signing* (separate from the
-  installer) is a disabled (`if: false`) stub step — no credentials of any
-  kind are in this repo.
+## Isi folder ini
 
-## Native window backend: Qt/PySide6 (bundled), GTK (system, fallback)
+- `launcher.py` — menjalankan aplikasi FastAPI yang sudah ada
+  (`backend/app/main.py`) di port localhost bebas, me-mount `frontend/dist`
+  sebagai static files di port yang sama, membukanya di jendela native
+  pywebview (WebKitGTK di Linux). Satu proses, satu port. Terverifikasi
+  jalan baik sebagai script biasa maupun sebagai binary PyInstaller di
+  bawah (frontend serve 200, `/api/health` 200, shutdown bersih). Lihat
+  "System prerequisites" di bawah untuk perilaku fallback jendela native.
+- `icons/` — `netgeo.ico` (multi-size 16/32/48/64/128/256, untuk Windows)
+  dan `netgeo-{128,256,512}.png` (Linux), dirasterisasi dari
+  `frontend/public/netgeo.svg` dengan ImageMagick (`magick`).
+- `netgeo.spec` — spec PyInstaller onedir yang membundel launcher +
+  `backend/app` (termasuk file data non-Python-nya, `app/data/*.json`) +
+  `frontend/dist` + `icons/` + ikon Windows. Build dan jalan sukses di
+  mesin ini (`pyinstaller netgeo.spec`, output di `packaging/dist/netgeo/`,
+  di-gitignore).
+- `requirements.txt` — mem-pin `pyinstaller==6.22.2` (hanya untuk build)
+  dan `pywebview==6.2.1` (dependency runtime `launcher.py`; jangan
+  tambahkan keduanya ke `backend/requirements.txt`).
+- `linux/` — integrasi desktop per-user: `netgeo.desktop` (entry XDG),
+  `install.sh` / `uninstall.sh`, `build-in-container.sh` (build Linux
+  portable via rootless Podman — lihat "Installing" di bawah, **pakai
+  ini, jangan `pyinstaller netgeo.spec` langsung di mesin ini**),
+  `build-appimage.sh` (membungkus bundle itu jadi satu file
+  `NetGeo-x86_64.AppImage` via `linuxdeploy` + `linuxdeploy-plugin-appimage`,
+  diunduh sesuai kebutuhan ke `packaging/linux/.appimage-tools/`,
+  di-gitignore).
+- `windows/netgeo.iss` — script Inno Setup yang menghasilkan
+  `netgeo-<version>-setup.exe` per-user (shortcut Start Menu + Desktop
+  opsional, uninstaller, tanpa hak admin).
+- `../.github/workflows/desktop.yml` — build bundle onedir unsigned di
+  `windows-latest` + `ubuntu-22.04` (dipin, bukan `ubuntu-latest` — lihat
+  komentar di workflow-nya untuk alasannya), lalu membungkusnya jadi
+  artifact siap-install per platform (Windows: `.exe` Inno Setup; Linux:
+  tarball dari bundle + `linux/`), upload keduanya. Trigger:
+  `workflow_dispatch` dan tag `v*` saja (bukan tiap push). *Signing*
+  Windows (terpisah dari installer) adalah stub step yang dimatikan
+  (`if: false`) — tidak ada kredensial jenis apa pun di repo ini.
 
-`launcher.py` opens NetGeo in a native window via `pywebview`. As of the
-native-window slice, the packaged (PyInstaller/AppImage/installer) build
-forces `PYWEBVIEW_GUI=qt` and ships its own Qt runtime: `packaging/
-requirements.txt` pulls `pywebview[pyside6]` (PySide6 + QtPy), and
-`netgeo.spec` lists the concrete `PySide6.QtWebEngine*` submodules as
-`hiddenimports` so PyInstaller runs its own bundled
-`hook-PySide6.QtWebEngineCore.py` — this collects the QtWebEngineProcess
-helper binary, Qt resources and translations straight into the onedir
-bundle. No system package is required for this path; it's a genuinely
-self-contained window, not a system dependency the user has to install.
+## Backend jendela native: Qt/PySide6 (bundled), GTK (sistem, fallback)
 
-**Why not GTK (the previous attempt)?** Proven dead end, not a guess:
-PyInstaller ships zero hooks for `gi`/PyGObject — nothing in this pipeline
-collects `.typelib` files or the WebKitGTK shared-library tree, so even with
-`gi` importable at build time the bundle would still need to resolve those
-from system paths at runtime, which varies by distro and CPython minor
-version (see the older investigation below). Qt/PySide6 has none of that:
-the wheel is self-contained and PyInstaller's own hooks (verified present in
-`pyinstaller==6.22.2`'s `hooks/` directory) already know how to collect it in
-full — the same reason nearly every PyInstaller+"native window" tutorial
-uses Qt, not GTK.
+`launcher.py` membuka NetGeo di jendela native lewat `pywebview`. Sejak
+slice native-window, build yang dipaketkan (PyInstaller/AppImage/installer)
+memaksa `PYWEBVIEW_GUI=qt` dan membawa runtime Qt-nya sendiri:
+`packaging/requirements.txt` menarik `pywebview[pyside6]` (PySide6 +
+QtPy), dan `netgeo.spec` mendaftarkan submodule `PySide6.QtWebEngine*`
+yang konkret sebagai `hiddenimports` supaya PyInstaller menjalankan
+`hook-PySide6.QtWebEngineCore.py` bawaannya sendiri — ini mengumpulkan
+binary helper QtWebEngineProcess, resource Qt, dan file terjemahan
+langsung ke dalam bundle onedir. Tidak ada system package yang dibutuhkan
+untuk jalur ini; ini jendela yang benar-benar self-contained, bukan
+dependency sistem yang harus diinstal user.
 
-GTK stays as a **secondary, system-provided fallback**: `_try_webview()`'s
-`PYWEBVIEW_GUI` `setdefault` still lets a source-run dev override to `gtk`,
-and if Qt itself fails to start (missing base X11/OpenGL libs on a very
-minimal system), pywebview's own guilib still tries GTK next before giving
-up — at which point `launcher.py` falls back to the system browser exactly
-as before, logging why:
+**Kenapa bukan GTK (percobaan sebelumnya)?** Jalan buntu yang terbukti,
+bukan dugaan: PyInstaller tidak punya satu pun hook untuk `gi`/PyGObject —
+tidak ada apa pun di pipeline ini yang mengumpulkan file `.typelib` atau
+pohon shared-library WebKitGTK, jadi meski `gi` bisa di-import saat build,
+bundle-nya tetap perlu me-resolve itu dari system path saat runtime, yang
+beda-beda tergantung distro dan versi minor CPython (lihat investigasi
+lama di bawah). Qt/PySide6 tidak punya masalah itu: wheel-nya
+self-contained dan hook bawaan PyInstaller (terverifikasi ada di direktori
+`hooks/` milik `pyinstaller==6.22.2`) sudah tahu cara mengumpulkannya
+secara lengkap — alasan yang sama kenapa hampir semua tutorial
+PyInstaller+"native window" pakai Qt, bukan GTK.
+
+GTK tetap ada sebagai **fallback sekunder yang disediakan sistem**:
+`setdefault` pada `PYWEBVIEW_GUI` di `_try_webview()` masih memungkinkan
+dev yang run dari source meng-override ke `gtk`, dan kalau Qt sendiri
+gagal start (lib dasar X11/OpenGL tidak ada di sistem yang sangat
+minimal), guilib pywebview sendiri masih mencoba GTK berikutnya sebelum
+menyerah — di titik itu `launcher.py` fallback ke browser sistem persis
+seperti sebelumnya, mencatat alasannya:
 
 ```bash
 # Fedora
@@ -81,288 +88,321 @@ sudo dnf install webkit2gtk4.1 python3-gobject gtk3
 sudo apt install libwebkit2gtk-4.1-0 python3-gi gir1.2-webkit2-4.1 libgtk-3-0
 ```
 
-`gir1.2-webkit2-4.1` (the introspection typelib) is the one most often
-missed — without it PyGObject can import `gi` fine but can't reach WebKit2.
+`gir1.2-webkit2-4.1` (typelib introspection) adalah yang paling sering
+kelewat — tanpa itu PyGObject bisa import `gi` dengan baik tapi tidak
+bisa menjangkau WebKit2.
 
-**If any of these are missing, NetGeo does not crash.** `launcher.py`
-catches the failure, prints which packages to install, and opens the app in
-the system's default browser instead — same URL, same app, just not in its
-own window. This fallback path is exercised in
-`backend/tests/test_launcher.py` (with `webview` stubbed/absent so CI never
-needs WebKitGTK installed) and was verified live on this dev machine — see
-"Installing" below for what was actually run.
+**Kalau salah satu dari ini hilang, NetGeo tidak crash.** `launcher.py`
+menangkap kegagalannya, mencetak package apa yang perlu diinstal, dan
+membuka app di browser default sistem sebagai gantinya — URL sama, app
+sama, cuma bukan di jendelanya sendiri. Jalur fallback ini diuji di
+`backend/tests/test_launcher.py` (dengan `webview` di-stub/tidak ada
+supaya CI tidak pernah butuh WebKitGTK terinstal) dan sudah diverifikasi
+langsung di mesin dev ini — lihat "Installing" di bawah untuk apa yang
+benar-benar dijalankan.
 
 ## Installing
 
-### Linux — DO NOT build the release bundle on this dev machine
+### Linux — JANGAN build bundle rilis di mesin dev ini
 
-**`pyinstaller netgeo.spec` run directly on this machine (Fedora 44, glibc
-2.43) produces a binary that will not start on any older distro.** Proven,
-not theoretical: a Fedora-built bundle shipped to a fresh Ubuntu 24.04 VM
-(glibc 2.39) failed with
-`GLIBC_ABI_GNU2_TLS' not found (required by libpython3.14.so.1.0)` — full
-repro in `docs/qa/launcher-vm-ubuntu-2026-08-28.md` (local-only). Reason:
-PyInstaller statically links the *build host's* glibc, and glibc only runs
-forward (older glibc → newer distro is fine; newer glibc → older distro is
-not).
+**`pyinstaller netgeo.spec` yang dijalankan langsung di mesin ini (Fedora
+44, glibc 2.43) menghasilkan binary yang tidak akan jalan di distro yang
+lebih tua.** Terbukti, bukan teori: bundle hasil build Fedora yang
+dikirim ke VM Ubuntu 24.04 baru (glibc 2.39) gagal dengan
+`GLIBC_ABI_GNU2_TLS' not found (required by libpython3.14.so.1.0)` —
+repro lengkap di `docs/qa/launcher-vm-ubuntu-2026-08-28.md` (lokal-only).
+Alasannya: PyInstaller me-link glibc *host build*-nya secara statis, dan
+glibc hanya jalan maju (glibc lebih tua → distro lebih baru itu aman;
+glibc lebih baru → distro lebih tua itu tidak).
 
-**Fix: build inside `packaging/linux/build-in-container.sh`.** It runs the
-same `pyinstaller netgeo.spec` inside a rootless Podman container based on
-`ubuntu:22.04` (glibc 2.35, python3.11 — the newest available there), so the
-resulting binary's glibc floor is 2.35 instead of whatever this machine
-happens to be running. No new dependency: Podman is already installed and
-already used on this machine (see vault `research/spike-frr-podman.md`).
+**Perbaikan: build di dalam `packaging/linux/build-in-container.sh`.**
+Script ini menjalankan `pyinstaller netgeo.spec` yang sama di dalam
+container Podman rootless berbasis `ubuntu:22.04` (glibc 2.35, python3.11
+— yang terbaru yang tersedia di sana), jadi glibc floor binary hasilnya
+2.35, bukan apa pun yang kebetulan dijalankan mesin ini. Tanpa dependency
+baru: Podman sudah terinstal dan sudah dipakai di mesin ini (lihat vault
+`research/spike-frr-podman.md`).
 
 ```
 ./packaging/linux/build-in-container.sh          # → packaging/dist-container/dist/netgeo
-cd packaging/linux && ./install.sh                # per-user, no root
+cd packaging/linux && ./install.sh                # per-user, tanpa root
 ```
 
-`frontend/dist` is built on the host first (Node is here; not installed in
-the container) and bind-mounted in. Named Podman volumes
-(`netgeo-build-apt-cache`, `netgeo-build-pip-cache`) persist apt/pip
-downloads across re-runs — this environment's egress was measured at
-~115 KB/s, so re-downloading everything on every retry is otherwise brutal.
+`frontend/dist` di-build di host duluan (Node ada di sini; tidak diinstal
+di container) lalu di-bind-mount masuk. Named volume Podman
+(`netgeo-build-apt-cache`, `netgeo-build-pip-cache`) menyimpan unduhan
+apt/pip lintas re-run — egress environment ini terukur ~115 KB/s, jadi
+mengunduh ulang semuanya tiap retry itu berat sekali kalau tidak begini.
 
-**Verified working, both directions, 2026-08-28:**
-- Built in the container, run **on this machine (Fedora 44)**: `/` → 200,
-  `/api/health` → 200, built JS asset → 200.
-- Same binary, shipped to a fresh **Ubuntu 24.04.4 VM** (headless,
-  1 vCPU/3.3 GB): `install.sh` as non-root, `NETGEO_NO_BROWSER=1`, `/` → 200,
-  `/api/health` → `{"status":"ok","app":"NetGeo","version":"1.2.99","channel":"beta"}`
-  (app version at test time, not current — see `backend/app/core/config.py` `APP_VERSION`),
-  built JS asset (`/assets/index-BTJLwYj6.js`) → 200. `uninstall.sh` ran
-  twice cleanly (idempotent), VM left with zero `netgeo` remnants.
-- `objdump -T` across every bundled `.so` tops out at `GLIBC_2.35` — matches
-  the container base exactly, nothing higher leaked in.
+**Terverifikasi jalan, dua arah, 2026-08-28:**
+- Di-build di container, dijalankan **di mesin ini (Fedora 44)**: `/` →
+  200, `/api/health` → 200, JS asset hasil build → 200.
+- Binary yang sama, dikirim ke **VM Ubuntu 24.04.4** baru (headless,
+  1 vCPU/3.3 GB): `install.sh` sebagai non-root, `NETGEO_NO_BROWSER=1`,
+  `/` → 200, `/api/health` →
+  `{"status":"ok","app":"NetGeo","version":"1.2.99","channel":"beta"}`
+  (versi app saat tes, bukan versi saat ini — lihat `APP_VERSION` di
+  `backend/app/core/config.py`), JS asset hasil build
+  (`/assets/index-BTJLwYj6.js`) → 200. `uninstall.sh` dijalankan dua kali
+  dengan bersih (idempotent), VM tersisa nol jejak `netgeo`.
+- `objdump -T` di semua `.so` yang dibundel mentok di `GLIBC_2.35` —
+  cocok persis dengan base container-nya, tidak ada yang lebih tinggi
+  bocor masuk.
 
-Not yet tested: Debian 12, Ubuntu 20.04 or older (glibc 2.31, below this
-build's 2.35 floor — would need a still-older base image), any distro other
-than Fedora/Ubuntu.
+Belum diuji: Debian 12, Ubuntu 20.04 atau lebih lama (glibc 2.31, di
+bawah floor 2.35 build ini — butuh base image yang lebih tua lagi),
+distro apa pun selain Fedora/Ubuntu.
 
-Uninstall: `packaging/linux/uninstall.sh` (or the copy under
-`~/.local/share/netgeo/` is not kept — re-run the one from a checkout/tarball).
+Uninstall: `packaging/linux/uninstall.sh` (salinan di
+`~/.local/share/netgeo/` tidak disimpan — jalankan lagi yang dari
+checkout/tarball).
 
-### Linux — AppImage (first installer format)
+### Linux — AppImage (format installer pertama)
 
-Decision + full comparison (AppImage vs Flatpak vs .deb/.rpm vs tarball):
-`docs/qa/2026-08-30-format-installer-linux.md` (local-only). Short version:
-single binary, no per-distro build, CI-friendly. WebKitGTK is **not**
-bundled — see "System prerequisites" above; the same fallback applies.
+Keputusan + perbandingan lengkap (AppImage vs Flatpak vs .deb/.rpm vs
+tarball): `docs/qa/2026-08-30-format-installer-linux.md` (lokal-only).
+Versi singkat: satu binary, tanpa build per-distro, CI-friendly.
+WebKitGTK **tidak** dibundel — lihat "System prerequisites" di atas;
+fallback yang sama berlaku.
 
 ```
 ./packaging/linux/build-in-container.sh   # → packaging/dist-container/dist/netgeo
 ./packaging/linux/build-appimage.sh       # → packaging/NetGeo-x86_64.AppImage
 ```
 
-`build-appimage.sh` downloads `linuxdeploy` + `linuxdeploy-plugin-appimage`
-(GitHub continuous releases, ~36 MB total, cached in
-`packaging/linux/.appimage-tools/` — gitignored) the first time it runs,
-hand-builds an `AppDir` around the onedir bundle (an `AppRun` script exec's
-the existing `netgeo` binary in place — the onedir's own libs are already
-glibc-2.35-pinned and self-contained, so `linuxdeploy`'s dependency-chasing
-is skipped on purpose, it would just risk shadowing them with mismatched
-system `.so`s), then runs the plugin's `--appimage-extract-and-run` to
-squash it (this environment has no guaranteed FUSE mount for a nested
-AppImage, rootless + no sudo — extract-and-run sidesteps that).
+`build-appimage.sh` mengunduh `linuxdeploy` + `linuxdeploy-plugin-appimage`
+(continuous release GitHub, total ~36 MB, di-cache di
+`packaging/linux/.appimage-tools/` — gitignored) di jalan pertamanya,
+membangun `AppDir` secara manual di sekitar bundle onedir (script
+`AppRun` meng-exec binary `netgeo` yang sudah ada di tempatnya — lib
+milik onedir itu sendiri sudah dipin ke glibc-2.35 dan self-contained,
+jadi pengejaran dependency oleh `linuxdeploy` sengaja dilewati, itu cuma
+akan berisiko menimpa mereka dengan `.so` sistem yang tidak cocok), lalu
+menjalankan `--appimage-extract-and-run` milik plugin-nya untuk
+mengompresnya (environment ini tidak punya jaminan FUSE mount untuk
+AppImage bersarang, rootless + tanpa sudo — extract-and-run menghindari
+itu).
 
-**Output size: 27 MB** (`NetGeo-x86_64.AppImage`, 28 023 288 bytes).
+**Ukuran output: 27 MB** (`NetGeo-x86_64.AppImage`, 28 023 288 byte).
 
-**Three questions the design doc left UNVERIFIED — closed here with a real
-build + two real runs (Fedora 44 desktop, Ubuntu 24.04 headless VM):**
+**Tiga pertanyaan yang di design doc masih BELUM TERVERIFIKASI — ditutup
+di sini dengan build nyata + dua run nyata (desktop Fedora 44, VM
+headless Ubuntu 24.04):**
 
-1. *Does PyInstaller/AppImage bundle `gi` + the WebKit2 typelib, or does it
-   stay dependent on system `.so`s?* **Stays dependent — confirmed, not
-   guessed.** `find packaging/dist-container/dist/netgeo -iname '*.typelib'`
-   returns nothing; no `_gi*.so` extension is bundled either — PyInstaller's
-   static analysis pulls in only the pure-Python `gi/__init__.py` stub (that
-   .py file is portable, so it rides along), not the compiled introspection
-   binary or any `.typelib` data file. Running the built binary reproduces
-   this identically on both the Fedora host (which *has* `webkit2gtk4.1` +
-   `python3-gobject` installed) and the headless Ubuntu VM (which doesn't):
-   `ImportError: cannot import name '_gi' from partially initialized module
-   'gi'`.
-2. *Does Ubuntu 22.04's apt `python3-gi` (built for its default python3.10)
-   actually import from a different-minor-version venv via
-   `--system-site-packages`?* **No — confirmed false, root cause found: a
-   CPython C-extension ABI mismatch, not a packaging omission.** Isolated
-   in a throwaway container: `python3.10 -m venv --system-site-packages`
-   imports `gi` and resolves `WebKit2-4.1.typelib` from the system path
-   without issue (`OK 3.10 venv: <IntrospectionModule 'WebKit2' from
-   '/usr/lib/x86_64-linux-gnu/girepository-1.0/WebKit2-4.1.typelib'>`) — the
-   *same* apt packages, imported from a `python3.11 -m venv
-   --system-site-packages` instead, fail with the identical `_gi`
-   ImportError seen in the real bundle. `build-in-container.sh` builds with
-   python3.11 (the newest on `ubuntu:22.04`'s own repos — see its header
-   comment), one minor version off apt's `python3-gi`'s 3.10 build — that
-   gap alone is fatal to the native window, independent of typelib
-   bundling. Not changed here: switching the build to python3.10 to close
-   this gap is a real, scoped fix, but was kept out of this slice per
-   instructions not to force fragile bundling just to look done — the
-   existing browser fallback already covers it correctly.
-3. *Final AppImage size?* **27 MB**, see above.
+1. *Apakah PyInstaller/AppImage membundel `gi` + typelib WebKit2, atau
+   tetap bergantung pada `.so` sistem?* **Tetap bergantung —
+   dikonfirmasi, bukan dugaan.**
+   `find packaging/dist-container/dist/netgeo -iname '*.typelib'` tidak
+   mengembalikan apa pun; extension `_gi*.so` juga tidak dibundel —
+   analisis statis PyInstaller cuma menarik stub `gi/__init__.py` yang
+   pure-Python (file .py itu portable, jadi ikut terbawa), bukan binary
+   introspection yang sudah dikompilasi atau file data `.typelib` apa
+   pun. Menjalankan binary hasil build mereproduksi ini persis sama baik
+   di host Fedora (yang *punya* `webkit2gtk4.1` + `python3-gobject`
+   terinstal) maupun VM Ubuntu headless (yang tidak punya):
+   `ImportError: cannot import name '_gi' from partially initialized
+   module 'gi'`.
+2. *Apakah `python3-gi` dari apt Ubuntu 22.04 (dibangun untuk python3.10
+   default-nya) benar-benar bisa di-import dari venv
+   versi-minor-berbeda lewat `--system-site-packages`?* **Tidak —
+   dikonfirmasi salah, root cause ditemukan: mismatch ABI C-extension
+   CPython, bukan kelalaian packaging.** Diisolasi di container
+   sekali-pakai: `python3.10 -m venv --system-site-packages` bisa
+   import `gi` dan resolve `WebKit2-4.1.typelib` dari system path
+   tanpa masalah (`OK 3.10 venv: <IntrospectionModule 'WebKit2' from
+   '/usr/lib/x86_64-linux-gnu/girepository-1.0/WebKit2-4.1.typelib'>`)
+   — package apt yang *sama*, tapi di-import dari `python3.11 -m venv
+   --system-site-packages`, malah gagal dengan `ImportError` `_gi`
+   yang identik dengan yang dilihat di bundle sungguhan.
+   `build-in-container.sh` build dengan python3.11 (yang terbaru di
+   repo `ubuntu:22.04` sendiri — lihat komentar header-nya), selisih
+   satu versi minor dari build python3.10 milik `python3-gi` apt —
+   selisih itu saja sudah fatal untuk jendela native, lepas dari soal
+   bundling typelib. Tidak diubah di sini: mengganti build ke
+   python3.10 untuk menutup celah ini adalah perbaikan nyata dan
+   bertarget, tapi sengaja tidak dimasukkan ke slice ini sesuai
+   instruksi untuk tidak memaksakan bundling yang rapuh cuma supaya
+   kelihatan selesai — fallback browser yang sudah ada sudah
+   menutupinya dengan benar.
+3. *Ukuran akhir AppImage?* **27 MB**, lihat di atas.
 
-**Verified working, both directions, 2026-08-30 (same two-machine pattern as
-the tarball above):**
-- **Fedora 44 (Wayland desktop, `webkit2gtk4.1`/`gtk3`/`python3-gobject`
-  installed)**: the AppImage FUSE-mounted directly (no
-  `--appimage-extract-and-run` needed — a real FUSE mount was available
-  here), `netgeo-bundle/netgeo` started, `_try_webview` failed for the ABI
-  reason above and printed the Fedora install hint, `webbrowser.open()`
-  opened a **real Firefox tab** — `GET /` → 200, JS/CSS assets → 200,
-  `GET /api/auth/setup` → 200.
-- **Ubuntu 24.04 VM (headless, `superadmin@100.72.83.91`, no
-  `webkit2gtk`/`libgtk-3-0`/`gir1.2-webkit2-4.1` installed, `python3-gi`
-  present for its own python3.12)**: copied over scp, FUSE-mounted the same
-  way, printed the correct **Ubuntu/Debian** install hint (not the Fedora
-  one — the same `launcher.py` code path picks the right message, this
-  isn't AppImage-specific), backend served `/api/health` → 200 and `/` →
-  200 with no window (headless, expected).
+**Terverifikasi jalan, dua arah, 2026-08-30 (pola dua-mesin yang sama
+seperti tarball di atas):**
+- **Fedora 44 (desktop Wayland, `webkit2gtk4.1`/`gtk3`/`python3-gobject`
+  terinstal)**: AppImage-nya FUSE-mount langsung (tidak butuh
+  `--appimage-extract-and-run` — FUSE mount sungguhan tersedia di
+  sini), `netgeo-bundle/netgeo` start, `_try_webview` gagal karena
+  alasan ABI di atas dan mencetak hint instalasi Fedora,
+  `webbrowser.open()` membuka **tab Firefox sungguhan** — `GET /` →
+  200, JS/CSS asset → 200, `GET /api/auth/setup` → 200.
+- **VM Ubuntu 24.04 (headless, `superadmin@100.72.83.91`,
+  `webkit2gtk`/`libgtk-3-0`/`gir1.2-webkit2-4.1` tidak terinstal,
+  `python3-gi` ada untuk python3.12 miliknya sendiri)**: disalin lewat
+  scp, FUSE-mount dengan cara yang sama, mencetak hint instalasi
+  **Ubuntu/Debian** yang benar (bukan yang Fedora — code path
+  `launcher.py` yang sama memilih pesan yang tepat, ini bukan khusus
+  AppImage), backend melayani `/api/health` → 200 dan `/` → 200 tanpa
+  jendela (headless, sesuai ekspektasi).
 
-Not tested: a distro with `webkit2gtk`/`gtk3`/`python3-gobject` present *and*
-its default python3 at 3.11 (would need the ABI check above to actually
-pass) — none was available in this session.
+Belum diuji: distro dengan `webkit2gtk`/`gtk3`/`python3-gobject` ada
+*dan* python3 default-nya di 3.11 (butuh supaya cek ABI di atas
+benar-benar lolos) — tidak ada yang tersedia di sesi ini.
 
-### Windows — written, NOT tested (no Windows machine reachable from here)
+### Windows — sudah ditulis, BELUM diuji (tidak ada mesin Windows yang terjangkau dari sini)
 
 ```
 cd packaging && pyinstaller netgeo.spec
 cd windows && iscc netgeo.iss
 ```
 
-Produces `packaging/windows/dist-installer/netgeo-<version>-setup.exe`, where
-`<version>` is `backend/app/core/config.py`'s `APP_VERSION` (CI passes it via
-`iscc /DMyAppVersion=...`; a manual `iscc netgeo.iss` with no override falls
-back to the constant in `netgeo.iss`, which may be stale — pass `/DMyAppVersion=`
-explicitly for a manual build). Installs to `%LOCALAPPDATA%\NetGeo`, Start
-Menu shortcut + optional Desktop shortcut, registers an uninstaller,
-`PrivilegesRequired=lowest` (no admin prompt). CI now builds this on
-`windows-latest` (Inno Setup is preinstalled on that runner image) and
-uploads it as `netgeo-installer-windows-unsigned`.
-**Surya needs to test this on an actual Windows machine** — double-click,
-confirm SmartScreen "Run anyway" flow, Start Menu entry, uninstall cleanup —
-before it's considered verified.
+Menghasilkan `packaging/windows/dist-installer/netgeo-<version>-setup.exe`,
+di mana `<version>` adalah `APP_VERSION` milik
+`backend/app/core/config.py` (CI mengirimnya lewat
+`iscc /DMyAppVersion=...`; `iscc netgeo.iss` manual tanpa override jatuh
+ke konstanta di `netgeo.iss`, yang bisa saja basi — kirim
+`/DMyAppVersion=` secara eksplisit untuk build manual). Terinstal ke
+`%LOCALAPPDATA%\NetGeo`, shortcut Start Menu + Desktop opsional,
+mendaftarkan uninstaller, `PrivilegesRequired=lowest` (tanpa prompt
+admin). CI sekarang build ini di `windows-latest` (Inno Setup sudah
+terpasang di image runner itu) dan mengunggahnya sebagai
+`netgeo-installer-windows-unsigned`. **Surya perlu menguji ini di mesin
+Windows sungguhan** — double-click, konfirmasi alur SmartScreen "Run
+anyway", entry Start Menu, pembersihan uninstall — sebelum dianggap
+terverifikasi.
 
-## Postgres / Redis — investigated, NOT a blocker
+## Postgres / Redis — sudah diselidiki, BUKAN blocker
 
-`backend/app/core/config.py` declares `DATABASE_URL` and `REDIS_URL`, but
-neither is read anywhere else in `app/` — grepped, zero hits outside
-`config.py`. `app/store/__init__.py`'s `get_repo()` always returns the
-in-memory `MemoryRepository`; `app/store/postgres.py` exists but is never
-imported. The FastAPI `lifespan` hook in `main.py` opens no DB or Redis
-connection. So the backend **already runs standalone**: no Docker, no
-Postgres, no Redis needed for D1. Confirmed by running `launcher.py` (and
-the PyInstaller binary) directly on this machine with no infra services up.
+`backend/app/core/config.py` mendeklarasikan `DATABASE_URL` dan
+`REDIS_URL`, tapi keduanya tidak dibaca di mana pun lagi di `app/` —
+sudah di-grep, nol hit di luar `config.py`. `get_repo()` di
+`app/store/__init__.py` selalu mengembalikan `MemoryRepository`
+in-memory; `app/store/postgres.py` ada tapi tidak pernah di-import. Hook
+`lifespan` FastAPI di `main.py` tidak membuka koneksi DB atau Redis apa
+pun. Jadi backend-nya **sudah jalan standalone**: tidak butuh Docker,
+Postgres, atau Redis untuk D1. Dikonfirmasi dengan menjalankan
+`launcher.py` (dan binary PyInstaller-nya) langsung di mesin ini tanpa
+satu pun infra service yang hidup.
 
 State persistence: `NETGEO_STATE_STORE` (default
-`~/.config/netgeo/auth.json` sibling `state.json`) already persists
-`MemoryRepository` to a JSON file across restarts when set — this is the
-existing S2 PERSIST-01 mechanism, not something added in this slice.
+`~/.config/netgeo/auth.json`, bersebelahan dengan `state.json`) sudah
+mem-persist `MemoryRepository` ke file JSON lintas restart kalau di-set —
+ini mekanisme S2 PERSIST-01 yang sudah ada, bukan sesuatu yang
+ditambahkan di slice ini.
 
-Env var `NETGEO_NO_BROWSER=1` skips the auto-open-browser step entirely (used
-for non-interactive smoke tests where nothing needs to open at all — no
-window, no browser, API only); unset/default behavior is unchanged.
+Env var `NETGEO_NO_BROWSER=1` melewati langkah auto-buka-browser
+sepenuhnya (dipakai untuk smoke test non-interaktif di mana tidak ada
+apa pun yang perlu dibuka — tanpa jendela, tanpa browser, API saja);
+perilaku unset/default tidak berubah.
 
-## Headless mode (distribution variant #4)
+## Mode headless (varian distribusi #4)
 
-Of the five NetGeo distribution forms (native full-offline, native+Google
-Maps, native+remote backend, **headless**, full-online — see vault
-`netgeo-distribusi-lima-bentuk`, local-only), headless is: backend runs
-locally exactly as usual, but the UI opens in the system **browser** instead
-of a native pywebview window. Before this flag existed, that was only an
-accidental fallback path — what happened when WebKitGTK/Qt failed to start.
-It's now an explicit choice:
+Dari lima bentuk distribusi NetGeo (native full-offline, native+Google
+Maps, native+remote backend, **headless**, full-online — lihat vault
+`netgeo-distribusi-lima-bentuk`, lokal-only), headless itu: backend
+jalan lokal persis seperti biasa, tapi UI-nya terbuka di **browser**
+sistem, bukan di jendela native pywebview. Sebelum flag ini ada, itu
+cuma jalur fallback yang kebetulan — yang terjadi kalau WebKitGTK/Qt
+gagal start. Sekarang ini pilihan eksplisit:
 
 ```
 python packaging/launcher.py --no-window     # flag
-NETGEO_NO_WINDOW=1 python packaging/launcher.py   # env var — for systemd
-                                                   # units/containers where
-                                                   # passing argv is awkward,
-                                                   # same on/off convention
-                                                   # as NETGEO_NO_BROWSER
+NETGEO_NO_WINDOW=1 python packaging/launcher.py   # env var — untuk systemd
+                                                   # unit/container yang
+                                                   # merepotkan untuk
+                                                   # passing argv, konvensi
+                                                   # on/off yang sama
+                                                   # seperti NETGEO_NO_BROWSER
 ```
 
-The log line distinguishes *why* the window was skipped, on purpose:
+Baris log-nya membedakan *kenapa* jendelanya dilewati, dengan sengaja:
 
-- Requested: `[netgeo-launcher] headless: native window skipped by request
-  (--no-window) — opening system browser.`
-- WebKitGTK/Qt genuinely failed to start (unrequested): the existing
-  `_webview_unavailable` message — "jendela aplikasi asli tidak tersedia
-  (...)" plus the per-distro install hint.
+- Diminta: `[netgeo-launcher] headless: native window skipped by
+  request (--no-window) — opening system browser.`
+- WebKitGTK/Qt benar-benar gagal start (tidak diminta): pesan
+  `_webview_unavailable` yang sudah ada — "jendela aplikasi asli tidak
+  tersedia (...)" ditambah hint instalasi per-distro.
 
-Requesting `--no-window`/`NETGEO_NO_WINDOW=1` never attempts the native
-window at all, so a real webview failure is never masked as "the user asked
-for this." `NETGEO_NO_BROWSER=1` still wins if both are set — it skips
-opening anything (window or browser), which is what CI/smoke tests want.
+Meminta `--no-window`/`NETGEO_NO_WINDOW=1` sama sekali tidak pernah
+mencoba jendela native, jadi kegagalan webview sungguhan tidak pernah
+tersamar sebagai "user yang minta ini." `NETGEO_NO_BROWSER=1` tetap
+menang kalau keduanya di-set — dia melewati pembukaan apa pun (jendela
+atau browser), yang memang diinginkan CI/smoke test.
 
-## Offline map region (OFFLINE-MAP-3)
+## Wilayah peta offline (OFFLINE-MAP-3)
 
-The backend can serve basemap tiles from a local MBTiles file instead of the
-internet (`backend/app/services/offline_maps.py`, `GET /api/maps/status` +
-`/api/maps/tiles/{z}/{x}/{y}`); the frontend switches to it automatically
-when one is installed, and falls back to online tiles whenever it isn't (see
-that module's docstring for the exact fallback rules — missing/corrupt file
-both mean "online").
+Backend bisa melayani basemap tile dari file MBTiles lokal, bukan dari
+internet (`backend/app/services/offline_maps.py`, `GET /api/maps/status`
++ `/api/maps/tiles/{z}/{x}/{y}`); frontend berpindah ke situ otomatis
+begitu ada yang terinstal, dan fallback ke tile online kapan pun tidak
+ada (lihat docstring modul itu untuk aturan fallback persisnya — file
+hilang/rusak dua-duanya berarti "online").
 
-**File location the backend reads by default:**
-`~/.config/netgeo/offline-map.mbtiles` (`NETGEO_OFFLINE_MAP_PATH` in
-`backend/app/core/config.py`; same path on Windows, resolved via
-`%USERPROFILE%\.config\netgeo\offline-map.mbtiles` — `~` just expands to the
-user's home there too).
+**Lokasi file yang dibaca backend secara default:**
+`~/.config/netgeo/offline-map.mbtiles` (`NETGEO_OFFLINE_MAP_PATH` di
+`backend/app/core/config.py`; path yang sama di Windows, di-resolve
+lewat `%USERPROFILE%\.config\netgeo\offline-map.mbtiles` — `~` di sana
+juga cuma expand ke home user).
 
-**No curated region packages are downloaded automatically.** There is no
-hosting for that today — inventing a download server here would be
-dishonest, and a broken promise is worse than no feature. Both installers
-instead offer the two things that are actually true right now:
+**Tidak ada paket wilayah kurasi yang diunduh otomatis.** Belum ada
+hosting untuk itu hari ini — mengarang-ngarang download server di sini
+itu tidak jujur, dan janji yang tidak ditepati lebih buruk daripada
+tidak punya fitur sama sekali. Kedua installer sebagai gantinya
+menawarkan dua hal yang memang benar-benar nyata sekarang:
 
-- **Bring your own file** — you already have a `.mbtiles` (built with
-  `mbutil`/`tippecanoe`/`planetiler`/QGIS export, or handed to you) and want
-  the installer to place it.
-- **A URL you provide yourself** — the installer fetches exactly that URL
-  (`curl` on Linux, `Invoke-WebRequest` on Windows) and nothing else; no
-  built-in host is ever contacted.
+- **Bawa file sendiri** — kamu sudah punya `.mbtiles` (dibuat dengan
+  `mbutil`/`tippecanoe`/`planetiler`/export QGIS, atau dikasih orang
+  lain) dan mau installer-nya menaruhnya.
+- **URL yang kamu sediakan sendiri** — installer-nya fetch persis URL
+  itu (`curl` di Linux, `Invoke-WebRequest` di Windows) dan tidak ada
+  yang lain; tidak pernah menghubungi host bawaan apa pun.
 
-**Linux CLI** (`packaging/linux/install.sh`):
+**CLI Linux** (`packaging/linux/install.sh`):
 
 ```
-./install.sh --offline-map=/path/to/region.mbtiles   # copy a file you have
+./install.sh --offline-map=/path/to/region.mbtiles   # salin file yang sudah kamu punya
 ./install.sh --offline-map-url=https://example.org/region.mbtiles
-./install.sh --no-offline-map                         # skip, no prompt
-./install.sh                                          # interactive prompt
-                                                        # if run in a terminal;
-                                                        # silently skipped
-                                                        # (safe default) if
-                                                        # run non-interactively
-                                                        # (no tty, e.g. CI)
+./install.sh --no-offline-map                         # skip, tanpa prompt
+./install.sh                                          # prompt interaktif
+                                                        # kalau dijalankan di terminal;
+                                                        # dilewati diam-diam
+                                                        # (default aman) kalau
+                                                        # dijalankan non-interaktif
+                                                        # (tanpa tty, misalnya CI)
 ```
 
-**Windows GUI** (`packaging/windows/netgeo.iss`, Inno Setup): a wizard page
-titled "Peta Offline (Opsional)" offers the same three choices (skip / local
-file / URL), defaulting to skip. Syntax is consistent with the rest of the
-script (`CreateInputOptionPage`/`CreateInputFilePage`/`CreateInputQueryPage`,
-standard Inno Pascal Script support functions) — **not run-tested**, since
-Inno Setup only runs on Windows and none is reachable from this dev machine
-(same limitation as the rest of the installer, see above).
+**GUI Windows** (`packaging/windows/netgeo.iss`, Inno Setup): halaman
+wizard berjudul "Peta Offline (Opsional)" menawarkan tiga pilihan yang
+sama (skip / file lokal / URL), default ke skip. Sintaksnya konsisten
+dengan sisa script-nya (`CreateInputOptionPage`/`CreateInputFilePage`/
+`CreateInputQueryPage`, fungsi pendukung standar Inno Pascal Script) —
+**belum diuji-jalan**, karena Inno Setup cuma jalan di Windows dan tidak
+ada yang terjangkau dari mesin dev ini (limitasi yang sama seperti sisa
+installer, lihat di atas).
 
-**Installing your own file after the fact, or removing it:** no installer
-needed — just drop or delete the file at the path above:
+**Memasang file sendiri belakangan, atau menghapusnya:** tidak butuh
+installer — cukup taruh atau hapus file-nya di path di atas:
 
 ```
 mkdir -p ~/.config/netgeo
 cp my-region.mbtiles ~/.config/netgeo/offline-map.mbtiles   # install
-rm ~/.config/netgeo/offline-map.mbtiles                      # remove -> back to online tiles
+rm ~/.config/netgeo/offline-map.mbtiles                      # hapus -> balik ke tile online
 ```
 
-`uninstall.sh` deliberately never touches `~/.config/netgeo/` (it's user
-data, same as saved projects/state), so an installed offline map survives an
-uninstall/reinstall cycle unless removed by hand.
+`uninstall.sh` sengaja tidak pernah menyentuh `~/.config/netgeo/` (itu
+data user, sama seperti project/state tersimpan), jadi peta offline yang
+terpasang selamat dari siklus uninstall/reinstall kecuali dihapus
+manual.
 
-## Not done (explicitly out of scope)
+## Belum dikerjakan (sengaja di luar scope)
 
-- No `.deb`/`.rpm` for Linux (AppImage now exists, see "Linux — AppImage" above), no macOS build.
-- No code signing (Windows installer and binaries are unsigned; see the
-  disabled step in `desktop.yml` and `docs/qa/code-signing-native-distribution`).
-- No tray icon, no auto-start, no auto-update wiring.
-- No onefile mode (onedir chosen for faster startup / easier debugging).
-- `launcher.py` always picks a random free port; no `--port` flag, no config
-  file, no single-instance lock.
+- Belum ada `.deb`/`.rpm` untuk Linux (AppImage sudah ada sekarang,
+  lihat "Linux — AppImage" di atas), belum ada build macOS.
+- Belum ada code signing (installer dan binary Windows unsigned; lihat
+  step yang dimatikan di `desktop.yml` dan
+  `docs/qa/code-signing-native-distribution`).
+- Belum ada tray icon, belum ada auto-start, belum ada wiring
+  auto-update.
+- Belum ada mode onefile (onedir dipilih untuk startup lebih cepat /
+  debugging lebih mudah).
+- `launcher.py` selalu memilih port bebas secara acak; tidak ada flag
+  `--port`, tidak ada file config, tidak ada single-instance lock.
