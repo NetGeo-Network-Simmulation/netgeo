@@ -26,6 +26,12 @@ Criteria SKIPPED, and why -- a real engine gap, not a harness shortcoming
   sim's -- which is exactly the "berpura-pura membandingkan" this harness
   is told to avoid. Skipped rather than faked; revisit once the sim grows
   real route-map support.
+- Re-checked 2026-09-12 per an explicit request to add local-pref and origin
+  oracle cases (treating MED alone as the risky one): all three hit the
+  identical wall, not just MED. ``add_neighbor``/``advertise_network`` take
+  no local-pref/origin/MED override of any kind (grepped -- confirmed), so
+  none of the three can be produced on the sim side without the same
+  hand-injection this file already refuses to do for the other two.
 
 FRR knobs pinned explicitly in every node's config (not left at whatever the
 image defaults to):
