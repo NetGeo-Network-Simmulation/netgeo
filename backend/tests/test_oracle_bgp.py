@@ -55,6 +55,11 @@ image defaults to):
   advertise a prefix with no matching RIB entry. Neither knob is part of
   RFC 4271 §9.1.2.2; both exist purely so the topology comes up at all,
   mirroring the sim's own ``advertise_network()`` which has no such gates.
+
+CORRECTION (v1.2.123): the gap described above is CLOSED. ``add_neighbor`` now
+takes ``local_pref_in`` / ``med_out`` and ``advertise_network`` takes ``origin``,
+so those three attributes can be driven through a real message flow and oracle
+cases for them are writable. Do not cite the paragraphs above as a live blocker.
 """
 from __future__ import annotations
 

@@ -174,10 +174,14 @@ formatting, not timing).
 | BGP best-path — eBGP over iBGP | eBGP-learned route preferred over iBGP-learned, all else equal | **Match** |
 
 Zero mismatches on the cases tested so far. See
-[`backend/tests/ORACLE_HARNESS.md`](backend/tests/ORACLE_HARNESS.md) for how a case is built and
-why some comparisons (raw MED/local-pref/origin ordering) aren't oracle-testable yet — the sim has
-no config knob to force those attributes through a real message flow, which is a documented gap,
-not a hidden one.
+[`backend/tests/ORACLE_HARNESS.md`](backend/tests/ORACLE_HARNESS.md) for how a case is built.
+
+The remaining tie-breaks — local-pref, ORIGIN, MED — were blocked for a while, and not by the
+harness: the engine had no way to set those attributes at all, so best-path logic existed that no
+operator could reach. `add_neighbor(..., local_pref_in=N, med_out=N)` and
+`advertise_network(..., origin=...)` closed that in v1.2.123, which is why oracle cases for them are
+next rather than impossible. Making MED settable immediately exposed a real bug: it leaked across
+eBGP boundaries, invisible for as long as its only value was zero.
 
 Beyond that: a pure-Python engine (no native deps — runs on Linux, Windows, ARM) driving L2 (MAC
 learning, 802.1Q, STP, LACP), L3 (longest-prefix routing, NAT44, ACLs, DHCP, DNS), OSPF multi-area,
@@ -200,8 +204,8 @@ on you:
 - No full TCP state machine — the netstack simulates reachability and routing, not a byte-accurate
   transport stack.
 - No DNS64/NAT64.
-- BGP local-pref/origin-type/MED tie-breaks are not independently config-able yet (see the oracle
-  gap above) — the sim always originates with local-pref 100, origin IGP, MED 0.
+- BGP local-pref/ORIGIN/MED are configurable as of v1.2.123, but not yet cross-checked against FRR —
+  the oracle cases for them are written next. Defaults stay local-pref 100, origin IGP, MED 0.
 - Windows installer (`netgeo-1.2.123-setup.exe`) has never been run on a real Windows machine —
   built and inspected, not verified end-to-end.
 - No multi-tenant isolation on the full-online form (#5) — one shared instance, one set of data.
