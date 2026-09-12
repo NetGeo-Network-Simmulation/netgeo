@@ -209,6 +209,22 @@ export const projectsApi = {
     http.get<Record<string, unknown>>(`/projects/${id}/archive`).then((r) => r.data),
 };
 
+/* -------------------------------- Maps ------------------------------------ */
+/** GET /api/maps/status shape (backend/app/services/offline_maps.py) —
+ *  OFFLINE-MAP-2 uses this to decide local vs. online basemap tiles. */
+export interface MapsStatus {
+  available: boolean;
+  path: string | null;
+  region: string | null;
+  attribution: string | null;
+  min_zoom?: number | null;
+  max_zoom?: number | null;
+}
+
+export const mapsApi = {
+  status: () => http.get<MapsStatus>('/maps/status').then((r) => r.data),
+};
+
 /* ------------------------------- Nodes ----------------------------------- */
 export const nodesApi = {
   create: (body: Partial<NodeModel>) => http.post<NodeModel>('/nodes', body).then((r) => r.data),

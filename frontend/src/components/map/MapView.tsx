@@ -49,7 +49,8 @@ import { useTopologyStore } from '@/store/topologyStore';
 import { useRfStore } from '@/store/rfStore';
 import { marginStatus, STATUS_COLOR, fmtKm } from '@/components/rf/rfLogic';
 import type { NodeModel, LinkModel, Site, Topology } from '@/api/types';
-import { rfApi, projectsApi, physicalApi, type CoverageSite, type ApiError } from '@/api/client';
+import { rfApi, projectsApi, physicalApi, mapsApi, type CoverageSite, type ApiError, type MapsStatus } from '@/api/client';
+import { getToken } from '@/api/token';
 import {
   fetchOsmTowers,
   towerLabel,
@@ -59,7 +60,7 @@ import {
   type OsmTower,
   type OsmBuilding,
 } from '@/services/osmService';
-import { MAP_TILES, type TileLayerConfig, type MapTileKey } from '@/config/mapTiles';
+import { MAP_TILES, resolveBaseTile, OFFLINE_TILE_PREFIX, type TileLayerConfig, type MapTileKey } from '@/config/mapTiles';
 import { GIS_LAYERS } from '@/config/gisLayers';
 import { MapToolbar } from './MapToolbar';
 import { MapDevicePanel } from './MapDevicePanel';
@@ -152,6 +153,7 @@ function syncRasterLayers(
   map: MapLibreMap,
   mapLayer: MapTileKey,
   gisLayers: Record<string, GisLayerState>,
+  offline: MapsStatus | null | undefined,
 ) {
   const style = map.getStyle();
   for (const layer of style.layers ?? []) {
@@ -172,21 +174,31 @@ function syncRasterLayers(
   // layers exist, matching the original append-on-top behavior.
   const beforeId = map.getStyle().layers?.[0]?.id;
 
-  const cfg: TileLayerConfig = MAP_TILES[mapLayer];
-  map.addSource(BASE_SOURCE_ID, rasterSource({ ...cfg, attribution: cfg.attribution }));
+  // OFFLINE-MAP-2: local MBTiles file (when installed) backs the basemap
+  // regardless of the Satellite/Street selection — a device carries one
+  // region file, not two, so there's nothing for the switcher to pick
+  // between while offline (config/mapTiles.ts `resolveBaseTile`). Falls
+  // through to today's online `cfg` unchanged when no local file exists.
+  const cfg = resolveBaseTile(mapLayer, offline);
+  map.addSource(BASE_SOURCE_ID, rasterSource(cfg));
   map.addLayer({ id: BASE_SOURCE_ID, type: 'raster', source: BASE_SOURCE_ID }, beforeId);
 
-  if (cfg.overlay) {
+  // Overlay compositing (labels/roads over imagery) only applies to the
+  // online providers above — the offline MBTiles file is a single flat
+  // raster layer with no second tile set to stack.
+  const onlineCfg: TileLayerConfig = MAP_TILES[mapLayer];
+  const onlineOverlay: TileLayerConfig['overlay'] = cfg.offline ? undefined : onlineCfg.overlay;
+  if (onlineOverlay) {
     map.addSource(
       BASE_OVERLAY_SOURCE_ID,
-      rasterSource({ url: cfg.overlay.url, maxZoom: cfg.maxZoom, attribution: cfg.overlay.attribution }),
+      rasterSource({ url: onlineOverlay.url, maxZoom: cfg.maxZoom, attribution: onlineOverlay.attribution }),
     );
     map.addLayer(
       {
         id: BASE_OVERLAY_SOURCE_ID,
         type: 'raster',
         source: BASE_OVERLAY_SOURCE_ID,
-        paint: { 'raster-opacity': cfg.overlay.opacity ?? 1 },
+        paint: { 'raster-opacity': onlineOverlay.opacity ?? 1 },
       },
       beforeId,
     );
@@ -205,9 +217,22 @@ function syncRasterLayers(
   }
 }
 
-function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) => void }) {
+function GlobeBasemap({
+  onMapChange,
+  offline,
+}: {
+  onMapChange: (map: MapLibreMap | null) => void;
+  /** OFFLINE-MAP-2: undefined while /api/maps/status is still loading (treated
+   *  as "no local map yet" — same online fallback as `available: false`). */
+  offline: MapsStatus | undefined;
+}) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<MapLibreMap | null>(null);
+  // Mirrored into a ref because the mount effect below only runs once (on
+  // container mount) but /api/maps/status can resolve after that — the ref
+  // lets its one-time `load` handler read whatever the latest value is.
+  const offlineRef = useRef(offline);
+  offlineRef.current = offline;
   // Sticky "initial style setup done" flag — NOT map.isStyleLoaded(). That
   // API reflects whether every current tile manager is finished loading
   // (style.loaded() walks style.tileManagers), which flickers back to false
@@ -238,13 +263,23 @@ function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) 
       // added back explicitly at bottom-left instead (QA-visual #2), the one
       // corner nothing else in this view claims.
       attributionControl: false,
+      // OFFLINE-MAP-2: MapLibre's own tile fetches never carry our axios
+      // instance's Authorization header. Every other tile provider here is
+      // a public, key-less external host — only our own offline-tiles route
+      // sits behind the app's normal bearer-token auth (same as every other
+      // API route, see backend/app/api/__init__.py), so only it needs one.
+      transformRequest: (url) => {
+        if (!url.startsWith(OFFLINE_TILE_PREFIX)) return undefined;
+        const token = getToken();
+        return token ? { url, headers: { Authorization: `Bearer ${token}` } } : undefined;
+      },
     });
     map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');
     map.addControl(new AttributionControl({ compact: true }), 'bottom-left');
     map.once('load', () => {
       map.setProjection({ type: 'globe' });
       const s = useMapStore.getState();
-      syncRasterLayers(map, s.mapLayer, s.gisLayers);
+      syncRasterLayers(map, s.mapLayer, s.gisLayers, offlineRef.current);
       readyRef.current = true;
       onMapChange(map);
     });
@@ -273,8 +308,11 @@ function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) 
 
   useEffect(() => {
     const map = mapRef.current;
-    if (map && readyRef.current) syncRasterLayers(map, mapLayer, gisLayers);
-  }, [mapLayer, gisLayers]);
+    // Also re-runs once /api/maps/status resolves after mount, switching a
+    // just-opened map from online to local tiles with no user action
+    // (Surya: "otomatis berpindah") — and back, if the file goes away.
+    if (map && readyRef.current) syncRasterLayers(map, mapLayer, gisLayers, offline);
+  }, [mapLayer, gisLayers, offline]);
 
   return (
     <div
@@ -2220,6 +2258,17 @@ function GradientLegend() {
 export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
   const [glMap, setGlMap] = useState<MapLibreMap | null>(null);
   const mapLayer = useMapStore((s) => s.mapLayer);
+  // OFFLINE-MAP-2: ask once whether a local MBTiles region is installed.
+  // staleTime Infinity — it only changes when an operator swaps the file on
+  // disk, which needs an app restart to pick up anyway (NETGEO_OFFLINE_MAP_PATH
+  // is read at request time server-side, but there's no push notification
+  // for "the file just changed" — a reload re-fetches like any other query).
+  const { data: offlineStatus } = useQuery({
+    queryKey: ['maps-status'],
+    queryFn: mapsApi.status,
+    staleTime: Infinity,
+    retry: false,
+  });
   // Basemap tile status (QA screencast bug: switching styles could look like
   // silent failure — a slow/rate-limited provider paints in over several
   // seconds with nothing telling the user it's still loading vs. broken).
@@ -2280,7 +2329,7 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
   return (
     <div className="relative h-full w-full overflow-hidden">
       <MapCtx.Provider value={glMap}>
-        <GlobeBasemap onMapChange={setGlMap} />
+        <GlobeBasemap onMapChange={setGlMap} offline={offlineStatus} />
 
         {/* Vector overlays — GeoJSON sources + style layers (Stage 2). Mount
             order sets z-order: OSM reference layers anchor to the vector floor
@@ -2371,7 +2420,10 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             The signal legend is NOT part of this stack (see its own doc
             comment) — it's pinned bottom-right independently. */}
         <MapCounterChips />
-        <MapLayerSwitcher tileStatus={tileStatus} />
+        <MapLayerSwitcher
+          tileStatus={tileStatus}
+          offline={offlineStatus?.available ? { region: offlineStatus.region } : null}
+        />
         {!rfMode && <SignalLegend />}
         {!rfMode && <ElevationProfilePanel />}
 

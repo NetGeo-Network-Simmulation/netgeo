@@ -36,9 +36,17 @@ export interface MapLayerSwitcherProps {
    *  QA screencast bug where a style change looked "stuck" with nothing
    *  telling the user whether it was still loading or broken. */
   tileStatus?: 'loading' | 'ready' | 'error';
+  /** OFFLINE-MAP-2: non-null while a local MBTiles region backs the basemap
+   *  (config/mapTiles.ts `resolveBaseTile`) — `region` is whatever name the
+   *  installed file's metadata carries, possibly null. Presence of the
+   *  object itself (not the region string) is what means "offline active",
+   *  so a nameless region still surfaces as offline. Only Satellite/Street
+   *  stay as choices (Surya: offline is a tile source, not a map type) —
+   *  this just labels which source is actually live right now. */
+  offline?: { region: string | null } | null;
 }
 
-export function MapLayerSwitcher({ tileStatus = 'ready' }: MapLayerSwitcherProps) {
+export function MapLayerSwitcher({ tileStatus = 'ready', offline = null }: MapLayerSwitcherProps) {
   const mapLayer = useMapStore((s) => s.mapLayer);
   const setMapLayer = useMapStore((s) => s.setMapLayer);
 
@@ -67,6 +75,18 @@ export function MapLayerSwitcher({ tileStatus = 'ready' }: MapLayerSwitcherProps
           );
         })}
       </div>
+      {/* OFFLINE-MAP-2: tells the user which source they're actually looking
+          at — a limited installed region, not the full online world — without
+          a new panel. Shown whenever local tiles are active, independent of
+          the loading/error status below. */}
+      {offline && (
+        <span
+          role="status"
+          className="glass-strong rounded-md border border-fg/15 px-2 py-0.5 text-[11px] font-medium text-fg/55"
+        >
+          Offline{offline.region ? ` · ${offline.region}` : ''}
+        </span>
+      )}
       {tileStatus !== 'ready' && (
         <span
           role="status"
@@ -77,7 +97,11 @@ export function MapLayerSwitcher({ tileStatus = 'ready' }: MapLayerSwitcherProps
               : 'border-fg/15 text-fg/55',
           )}
         >
-          {tileStatus === 'error' ? 'Tiles unavailable' : 'Loading tiles…'}
+          {tileStatus === 'error'
+            ? offline
+              ? 'Area di luar cakupan peta offline'
+              : 'Tiles unavailable'
+            : 'Loading tiles…'}
         </span>
       )}
     </div>
