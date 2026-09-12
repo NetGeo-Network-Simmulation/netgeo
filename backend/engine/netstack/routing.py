@@ -252,11 +252,16 @@ class AclRule:
     ``.type``) so "deny ND" (type 135/136) and "permit echo" (128/129) can be
     written as ordinary rules alongside ``proto="icmpv6"``.
 
-    Extension-header filtering (RFC 8200 Hop-by-Hop/Routing/Fragment/
-    Destination Options) is out of scope: ``proto`` on an ``Ipv6Packet`` is
-    only ever the value already stored on it (see ``Ipv6Packet.proto``,
-    which itself does not parse the next-header chain), never a header the
-    engine peels off itself.
+    Extension-header handling: a rule's ``proto``/``dst_port``/``icmp_type``
+    always read ``Ipv6Packet.proto``/``.payload`` directly (already the
+    resolved upper-layer values — see ``Ipv6Packet`` docstring), never a
+    header this class peels off itself. What this class does *not* do is
+    decide whether to trust that read at all when the packet carries an
+    extension-header chain too long or too strange to vouch for — that
+    fail-safe (deny rather than risk matching a spoofed classification) sits
+    in ``Router._acl_permits``, gated on ``Ipv6Packet.ext_headers_ok()``,
+    because it must apply before any rule (including a trailing bare
+    ``permit``) gets a chance to match.
     """
 
     action: str = "permit"                     # permit | deny
@@ -288,6 +293,15 @@ class AclRule:
         if self.dst_port is not None:
             l4 = pkt.payload
             port = getattr(l4, "dst_port", None)
+            # A non-first IPv6 fragment (Fragment ext header, ``payload``
+            # None — no L4 header travels with it, same as an IPv4 non-first
+            # fragment) can never satisfy a port-specific rule: ``port`` is
+            # None here, ``self.dst_port`` isn't, so this falls through to
+            # the next rule / implicit deny rather than matching by accident.
+            # A proto-only rule (no dst_port) is unaffected and still matches
+            # on ``pkt.proto_name``, which stays correct for every fragment —
+            # RFC 8200's Fragment header carries the true next-header just
+            # like the fixed IPv4 header does across fragments.
             if port != self.dst_port:
                 return False
         return self.icmp_type is None or getattr(pkt.payload, "type", None) == self.icmp_type
@@ -902,6 +916,14 @@ class Router(L3Device):
     def _acl_permits(self, rules: list[AclRule] | None, pkt: Ipv4Packet | Ipv6Packet) -> bool:
         if not rules:
             return True
+        # RFC 7112 evasion guard: an extension-header chain this engine can't
+        # vouch for (too long, or a header type it doesn't recognize) means
+        # the proto/port a rule would match on can't be trusted either — so
+        # it never gets the chance to. This only fires when an ACL is
+        # actually configured (the ``not rules`` guard above already passed);
+        # a link with no ACL has nothing here to evade.
+        if isinstance(pkt, Ipv6Packet) and not pkt.ext_headers_ok():
+            return False
         for rule in rules:
             if rule.matches(pkt):
                 return rule.action == "permit"
