@@ -29,6 +29,7 @@ import * as THREE from 'three';
 import type { NodeKind, Rack } from '@/api/types';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiError, type DeviceType } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
+import { useTopologyStore } from '@/store/topologyStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { cn } from '@/lib/cn';
 import { autoName } from '@/lib/mapDeploy';
@@ -341,8 +342,13 @@ export function Rack3DElevationPanel() {
         project_id: projectId!, link_id: link.id,
         media: cableMediaForVisual(v.media), length_m: v.lengthM,
       });
+      return link;
     },
-    onSuccess: () => { setError(null); invalidate(); },
+    // QA-visual #3: push the confirmed link into the shared topology store
+    // right away — this panel reads its own react-query cache (`topoQ`), so
+    // without this the 2D canvas/map link only appeared once `invalidate()`'s
+    // refetch came back, a full extra round-trip after the backend accepted it.
+    onSuccess: (link) => { setError(null); useTopologyStore.getState().upsertLink(link); invalidate(); },
     onError: (e) => setError((e as unknown as ApiError).message || 'Gagal menyimpan kabel.'),
   });
 
