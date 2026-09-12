@@ -155,8 +155,10 @@ class Device:
 class L3Device(Device):
     """Shared ARP + ICMP-echo machinery for anything with an IP stack."""
 
-    def __init__(self, name: str, node_id: str | None = None, nos: str = "forgeos") -> None:
-        super().__init__(name, node_id, nos)
+    def __init__(
+        self, name: str, node_id: str | None = None, nos: str = "forgeos", mode: str = "sim"
+    ) -> None:
+        super().__init__(name, node_id, nos, mode)
         # ip -> (mac, iface_name)
         self.arp_table: dict[IPv4Address, tuple[MacAddr, str]] = {}
         # next-hop ip -> queued IP packets awaiting resolution
@@ -569,8 +571,10 @@ class Host(L3Device):
 
     kind = "host"
 
-    def __init__(self, name: str, node_id: str | None = None, nos: str = "forgeos") -> None:
-        super().__init__(name, node_id, nos)
+    def __init__(
+        self, name: str, node_id: str | None = None, nos: str = "forgeos", mode: str = "sim"
+    ) -> None:
+        super().__init__(name, node_id, nos, mode)
         self.default_gateway: IPv4Address | None = None
         self.default_gateway6: IPv6Address | None = None
         self._gateway6_iface: str | None = None   # iface the RA arrived on

@@ -473,8 +473,10 @@ class Router(L3Device):
 
     kind = "router"
 
-    def __init__(self, name: str, node_id: str | None = None, nos: str = "forgeos") -> None:
-        super().__init__(name, node_id, nos)
+    def __init__(
+        self, name: str, node_id: str | None = None, nos: str = "forgeos", mode: str = "sim"
+    ) -> None:
+        super().__init__(name, node_id, nos, mode)
         self.routes: list[Route] = []
         self.routes6: list[Route6] = []
         self.ra_enabled = False           # advertise prefixes for SLAAC
@@ -1537,8 +1539,10 @@ class Firewall(Router):
 
     kind = "firewall"
 
-    def __init__(self, name: str, node_id: str | None = None, nos: str = "forgeos") -> None:
-        super().__init__(name, node_id, nos)
+    def __init__(
+        self, name: str, node_id: str | None = None, nos: str = "forgeos", mode: str = "sim"
+    ) -> None:
+        super().__init__(name, node_id, nos, mode)
         self.default_policy = "permit"   # operators flip to "deny" for strictness
 
     def _acl_permits(self, rules: list[AclRule] | None, pkt: Ipv4Packet | Ipv6Packet) -> bool:

@@ -104,9 +104,10 @@ def _resolve_dst(lab: netlab.Lab, ref: str) -> str:
 
 def _topo_node(topo: Topology, ref: str) -> Node | None:
     """Find a stored ``Node`` by id or name — same lookup ``lab.net.find_device``
-    does inside the engine, but against the pre-build model, where ``Node.mode``
-    (sim|emul) is still visible (the engine ``Device`` built from it is not:
-    ``netlab.build_network`` never threads ``mode`` through)."""
+    does inside the engine. Used here (rather than building/reusing the lab and
+    reading ``Device.mode``, which ``build_network`` does thread through) so the
+    emul-vs-sim branch below can be taken without building a ``Network`` for a
+    node pair that might never touch the DES kernel at all."""
     for n in topo.nodes:
         if n.id == ref or n.name == ref:
             return n
