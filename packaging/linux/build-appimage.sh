@@ -3,12 +3,15 @@
 # (packaging/linux/build-in-container.sh) into a single-file AppImage.
 #
 # WebKitGTK is NOT bundled (see docs/qa/2026-08-30-format-installer-linux.md
-# §F, confirmed empirically in this slice: PyInstaller's static import scan
-# picks up the `gi` Python module, but GObject-Introspection typelibs are
-# data files resolved from system paths at runtime, not Python imports —
-# nothing in this pipeline collects them). It stays a documented system
-# prerequisite; launcher.py already falls back to the system browser with
-# an install hint when WebKitGTK is missing.
+# §F: GObject-Introspection typelibs are data files resolved from system
+# paths at runtime, not Python imports, and PyInstaller has no hook that
+# collects them). It stays a documented system prerequisite. The native
+# window's real backend since the Qt slice is PySide6/QtWebEngine instead —
+# that IS fully bundled: netgeo.spec's hiddenimports pull in PyInstaller's
+# own hook-PySide6.QtWebEngineCore.py, which copies the QtWebEngineProcess
+# helper binary + Qt resources straight into the onedir bundle this script
+# packages, so nothing extra is needed here. launcher.py still falls back to
+# the system browser (with the GTK install hint) if even that fails.
 #
 # ponytail: the onedir bundle is already self-contained (its own glibc-
 # pinned .so files) — we don't need linuxdeploy's dependency-chasing

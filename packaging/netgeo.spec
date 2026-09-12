@@ -33,6 +33,26 @@ a = Analysis(
         "uvicorn.protocols.http.auto",
         "uvicorn.protocols.websockets.auto",
         "uvicorn.loops.auto",
+        # Native window (Qt backend): pywebview's platforms/qt.py imports
+        # `qtpy`, which picks its real Qt binding (PySide6 here) at runtime
+        # via its own probing, not a static import PyInstaller's analysis can
+        # follow. Listing the concrete PySide6 submodules makes PyInstaller
+        # treat them as reachable, which is what makes it run its own bundled
+        # hook-PySide6.QtWebEngineCore.py (collects the QtWebEngineProcess
+        # helper binary + resources/translations) — confirmed present in
+        # pyinstaller==6.22.2's hooks/ dir. GTK/gi has no equivalent hook,
+        # which is why that path was abandoned (see packaging/README.md).
+        "qtpy",
+        "qtpy.QtCore",
+        "qtpy.QtGui",
+        "qtpy.QtWidgets",
+        "PySide6.QtCore",
+        "PySide6.QtGui",
+        "PySide6.QtWidgets",
+        "PySide6.QtNetwork",
+        "PySide6.QtPrintSupport",
+        "PySide6.QtWebEngineCore",
+        "PySide6.QtWebEngineWidgets",
     ],
     hookspath=[],
     runtime_hooks=[],

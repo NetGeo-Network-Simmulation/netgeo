@@ -48,6 +48,29 @@ def test_try_webview_falls_back_when_backend_start_fails(monkeypatch, capsys):
     assert "webkit2gtk4.1" in capsys.readouterr().err
 
 
+def test_main_version_flag_prints_and_exits_without_serving(monkeypatch, capsys):
+    """`netgeo --version` must not bind a port or start uvicorn."""
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--version"])
+    monkeypatch.setattr(launcher, "_mount_frontend", lambda: (_ for _ in ()).throw(
+        AssertionError("--version must exit before mounting/serving anything")
+    ))
+    launcher.main()
+    out = capsys.readouterr().out
+    assert "NetGeo" in out
+    assert "serving on" not in out
+
+
+def test_main_help_flag_prints_and_exits_without_serving(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--help"])
+    monkeypatch.setattr(launcher, "_mount_frontend", lambda: (_ for _ in ()).throw(
+        AssertionError("--help must exit before mounting/serving anything")
+    ))
+    launcher.main()
+    out = capsys.readouterr().out
+    assert "Usage: netgeo" in out
+    assert "serving on" not in out
+
+
 def test_try_webview_succeeds_when_backend_available(monkeypatch):
     """Sanity check the happy path too: start() returning normally -> True."""
     fake_webview = type(sys)("webview")

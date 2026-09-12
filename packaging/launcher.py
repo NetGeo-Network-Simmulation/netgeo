@@ -46,7 +46,10 @@ from app.main import app  # noqa: E402
 _WEBKIT_INSTALL_HINT = (
     "    Fedora:         sudo dnf install webkit2gtk4.1 python3-gobject gtk3\n"
     "    Ubuntu/Debian:  sudo apt install libwebkit2gtk-4.1-0 python3-gi "
-    "gir1.2-webkit2-4.1 libgtk-3-0"
+    "gir1.2-webkit2-4.1 libgtk-3-0\n"
+    "    (packaged builds bundle Qt/QtWebEngine already, so this GTK path is "
+    "only relevant when running from source without packaging/requirements.txt "
+    "installed, or on a machine missing base X11/OpenGL libs)"
 )
 
 
@@ -83,6 +86,15 @@ def _try_webview(url: str) -> bool:
     (WebKitGTK/Qt) isn't importable here — caller falls back to the system
     browser instead of crashing.
     """
+    # ponytail: prefer the bundled Qt/PySide6 backend over GTK — WebKitGTK's
+    # typelibs are a system prerequisite PyInstaller cannot cleanly bundle
+    # (no hook collects .typelib/girepository data at all), while Qt/
+    # QtWebEngine ships as a self-contained pip wheel that PyInstaller's own
+    # bundled hooks (hook-PySide6.QtWebEngineCore.py et al.) already know how
+    # to collect in full (helper binary, resources, translations). setdefault
+    # so a source-run dev with only system GTK installed can still force it
+    # back with PYWEBVIEW_GUI=gtk.
+    os.environ.setdefault("PYWEBVIEW_GUI", "qt")
     try:
         import webview
     except ImportError as exc:
@@ -109,7 +121,37 @@ def _try_webview(url: str) -> bool:
     return True
 
 
+def _print_version() -> None:
+    from app.core.config import APP_VERSION
+
+    print(f"NetGeo {APP_VERSION}")
+
+
+def _print_help() -> None:
+    print("NetGeo desktop launcher")
+    print()
+    print("Usage: netgeo [--version] [--help]")
+    print()
+    print("  --version   print the app version and exit")
+    print("  --help      show this message and exit")
+    print()
+    print("Env vars:")
+    print("  NETGEO_NO_BROWSER=1   run the backend headless, no window/browser")
+    print("  PYWEBVIEW_GUI=gtk|qt  force the native-window backend")
+
+
 def main() -> None:
+    # ponytail: handled before touching the server/frontend at all — a user
+    # running `netgeo --version` should get an instant answer, not a bound
+    # port and a spawned window.
+    args = sys.argv[1:]
+    if "--version" in args:
+        _print_version()
+        return
+    if "--help" in args or "-h" in args:
+        _print_help()
+        return
+
     _mount_frontend()
     port = _free_port()
     url = f"http://127.0.0.1:{port}"

@@ -2,5 +2,10 @@
 # Install into backend/.venv before running: pyinstaller netgeo.spec
 pyinstaller==6.22.2
 # pywebview IS a launcher.py runtime dependency (native window, falls back
-# to the system browser if this or WebKitGTK is missing — see README.md).
-pywebview==6.2.1
+# to the system browser if this is missing or its backend fails to start —
+# see README.md). [pyside6] pulls qtpy + PySide6 so the native window ships
+# as a self-contained Qt runtime instead of depending on system WebKitGTK/
+# PyGObject typelibs (which PyInstaller has no hook to collect at all).
+pywebview[pyside6]==6.2.1
+PySide6==6.11.2
+QtPy==2.4.3
