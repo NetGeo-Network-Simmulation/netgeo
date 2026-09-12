@@ -12,7 +12,12 @@
  * shared these tile configs in the first place.
  *
  * Sits above MapCounterChips' slot in the top-right stack — see the
- * top-3/top-16/top-28/top-40 rhythm comment in MapView.tsx.
+ * top-3/top-11/top-28/top-24 rhythm comment in MapView.tsx.
+ *
+ * QA-visual #6 (2026-09-12): raised from top-16 to top-11 — Surya asked for
+ * it higher still; MapCounterChips above tops out around y=40px (single
+ * row of 4 small chips starting at top-3/12px), so top-11/44px keeps a
+ * few px of clearance without the two ever touching.
  */
 import { Satellite, Map as MapIcon } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
@@ -38,7 +43,7 @@ export function MapLayerSwitcher({ tileStatus = 'ready' }: MapLayerSwitcherProps
   const setMapLayer = useMapStore((s) => s.setMapLayer);
 
   return (
-    <div className={cn('pointer-events-auto absolute right-4 top-16 flex flex-col items-end gap-1', zc.workspace)}>
+    <div className={cn('pointer-events-auto absolute right-4 top-11 flex flex-col items-end gap-1', zc.workspace)}>
       <div
         className="glass-strong flex gap-1 rounded-xl border border-fg/15 p-1 shadow-glass-lg"
         role="group"
