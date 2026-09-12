@@ -35,6 +35,7 @@ import { PulseEdge } from './PulseEdge';
 import { ConnectionLine } from './ConnectionLine';
 import { OverlayChips } from './OverlayChips';
 import { hierarchyLayout } from './hierarchyLayout';
+import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
 import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
 import { useLabStore } from '@/store/labStore';
@@ -106,10 +107,21 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
   // (clearing focusNodeId first flipped the prop back and the late fit
   // overrode setCenter; QA round 2).
   const [suppressInitialFit] = useState(() => Boolean(useUiStore.getState().focusNodeId));
-  // Visible, non-blocking report for a failed auto-cable (Q4 bridge below) —
-  // same local-state + inline banner idiom Rack3DElevationPanel already uses
-  // for its own mutation errors, not a new toast system (ponytail).
-  const [cableError, setCableError] = useState<string | null>(null);
+  // Visible, non-blocking report for a failed mutation (auto-cable, delete) —
+  // same local-state + inline banner idiom Rack3DElevationPanel already uses,
+  // not a new toast system (ponytail). Also the sink for window.alert's old
+  // job on failed deletes (QA-visual #2).
+  const [mutationError, setMutationError] = useState<string | null>(null);
+  // QA-visual #2: themed replacement for window.confirm — set by auto-layout
+  // and delete to describe the pending action, consumed by one <ConfirmDialog>
+  // rendered below the canvas.
+  const [confirmRequest, setConfirmRequest] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    danger?: boolean;
+    onConfirm: () => void;
+  } | null>(null);
   useEffect(() => {
     if (!focusNodeId || !rfReady) return;
     const n = nodesMap.get(focusNodeId);
@@ -222,15 +234,18 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
   // a new persistence surface. No undo — a confirm is the ponytail-sized guard.
   const onAutoLayout = useCallback(() => {
     if (nodesMap.size === 0) return;
-    const ok = window.confirm(
-      'Auto-layout repositions every node on this canvas by hierarchy. Manual placement will be lost. Continue?',
-    );
-    if (!ok) return;
-    const positions = hierarchyLayout(Array.from(nodesMap.values()), Array.from(linksMap.values()));
-    for (const [id, pos] of positions) {
-      moveNode(id, pos.x, pos.y);
-      void nodesApi.move(id, pos.x, pos.y).catch(() => {});
-    }
+    setConfirmRequest({
+      title: 'Auto-layout canvas',
+      message: 'Repositions every node on this canvas by hierarchy. Manual placement will be lost.',
+      confirmLabel: 'Auto-layout',
+      onConfirm: () => {
+        const positions = hierarchyLayout(Array.from(nodesMap.values()), Array.from(linksMap.values()));
+        for (const [id, pos] of positions) {
+          moveNode(id, pos.x, pos.y);
+          void nodesApi.move(id, pos.x, pos.y).catch(() => {});
+        }
+      },
+    });
   }, [nodesMap, linksMap, moveNode]);
 
   const onSelectionNode: NodeMouseHandler<Node<DeviceNodeData>> = useCallback(
@@ -248,15 +263,22 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
       const linkCount = Array.from(linksMap.values()).filter(
         (l) => ifaceIds.has(l.a_iface) || ifaceIds.has(l.b_iface),
       ).length;
-      const msg =
+      const message =
         linkCount > 0
-          ? `Delete "${node.name}"? Its ${linkCount} connected link${linkCount === 1 ? '' : 's'} will be deleted too. This can't be undone.`
-          : `Delete "${node.name}"? This can't be undone.`;
-      if (!window.confirm(msg)) return;
-      void nodesApi
-        .remove(id)
-        .then(() => removeNode(id))
-        .catch(() => window.alert(`Failed to delete "${node.name}". It was not removed — try again.`));
+          ? `Its ${linkCount} connected link${linkCount === 1 ? '' : 's'} will be deleted too. This can't be undone.`
+          : "This can't be undone.";
+      setConfirmRequest({
+        title: `Delete "${node.name}"?`,
+        message,
+        confirmLabel: 'Delete',
+        danger: true,
+        onConfirm: () => {
+          void nodesApi
+            .remove(id)
+            .then(() => removeNode(id))
+            .catch(() => setMutationError(`Failed to delete "${node.name}". It was not removed — try again.`));
+        },
+      });
     },
     [nodesMap, linksMap, removeNode],
   );
@@ -267,7 +289,7 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
       void linksApi
         .remove(id)
         .then(() => removeLink(id))
-        .catch(() => window.alert('Failed to delete link. It was not removed — try again.'));
+        .catch(() => setMutationError('Failed to delete link. It was not removed — try again.'));
     },
     [linksMap, removeLink],
   );
@@ -313,13 +335,13 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
         ifaceType(nodesMap, link.b_iface),
       );
       if (!media) return; // e.g. a wireless port — no sensible cable media
-      setCableError(null);
+      setMutationError(null);
       void physicalApi
         .createCable({ project_id: link.project_id, link_id: link.id, media, length_m: 1 })
         .catch(() => {
           // Visible, not silent (D4 lesson: a no-op that looks like it worked
           // is a bug). The topology link already succeeded and stays either way.
-          setCableError(
+          setMutationError(
             'Link topologi dibuat, tapi kabel fisik gagal dibuat otomatis. Tambahkan kabelnya manual di tampilan rak.',
           );
         });
@@ -531,16 +553,16 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--ng-border)" />
         <Controls position="bottom-right" className="!border-fg/10 !bg-fg/5 backdrop-blur" />
 
-        {cableError && (
+        {mutationError && (
           <Panel position="top-center" className="!m-3">
             <div
               role="alert"
               className="flex items-center gap-1.5 rounded-lg border border-fg/10 bg-danger/10 px-3 py-1.5 text-xs text-danger shadow-glass backdrop-blur"
             >
               <AlertTriangle size={13} className="shrink-0" />
-              {cableError}
+              {mutationError}
               <button
-                onClick={() => setCableError(null)}
+                onClick={() => setMutationError(null)}
                 aria-label="Dismiss"
                 className="ml-1 text-danger/70 hover:text-danger"
               >
@@ -598,6 +620,19 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
           />
         )}
       </ReactFlow>
+      {confirmRequest && (
+        <ConfirmDialog
+          title={confirmRequest.title}
+          message={confirmRequest.message}
+          confirmLabel={confirmRequest.confirmLabel}
+          danger={confirmRequest.danger}
+          onConfirm={() => {
+            confirmRequest.onConfirm();
+            setConfirmRequest(null);
+          }}
+          onCancel={() => setConfirmRequest(null)}
+        />
+      )}
     </div>
   );
 }
