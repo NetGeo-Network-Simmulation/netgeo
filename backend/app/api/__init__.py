@@ -21,6 +21,7 @@ from app.api import (
     fiber,
     lab,
     links,
+    maps,
     nodes,
     physical,
     projects,
@@ -64,3 +65,4 @@ api_router.include_router(wireless.router, dependencies=_require_auth)
 api_router.include_router(rf.router, dependencies=_require_auth)   # NG-RF-01
 api_router.include_router(lab.router, dependencies=_require_auth)
 api_router.include_router(education.router, dependencies=_require_auth)   # NG-EDU-01/02
+api_router.include_router(maps.router, dependencies=_require_auth)   # OFFLINE-MAP-1

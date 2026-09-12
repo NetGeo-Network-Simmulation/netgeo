@@ -22,6 +22,10 @@ os.environ.setdefault("NETGEO_AUTH_STORE", "")
 # pertama yang jalan; tanpa ini test bisa menulis ke ~/.config/netgeo/state.json
 # milik developer.
 os.environ.setdefault("NETGEO_STATE_STORE", "")
+# Sama untuk offline map tiles (OFFLINE-MAP-1) — default path menunjuk ke
+# ~/.config/netgeo/offline-map.mbtiles milik developer; kosongkan supaya tes
+# tidak diam-diam melihat "available: true" kalau file itu kebetulan ada.
+os.environ.setdefault("NETGEO_OFFLINE_MAP_PATH", "")
 
 import pytest
 import pytest_asyncio

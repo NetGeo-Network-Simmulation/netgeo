@@ -76,6 +76,13 @@ class Settings(BaseSettings):
     # persisted across restarts (S2 PERSIST-01). Empty = disabled (in-memory only).
     NETGEO_STATE_STORE: str = "~/.config/netgeo/state.json"
 
+    # MBTiles file to serve raster map tiles from when present (OFFLINE-MAP-1,
+    # native full-offline distribution variant). Auto-detected at this default
+    # path; point it at a user-supplied region package to override. Empty, or
+    # a missing/corrupt file, means "no offline map" — the frontend then keeps
+    # using its existing online tile providers, unchanged.
+    NETGEO_OFFLINE_MAP_PATH: str = "~/.config/netgeo/offline-map.mbtiles"
+
     # In-app self-update (see app/services/updater.py + scripts/self-update.sh).
     # GITHUB_REPO is the "owner/name" slug whose releases we compare against.
     GITHUB_REPO: str = "NetGeo-Network-Simmulation/netgeo"
