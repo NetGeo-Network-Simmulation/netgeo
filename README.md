@@ -23,22 +23,23 @@ bukan catatan kaki.*
 
 ## Apa ini
 
-NetGeo dibangun oleh insinyur jaringan yang sudah terlalu sering menatap "diagram topologi" yang
-ternyata cuma kotak dan garis. Ia adalah simulator, perencana RF/fiber, dan digital twin hasil
-import config, sekaligus dalam satu aplikasi: gambar topologi (atau import config Cisco/MikroTik
-asli), jalankan netstack deterministik — VLAN, OSPF, BGP, NAT, ACL — capture paketnya, lalu tanya
-"apakah A bisa menjangkau B" dan dapat jawaban sungguhan berikut buktinya, bukan tebakan.
+NetGeo dibuat oleh insinyur jaringan yang sudah bosan menatap "diagram topologi" yang ternyata
+cuma kotak dan garis. Satu aplikasi, tiga peran: simulator, perencana RF/fiber, dan digital twin
+dari config yang kamu import. Gambar topologinya sendiri, atau langsung import config
+Cisco/MikroTik yang asli. Netstack-nya deterministik dan jalan sungguhan — VLAN, OSPF, BGP, NAT,
+ACL — lengkap dengan capture paket. Tanya "apakah A bisa menjangkau B", dan kamu dapat jawaban
+sungguhan berikut buktinya. Bukan tebakan.
 
-Untuk mahasiswa jaringan, dosen yang menilai praktikum, dan insinyur ISP/jaringan yang mau
-merencanakan atau mengecek kewarasan topologi tanpa menyentuh perangkat produksi.
+Cocok buat mahasiswa jaringan, dosen yang menilai praktikum, dan insinyur ISP yang mau
+merencanakan atau mengecek kewarasan topologi tanpa harus menyentuh perangkat produksi.
 
 ---
 
 ## Cara pasang
 
-NetGeo dirilis dalam lima bentuk. Dua di antaranya sudah jalan hari ini. Baca tabelnya dulu
-sebelum memilih — ukurannya besar memang disengaja (window native sungguhan membundel runtime Qt
-sungguhan; itu bukan bug yang perlu "dioptimasi").
+NetGeo dirilis dalam lima bentuk, tapi baru dua yang beneran jalan hari ini. Baca dulu tabelnya
+sebelum milih. Ukuran filenya memang besar, dan itu disengaja — window native-nya asli, jadi ia
+membawa runtime Qt sendiri. Itu bukan bug yang perlu "dioptimasi".
 
 | # | Bentuk | Frontend | Backend | Peta | Status |
 |---|---|---|---|---|---|
@@ -58,9 +59,9 @@ Ambil aset dari tag terbaru di [Releases](https://github.com/NetGeo-Network-Simm
 | `netgeo-1.2.123-setup.exe` | 157.9 MB | Installer Windows, window native — **sudah dibangun, belum pernah diuji jalan di Windows asli** |
 | `netgeo-linux-x86_64.tar.gz` | 253.5 MB | Bundle onedir, Linux, extract lalu jalankan `netgeo` |
 
-Ketiganya sama-sama jalur window native (bentuk #1/#2/#3 di atas, minus bagian yang belum
-dibangun — hari ini perilakunya seperti bentuk #4: backend lokal, peta online). Lihat
-`packaging/README.md` untuk isi tiap aset dan cara buildnya.
+Ketiganya sama-sama lewat jalur window native (bentuk #1/#2/#3 di atas, minus bagian yang belum
+dibangun). Jadi hari ini perilakunya persis bentuk #4: backend lokal, peta online. Isi tiap aset
+dan cara buildnya ada di `packaging/README.md`.
 
 ### Instalasi Docker / server (bentuk #5 — online penuh)
 
@@ -138,10 +139,10 @@ NETGEO_NO_WINDOW=1 python packaging/launcher.py   # same thing, for systemd unit
 
 ### Region peta offline
 
-Backend bisa menyajikan tile basemap dari file `.mbtiles` lokal, bukan dari internet
-(`GET /api/maps/tiles/{z}/{x}/{y}`); frontend otomatis beralih ke situ kalau filenya ada, dan
-balik ke tile online begitu filenya tidak ada — tidak ada region kurasi yang di-hosting di mana
-pun, jadi kamu yang bawa filenya sendiri atau URL untuk mengambilnya:
+Backend bisa menyajikan tile basemap dari file `.mbtiles` lokal, jadi tidak perlu ambil dari
+internet (`GET /api/maps/tiles/{z}/{x}/{y}`). Frontend otomatis pindah ke situ kalau filenya ada,
+dan balik ke tile online begitu filenya tidak ada. Tidak ada region kurasi yang di-hosting di mana
+pun — kamu yang bawa filenya sendiri, atau kasih URL untuk mengambilnya:
 
 ```bash
 ./install.sh --offline-map=/path/to/region.mbtiles
@@ -166,9 +167,10 @@ Detail lengkap (lokasi file, aturan fallback, cara wizard Windows-nya dirakit) a
 ## Kenapa engine ini layak dipercaya
 
 Kebanyakan simulator cuma konsisten dengan dirinya sendiri — mereka mengecek diri sendiri lawan
-diri sendiri. NetGeo juga menjalankan **oracle test**: topologi yang identik, sekali di engine
-Python deterministik kami, sekali lagi di container **FRR 10.7.0** sungguhan, dibandingkan persis
-pada apa yang dipatok RFC (bukan format CLI, bukan timing).
+diri sendiri. NetGeo juga menjalankan **oracle test**: topologi yang sama persis dijalankan dua
+kali, sekali di engine Python deterministik kami, sekali lagi di container **FRR 10.7.0**
+sungguhan. Hasilnya dibandingkan langsung dengan apa yang dipatok RFC — bukan format CLI, bukan
+timing.
 
 | Perbandingan | Hasil yang dipatok RFC | Hasil |
 |---|---|---|
@@ -180,20 +182,20 @@ Nol mismatch dari semua kasus yang sudah diuji. Lihat
 [`backend/tests/ORACLE_HARNESS.md`](backend/tests/ORACLE_HARNESS.md) untuk cara sebuah kasus
 dibangun.
 
-Tie-break yang tersisa — local-pref, ORIGIN, MED — sempat mandek lama, dan bukan gara-gara
-harness-nya: engine ini memang tidak punya cara untuk mengatur atribut-atribut itu sama sekali,
-jadi logika best-path-nya ada tapi tak terjangkau operator mana pun. `add_neighbor(...,
+Tie-break yang tersisa — local-pref, ORIGIN, MED — sempat mandek lama. Bukan gara-gara
+harness-nya: engine ini memang tidak punya cara sama sekali untuk mengatur atribut-atribut itu,
+jadi logika best-path-nya sudah ada tapi tak terjangkau operator mana pun. `add_neighbor(...,
 local_pref_in=N, med_out=N)` dan `advertise_network(..., origin=...)` menutup celah itu di
-v1.2.123, makanya kasus oracle untuk mereka sekarang jadi giliran berikutnya, bukan lagi mustahil.
-Begitu MED bisa diatur, langsung ketahuan satu bug sungguhan: nilainya bocor lintas batas eBGP,
-tak kelihatan selama nilainya cuma nol terus.
+v1.2.123, makanya kasus oracle untuk ketiganya sekarang jadi giliran berikutnya, bukan lagi
+mustahil. Begitu MED bisa diatur, langsung ketahuan satu bug sungguhan: nilainya bocor lintas
+batas eBGP, tak kelihatan selama ini karena nilainya memang selalu nol.
 
-Di luar itu: sebuah engine pure-Python (tanpa dependensi native — jalan di Linux, Windows, ARM)
-yang menggerakkan L2 (MAC learning, 802.1Q, STP, LACP), L3 (longest-prefix routing, NAT44, ACL,
-DHCP, DNS), OSPF multi-area, BGP dengan route-reflector dan community, VRRP, dual-stack IPv4+IPv6,
-antrean QoS berbasis DSCP, CLI ala Cisco/MikroTik per device, export pcapng, dan digital twin hasil
-import config lengkap dengan reachability engine yang menjawab "apakah A bisa menjangkau B" dengan
-keputusan routing sungguhan sebagai bukti. Daftar fitur lengkap:
+Selebihnya, ini engine pure-Python (tanpa dependensi native — jalan di Linux, Windows, ARM) yang
+menggerakkan L2 (MAC learning, 802.1Q, STP, LACP), L3 (longest-prefix routing, NAT44, ACL, DHCP,
+DNS), OSPF multi-area, BGP dengan route-reflector dan community, VRRP, dual-stack IPv4+IPv6,
+antrean QoS berbasis DSCP, CLI ala Cisco/MikroTik per device, export pcapng, sampai digital twin
+hasil import config lengkap dengan reachability engine yang menjawab "apakah A bisa menjangkau B"
+pakai keputusan routing sungguhan sebagai bukti. Daftar fitur lengkapnya ada di
 [`dev-docs/ARCHITECTURE.md`](dev-docs/ARCHITECTURE.md).
 
 Start di bawah 3 detik, idle di bawah 300 MB RAM.
@@ -202,7 +204,7 @@ Start di bawah 3 detik, idle di bawah 300 MB RAM.
 
 ## Yang belum ada
 
-Sengaja disebut terus terang — fitur yang belum ada dan kamu tahu itu lebih baik daripada fitur
+Sengaja ditulis terus terang: fitur yang belum ada tapi kamu tahu, jauh lebih baik daripada fitur
 yang diklaim ada tapi ternyata rusak di tanganmu:
 
 - Tidak ada IS-IS, MPLS, Segment Routing, atau EVPN.
