@@ -138,9 +138,12 @@ export function ConfigWorkspace() {
 
   return (
     <div className="absolute inset-0 flex bg-surface">
-      {/* Device rail */}
+      {/* Device rail — bg/border-r span the full width to x=0 (AppShell bleed);
+          the inner content gets pl-[116px] instead, 16px past the floating
+          rail's x=100 right edge, so the search box and device names never
+          render under the rail. */}
       <aside className="flex w-[280px] shrink-0 flex-col border-r border-fg/10 bg-panel">
-        <div className="border-b border-fg/10 p-3">
+        <div className="border-b border-fg/10 py-3 pr-3 pl-[116px]">
           <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
             <Search className="h-4 w-4 text-fg/40" aria-hidden />
             <input
@@ -274,7 +277,7 @@ function DeviceRow({ node, active, onSelect }: { node: NodeModel; active: boolea
       aria-selected={active}
       onClick={onSelect}
       className={cn(
-        'relative flex w-full items-center gap-3 p-3 text-left transition-colors',
+        'relative flex w-full items-center gap-3 py-3 pr-3 pl-[116px] text-left transition-colors',
         active ? 'bg-fg/8' : 'hover:bg-fg/5',
       )}
     >

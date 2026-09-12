@@ -75,24 +75,38 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
   const viewMode = useUiStore((s) => s.viewMode);
   const simMode = useLabStore((s) => s.mode) === 'simulation';
   const drawerHosted = viewMode === 'topology' || viewMode === 'map';
-  // Every primary workspace canvas bleeds under the rail instead of paying a
-  // fixed 120px reserved-space tax on its own left edge (design feedback
-  // 2026-07-27 for map/rf; broadened slice/ui-layout-consistency 2026-09-07
-  // after Surya reported plant/topology content sitting in a dead gap that
-  // never touched the viewport's left edge, worst at narrow tab widths where
-  // a fixed 120px slice is a large share of the available width). Map/RF
-  // tiles are infinitely pannable so nothing real is lost under the rail
-  // chassis; topology's canvas and plant's 3D scene are equally safe to
-  // bleed — the rail is vertically centered (NavigationRail.tsx), so only
-  // chrome actually sitting in its vertical band needs `CHROME_INSET`/
+  // Every workspace's own surface bleeds to the viewport's left edge instead
+  // of paying a fixed 120px reserved-space tax that left a dead, off-color
+  // band there (design feedback 2026-07-27 for map/rf; broadened
+  // slice/ui-layout-consistency 2026-09-07 for plant/topology; broadened
+  // again slice/ui-edge-fit 2026-09-12 after Surya's screenshots showed the
+  // same band on Projects/Config/Problems/Reports/Twin/Edu — the wrapper
+  // below was still gating those six on the old RAIL_INSET branch). Map/RF
+  // tiles are infinitely pannable and topology/plant/twin/edu all render the
+  // same pannable TopologyCanvas, so nothing real is lost under the rail
+  // chassis there; Projects/Config/Problems/Reports are list/table-shaped —
+  // their own components pad their leftmost in-flow column instead (see
+  // each workspace's `pl-[116px]`, a 16px gutter past the rail's x=100
+  // right edge) so real content never renders under the floating rail.
+  // The rail is vertically centered (NavigationRail.tsx), so only chrome
+  // actually sitting in its vertical band needs `CHROME_INSET`/
   // `CHROME_INSET_PL` (theme/shell.ts); a fixed top/bottom bar (plant's
   // toolbar/status rows, topology's bottom-left dock) sits outside that
   // band and stays flush left instead (slice/ui-edge-fit, 2026-09-07 re-QA:
   // the broadened fix above had applied the inset to those bars too, which
   // is the dead-gap-on-the-left regression Surya then reported a second
-  // time). Config/reports/problems/projects are list/table-shaped, not
-  // canvases, and keep the simpler reserved-space contract below.
-  const bleed = viewMode === 'map' || viewMode === 'rf' || viewMode === 'plant' || viewMode === 'topology';
+  // time).
+  const bleed =
+    viewMode === 'map' ||
+    viewMode === 'rf' ||
+    viewMode === 'plant' ||
+    viewMode === 'topology' ||
+    viewMode === 'twin' ||
+    viewMode === 'edu' ||
+    viewMode === 'projects' ||
+    viewMode === 'config' ||
+    viewMode === 'problems' ||
+    viewMode === 'reports';
   useShortcuts();
 
   return (
@@ -114,16 +128,20 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
               own left offset becomes the containing block those descendants
               inherit, so every workspace clears the rail without each one
               hand-rolling its own offset.
-              Map/RF/plant/topology are the exception (v1.2.56 for map/rf;
-              slice/ui-layout-consistency for plant/topology): their wrapper
-              bleeds to `left-0` instead, so the workspace canvas itself
-              renders behind the rail (the rail floats over it) rather than
-              starting at the rail's right edge — only the chrome that
-              actually sits in the rail's vertical band (map's tool column)
-              compensates with `CHROME_INSET`/`CHROME_INSET_PL`
-              (theme/shell.ts); chrome pinned to a fixed top/bottom edge
-              stays flush left instead, see theme/shell.ts for the full
-              contract.
+              Every workspace now bleeds to `left-0` instead (slice/ui-edge-
+              fit, 2026-09-12): each one's own root surface/background
+              renders from x=0 so there is no dead, off-color band between
+              the viewport edge and where content used to start. Canvas
+              workspaces (map/rf/plant/topology/twin/edu) already relied on
+              this — their pannable content freely renders behind the rail,
+              the rail just floats over it — only chrome actually sitting in
+              the rail's vertical band (map's tool column) compensates with
+              `CHROME_INSET`/`CHROME_INSET_PL` (theme/shell.ts); chrome
+              pinned to a fixed top/bottom edge stays flush left instead, see
+              theme/shell.ts for the full contract. List/table workspaces
+              (projects/config/problems/reports) pad their own leftmost
+              in-flow column with `pl-[116px]` (16px past the rail's x=100
+              right edge) so real content is never rendered under the rail.
               BottomDrawer/SimulationDock live in a second, always-rail-inset
               wrapper below (not this one): the drawer is hosted on topology
               AND map, so if it rode inside the bleed wrapper it would render
