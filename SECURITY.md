@@ -1,3 +1,5 @@
+*Versi Inggris: [SECURITY.en.md](SECURITY.en.md)*
+
 # Security Policy
 
 ## Versi yang didukung
