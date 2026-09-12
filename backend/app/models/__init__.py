@@ -90,5 +90,6 @@ from app.models.schemas import (  # noqa: F401
     Topology,
     WirelessLink,
     WirelessPlanResult,
+    derive_project_mode,
     project_capabilities,
 )

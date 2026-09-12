@@ -285,6 +285,20 @@ class Project(_Base):
     mode: Literal["pure-sim", "pure-emul", "mixed"] = "pure-sim"
 
 
+def derive_project_mode(nodes: list[Node]) -> Literal["pure-sim", "pure-emul", "mixed"]:
+    """N-6b: ``Project.mode`` reflects reality instead of a stale default —
+    all nodes ``sim`` -> "pure-sim", all ``emul`` -> "pure-emul", both present
+    -> "mixed". An empty project has nothing to contradict "pure-sim" (the
+    backward-compatible default every existing project already carries), so
+    it stays "pure-sim" rather than inventing a fourth state."""
+    modes = {n.mode for n in nodes}
+    if not modes or modes == {NodeMode.sim}:
+        return "pure-sim"
+    if modes == {NodeMode.emul}:
+        return "pure-emul"
+    return "mixed"
+
+
 def project_capabilities(mode: str) -> dict[str, bool]:
     """Single source of truth for mode-gated features (NG-N6): both
     time-travel /seek (journal replay needs one deterministic DES kernel) and

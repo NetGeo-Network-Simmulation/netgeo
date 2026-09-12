@@ -1,13 +1,13 @@
-"""NG-N6: honest degradation for /seek and grading-exact on non-pure-sim
-projects. Pure logic gating (Project.capabilities, derived from Project.mode)
-— no podman, no engine emulation involved.
+"""NG-N6 / N-6b: honest degradation for /seek and grading-exact on non-pure-sim
+projects. Pure logic gating (Project.capabilities, derived from Project.mode,
+itself derived from the project's actual Node.mode set — see
+derive_project_mode) — no podman, no engine emulation involved.
 """
 from __future__ import annotations
 
 import pytest
 
 from app.services.netlab import get_lab_manager
-from app.store import get_repo
 
 
 @pytest.fixture(autouse=True)
@@ -17,12 +17,25 @@ def _fresh_labs():
     get_lab_manager()._labs.clear()
 
 
+async def _mk_node(client, pid: str, name: str, mode: str) -> None:
+    resp = await client.post(
+        "/api/nodes", json={"project_id": pid, "name": name, "mode": mode}
+    )
+    assert resp.status_code == 201, resp.text
+
+
 async def _mk_project(client, mode: str = "pure-sim") -> str:
+    """Create a project whose *derived* mode (N-6b) is ``mode`` — by adding
+    real nodes of the matching NodeMode, never by poking stored state, so
+    these tests prove the outside-observable contract."""
     resp = await client.post("/api/projects", json={"name": "N6"})
     assert resp.status_code == 201
     pid = resp.json()["id"]
-    if mode != "pure-sim":
-        get_repo()._projects[pid].mode = mode
+    if mode == "pure-emul":
+        await _mk_node(client, pid, "e1", "emul")
+    elif mode == "mixed":
+        await _mk_node(client, pid, "s1", "sim")
+        await _mk_node(client, pid, "e1", "emul")
     return pid
 
 

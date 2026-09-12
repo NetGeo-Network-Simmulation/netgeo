@@ -35,6 +35,7 @@ from app.models import (
     Scenario,
     Site,
     Topology,
+    derive_project_mode,
 )
 from app.services.physical import apply_physical
 from app.utils.ids import new_id
@@ -217,6 +218,12 @@ class MemoryRepository:
         sites = [s for s in self._sites.values() if s.project_id == pid]
         racks = [rk for rk in self._racks.values() if rk.project_id == pid]
         cables = [c for c in self._cables.values() if c.project_id == pid]
+        # N-6b: `mode` reflects the nodes' actual mode, recomputed on every
+        # read — never persisted (the stored Project always keeps the
+        # backward-compatible "pure-sim" default; see derive_project_mode).
+        derived = derive_project_mode(nodes)
+        if proj.mode != derived:
+            proj = proj.model_copy(update={"mode": derived})
         topo = Topology(
             project=proj, nodes=nodes, links=links,
             sites=sites, racks=racks, cables=cables,
