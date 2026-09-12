@@ -49,16 +49,19 @@ describe('UnrackedDevicesPanel', () => {
 
   it('lists an unracked node and lets its mount type be set', async () => {
     mount([{ id: 'n1', name: 'rru1', mount: null }]);
-    const select = container.querySelector('select') as HTMLSelectElement;
-    expect(select.value).toBe('');
+    // Themed combobox (components/ui/Select), not a native <select> — see
+    // slice/ui-edge-fit part B: native <select> options render OS-coloured,
+    // clashing with the app's dark theme.
+    const combo = container.querySelector('[aria-label="Tipe mount untuk rru1"]') as HTMLButtonElement;
+    expect(combo.textContent).toContain('(belum dipasang)');
     // height input starts disabled — nothing to set a height on yet.
     const heightInput = container.querySelector('input[type="number"]') as HTMLInputElement;
     expect(heightInput.disabled).toBe(true);
 
-    const nativeSetter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')!.set!;
+    act(() => combo.click());
+    const option = Array.from(container.querySelectorAll('[role="option"]')).find((o) => o.textContent === 'pole')!;
     await act(async () => {
-      nativeSetter.call(select, 'pole');
-      select.dispatchEvent(new Event('change', { bubbles: true }));
+      option.dispatchEvent(new MouseEvent('click', { bubbles: true }));
       await Promise.resolve();
     });
 

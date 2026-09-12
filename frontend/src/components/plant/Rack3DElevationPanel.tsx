@@ -37,6 +37,7 @@ import { loadBootAssets } from '@/lib/three/bootAssets';
 import { mountElevationM, structureSpecFor } from '@/lib/three/outdoorPlacement';
 import { RackDevicePicker } from './RackDevicePicker';
 import { UnrackedDevicesPanel } from './UnrackedDevicesPanel';
+import { Select } from '@/components/ui/Select';
 import {
   adaptTopology,
   cableLengthUpdatesForNode,
@@ -1012,19 +1013,19 @@ export function Rack3DElevationPanel() {
    *  is automatic now, driven by the site selector, not manually chosen
    *  here; this control only still lets you change *how a shown rack looks*). */
   const rackChip = (rack: Rack) => (
-    <label key={rack.id} className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+    <div key={rack.id} className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
       <span className="max-w-[7rem] truncate text-fg" title={rack.name}>{rack.name}</span>
-      <select
+      <Select
+        aria-label={`Profil enclosure untuk ${rack.name}`}
         value={rack.enclosure_profile ?? DEFAULT_ENCLOSURE}
-        onChange={(e) => updateEnclosure.mutate({ rackId: rack.id, profile: e.target.value })}
-        className="w-28 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
-        title="Profil enclosure"
-      >
-        {ENCLOSURE_KEYS.filter((k) => k !== 'cpi' || rack.enclosure_profile === 'cpi').map((k) => (
-          <option key={k} value={k}>{RACK_SPECS[k]!.label.replace(/ \d+U.*/, '')}</option>
-        ))}
-      </select>
-    </label>
+        onChange={(profile) => updateEnclosure.mutate({ rackId: rack.id, profile })}
+        className="w-28"
+        options={ENCLOSURE_KEYS.filter((k) => k !== 'cpi' || rack.enclosure_profile === 'cpi').map((k) => ({
+          value: k,
+          label: RACK_SPECS[k]!.label.replace(/ \d+U.*/, ''),
+        }))}
+      />
+    </div>
   );
 
   // NG-PH3D P4: no WebGL, no scene — a black/blank canvas here would look
@@ -1071,27 +1072,20 @@ export function Rack3DElevationPanel() {
           aria-label="New rack name"
           className="w-28 min-w-0 rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none placeholder:text-fg/30 focus:border-accent/50"
         />
-        <select
+        <Select
           aria-label="New rack site"
           value={newRackSite}
-          onChange={(e) => setNewRackSite(e.target.value)}
-          className="w-24 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
-        >
-          <option value="">(no site)</option>
-          {sites.map((s) => (
-            <option key={s.id} value={s.id}>{s.name}</option>
-          ))}
-        </select>
-        <select
+          onChange={setNewRackSite}
+          className="w-24"
+          options={[{ value: '', label: '(no site)' }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
+        />
+        <Select
           aria-label="Rack height"
           value={String(newRackU)}
-          onChange={(e) => setNewRackU(Number(e.target.value))}
-          className="w-16 rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
-        >
-          {RACK_SIZES.map((u) => (
-            <option key={u} value={u}>{u}U</option>
-          ))}
-        </select>
+          onChange={(v) => setNewRackU(Number(v))}
+          className="w-16"
+          options={RACK_SIZES.map((u) => ({ value: String(u), label: `${u}U` }))}
+        />
         <button
           type="button"
           onClick={() => {
@@ -1112,20 +1106,16 @@ export function Rack3DElevationPanel() {
         {/* Site being viewed — every rack in it renders, no manual per-rack
             picking (permintaan Surya). Switching this is what "resets to 0"
             and then shows only the new site's racks. */}
-        <label className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+        <div className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
           Site
-          <select
+          <Select
             aria-label="Site ditampilkan"
             value={viewSiteId}
-            onChange={(e) => setViewSiteId(e.target.value)}
-            className="w-28 min-w-0 truncate rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none focus:border-accent/50"
-          >
-            <option value="">(no site)</option>
-            {sites.map((s) => (
-              <option key={s.id} value={s.id}>{s.name}</option>
-            ))}
-          </select>
-        </label>
+            onChange={setViewSiteId}
+            className="w-28"
+            options={[{ value: '', label: '(no site)' }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
+          />
+        </div>
         <div className="mx-1 h-5 w-px bg-fg/10" />
         <button type="button" className={btn(face === 'front')} onClick={() => setFace('front')}>Depan</button>
         <button type="button" className={btn(face === 'back')} onClick={() => setFace('back')}>Belakang</button>
