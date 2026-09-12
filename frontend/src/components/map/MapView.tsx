@@ -2023,7 +2023,10 @@ function SignalLegend() {
   // StatusBar (a flex sibling, not an overlay), so no bottom-offset here
   // can ever slide under the status bar.
   return (
-    <div className={cn('pointer-events-auto absolute right-4 bottom-20 w-64 space-y-2', zc.workspace)}>
+    <div
+      data-signal-legend
+      className={cn('pointer-events-auto absolute right-4 bottom-20 w-64 space-y-2', zc.workspace)}
+    >
       {/* LOS check button */}
       <button
         onClick={() => void triggerLosCheck()}
@@ -2347,10 +2350,12 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             the signal legend no longer lives in this column at all — it's
             now its own fixed bottom-right box (see SignalLegend's doc
             comment) so it stops moving every time this column's height
-            changes. GisLayerPanel still caps itself at max-h-70vh with its
-            own internal scroll (see GisLayerPanel.tsx): if this column ever
-            runs out of room, the panel is what should be height-capped
-            further, never the signal legend below. */}
+            changes. GisLayerPanel measures its own rendered top and the
+            signal legend's rendered top (via `[data-signal-legend]`) and
+            clamps its max-height to the real gap between them (see
+            GisLayerPanel.tsx) — so it never overlaps the legend/LOS button
+            at any viewport height, and needs no manual re-tuning if either
+            box's height changes. */}
         <div className={cn('pointer-events-none absolute right-4 top-24 flex flex-col items-end gap-2', zc.workspace)}>
           <GisLayerToggle />
           <GisLayerPanel />
