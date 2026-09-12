@@ -1,8 +1,10 @@
 /**
- * ReportsWorkspace — the Reports Center (v1.2.032, clay design). A left column of
- * report types + a right document preview rendered as a "paper" page, with
- * Download HTML / Print (PDF) actions. It's the standing home for engineering
- * documentation.
+ * ReportsWorkspace — the Reports Center (v1.2.032, clay design; re-laid-out
+ * slice/ui-edge-fit per Surya's QA: "bagian reports center bisa di layout
+ * ulang"). Three columns — download actions (left) · document preview
+ * (center) · report type cards (right) — so the "paper" page reads as the
+ * page's actual focal point instead of competing with a 4-card grid for
+ * attention. It's the standing home for engineering documentation.
  *
  * Reuses the existing REST surface — NO new backend:
  *  - `fiberApi.bom(projectId)`    → Bill of Materials rows (NG-FI-04),
@@ -131,59 +133,58 @@ export function ReportsWorkspace() {
 
   return (
     <div className="absolute inset-0 flex bg-surface" role="region" aria-label="Reports Center">
-      {/* Left: report type cards. This column's own background/border-r bleed
-          to x=0 (AppShell); the card grid gets pl-[116px] — 16px past the
-          floating rail's x=100 right edge — instead so cards never render
-          under the rail. No max-w cap here: Surya reported the previous
-          max-w-[1280px] leaving empty margins on both sides instead of
-          hugging the viewport edges. No page title either — the Reports
-          tab in TopBar's sub-nav already carries this page's identity, so
-          the in-page h1 + subtitle were a duplicate (root gets
-          aria-label="Reports Center" above instead). */}
-      <div className="flex w-[380px] shrink-0 flex-col border-r border-fg/10 bg-panel">
-        <div className="ng-scroll grid min-h-0 flex-1 grid-cols-2 content-start gap-3 overflow-y-auto pt-4 pr-4 pb-4 pl-[116px]">
+      {/* Left: download actions. This column's own background/border-r bleed
+          to x=0 (AppShell); its content gets pl-[116px] — 16px past the
+          floating rail's x=100 right edge — so the buttons never render
+          under the rail (same convention the card grid used before this
+          layout, see theme/shell.ts). Narrow and top-aligned on purpose: the
+          less width this column and the cards column on the right both
+          claim, the more is left for the document in the middle. */}
+      <div className="flex w-[300px] shrink-0 flex-col border-r border-fg/10 bg-panel">
+        <div className="flex flex-col gap-2 py-6 pr-6 pl-[116px]">
+          <button
+            onClick={() => window.print()}
+            disabled={!canDownload}
+            className="flex items-center gap-2 rounded border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+          >
+            <Printer className="h-[18px] w-[18px] shrink-0" aria-hidden />
+            Download PDF
+          </button>
+          <button
+            onClick={downloadHtml}
+            disabled={!canDownload}
+            className="flex items-center gap-2 rounded border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+          >
+            <Code2 className="h-[18px] w-[18px] shrink-0" aria-hidden />
+            Download HTML
+          </button>
+          <span className="mt-2 rounded border border-fg/10 bg-recess/30 px-3 py-1.5 text-center font-mono text-[12px] text-fg/60">
+            Template: Standard
+          </span>
+        </div>
+      </div>
+
+      {/* Center: the document itself — the page's actual focal point. */}
+      <main className="ng-scroll min-w-0 flex-1 overflow-y-auto bg-recess/20 p-8">
+        {selected === 'summary' ? (
+          <SummaryPreview loading={reportQ.isLoading} error={reportQ.error} html={reportQ.data} />
+        ) : (
+          <BomPreview loading={bomQ.isLoading} error={bomQ.error} rows={bomQ.data ?? []} title={activeMeta.title} />
+        )}
+      </main>
+
+      {/* Right: report type cards, one per row — a narrower rail than the
+          old 2-column grid so the document keeps most of the width. No page
+          title either — the Reports tab in TopBar's sub-nav already carries
+          this page's identity (root gets aria-label="Reports Center" above
+          instead). */}
+      <div className="flex w-[300px] shrink-0 flex-col border-l border-fg/10 bg-panel">
+        <div className="ng-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
           {REPORTS.map((r) => (
             <ReportCard key={r.id} report={r} active={r.id === selected} onSelect={() => r.available && setSelected(r.id)} />
           ))}
         </div>
       </div>
-
-      {/* Right: document preview */}
-      <main className="flex min-w-0 flex-1 flex-col bg-recess/20">
-        {/* Toolbar */}
-        <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-fg/10 bg-panel px-6">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => window.print()}
-              disabled={!canDownload}
-              className="flex items-center gap-2 rounded border border-fg/10 px-3 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-            >
-              <Printer className="h-[18px] w-[18px]" aria-hidden />
-              Download PDF
-            </button>
-            <button
-              onClick={downloadHtml}
-              disabled={!canDownload}
-              className="flex items-center gap-2 rounded border border-fg/10 px-3 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-            >
-              <Code2 className="h-[18px] w-[18px]" aria-hidden />
-              Download HTML
-            </button>
-          </div>
-          <span className="rounded border border-fg/10 bg-recess/30 px-3 py-1.5 font-mono text-[12px] text-fg/60">
-            Template: Standard
-          </span>
-        </div>
-
-        {/* Preview */}
-        <div className="ng-scroll min-h-0 flex-1 overflow-y-auto p-8">
-          {selected === 'summary' ? (
-            <SummaryPreview loading={reportQ.isLoading} error={reportQ.error} html={reportQ.data} />
-          ) : (
-            <BomPreview loading={bomQ.isLoading} error={bomQ.error} rows={bomQ.data ?? []} title={activeMeta.title} />
-          )}
-        </div>
-      </main>
     </div>
   );
 }
