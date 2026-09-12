@@ -10,7 +10,7 @@
  * State lives in mapStore (`gisLayers`); MapView reads it to mount tile/feature
  * overlays. Toggled open via the Layers button in MapView.
  */
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Layers, ChevronRight, X, Lock } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
 import { GIS_GROUPS, GIS_LAYERS, type GisLayerGroup } from '@/config/gisLayers';
@@ -27,6 +27,39 @@ export function GisLayerPanel() {
     Object.fromEntries(GIS_GROUPS.map((g) => [g.group, g.collapsed])),
   );
 
+  // Height is derived, not guessed: measure where this panel actually sits
+  // (its own rendered top) and where the bottom-right signal legend/LOS
+  // button actually starts (`[data-signal-legend]`, see MapView.tsx), then
+  // cap max-height to the real gap between them. This stays correct at any
+  // viewport height and needs no update if the legend's content ever grows
+  // or shrinks — a ResizeObserver on it recomputes automatically. Content
+  // still scrolls internally (`ng-scroll overflow-y-auto` below) once it
+  // no longer fits.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const [maxHeight, setMaxHeight] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const el = panelRef.current;
+    if (!el) return;
+    const GAP_PX = 16;
+    const recompute = () => {
+      const top = el.getBoundingClientRect().top;
+      const legend = document.querySelector<HTMLElement>('[data-signal-legend]');
+      const floor = legend ? legend.getBoundingClientRect().top : window.innerHeight;
+      setMaxHeight(Math.max(160, floor - GAP_PX - top));
+    };
+    recompute();
+    const ro = new ResizeObserver(recompute);
+    const legend = document.querySelector<HTMLElement>('[data-signal-legend]');
+    if (legend) ro.observe(legend);
+    window.addEventListener('resize', recompute);
+    return () => {
+      ro.disconnect();
+      window.removeEventListener('resize', recompute);
+    };
+  }, [open]);
+
   if (!open) return null;
 
   const layersFor = (group: GisLayerGroup) => GIS_LAYERS.filter((l) => l.group === group);
@@ -37,7 +70,11 @@ export function GisLayerPanel() {
       aria-label="GIS layers"
       className="pointer-events-auto w-72 animate-fade-in"
     >
-      <div className="glass-strong flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-fg/15 shadow-glass-lg">
+      <div
+        ref={panelRef}
+        style={{ maxHeight: maxHeight ?? undefined }}
+        className="glass-strong flex max-h-[70vh] flex-col overflow-hidden rounded-xl border border-fg/15 shadow-glass-lg"
+      >
         {/* Header */}
         <div className="flex items-center gap-2 border-b border-fg/10 px-3 py-2">
           <Layers className="h-4 w-4 text-accent" />
@@ -54,7 +91,7 @@ export function GisLayerPanel() {
         </div>
 
         {/* Layer tree */}
-        <div className="ng-scroll overflow-y-auto px-1.5 py-1.5">
+        <div className="ng-scroll min-h-0 overflow-y-auto px-1.5 py-1.5">
           {GIS_GROUPS.map(({ group, label }) => {
             const layers = layersFor(group);
             const isCollapsed = collapsed[group];
