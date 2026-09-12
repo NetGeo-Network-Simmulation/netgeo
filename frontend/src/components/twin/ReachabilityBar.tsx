@@ -40,6 +40,7 @@ export function ReachabilityBar({ nodes }: { nodes: NodeModel[] }) {
           placeholder="source…"
           options={nodes.map((n) => ({ value: n.name, label: n.name }))}
           className="max-w-[130px]"
+          menuPosition="top"
         />
         <span className="text-xs text-fg/50">reach</span>
         <input
