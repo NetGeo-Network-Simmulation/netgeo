@@ -2010,12 +2010,20 @@ function SignalLegend() {
   const checkingLos = useMapStore((s) => s.checkingLos);
   const triggerLosCheck = useMapStore((s) => s.triggerLosCheck);
 
-  // QA-visual #3 (2026-09-12): moved from a fixed bottom-right slot (which
-  // overlapped the map's copyright/attribution control, #2) up into the
-  // top-right stack — it's now a plain flow child of that flex column
-  // (MapView's `top-40` wrapper), not its own absolutely-positioned box.
+  // QA-visual #3 (2026-09-12) moved this into the top-right flex column to
+  // dodge the attribution control at the time. QA-visual #7 (2026-09-12)
+  // reverses that: Surya wants it locked at bottom-right for good — it had
+  // already relocated twice and kept drifting with column height. Back to
+  // its own absolutely-positioned box, `bottom-20 right-4` (80px up from the
+  // corner) clears MapLibre's NavigationControl (two 29px buttons + 10px
+  // margin = 58px tall, anchored bottom-10/right-10 — see maplibre-gl.css),
+  // leaving ~12px of breathing room above it. Horizontally it never meets
+  // the bottom-left attribution control, and this box sits inside MapView's
+  // own `relative h-full` root, which already ends above AppShell's
+  // StatusBar (a flex sibling, not an overlay), so no bottom-offset here
+  // can ever slide under the status bar.
   return (
-    <div className="pointer-events-auto w-64 space-y-2">
+    <div className={cn('pointer-events-auto absolute right-4 bottom-20 w-64 space-y-2', zc.workspace)}>
       {/* LOS check button */}
       <button
         onClick={() => void triggerLosCheck()}
@@ -2329,33 +2337,37 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             show it only when that layer is on, so it doesn't float over the
             top bar/popovers. */}
         {coverageVisible && <GradientLegend />}
-        {/* GIS toggle, GIS panel, device panel, and signal legend stack by real
-            rendered height instead of guessed pixel offsets (QA:
-            "masih banyak ui yang tumpang tindih"). MapCounterChips (top-3) and
-            MapLayerSwitcher (top-16) sit above this column's top-40 start and
-            are unaffected.
-            QA-visual #1 (2026-09-12): the column itself never scrolls — the
-            basemap switcher stays up top (separate, above), the signal legend
-            stays at the bottom, and GIS Layers sits between. GisLayerPanel
-            already caps itself at max-h-70vh with its own internal scroll
-            (see GisLayerPanel.tsx), so that's the only thing that scrolls if
-            the combined stack ever doesn't fit — the outer column no longer
-            adds a second, redundant scroll region on top of it. */}
-        <div className={cn('pointer-events-none absolute right-4 top-40 flex flex-col items-end gap-2', zc.workspace)}>
+        {/* GIS toggle, GIS panel, and device panel stack by real rendered
+            height instead of guessed pixel offsets (QA: "masih banyak ui
+            yang tumpang tindih"). MapCounterChips (top-3) and
+            MapLayerSwitcher (top-11) sit above this column's top-24 start
+            and are unaffected.
+            QA-visual #7 (2026-09-12): raised from top-40 to top-24 (Surya:
+            "masih terlalu kebawah") to sit closer under its trigger row, and
+            the signal legend no longer lives in this column at all — it's
+            now its own fixed bottom-right box (see SignalLegend's doc
+            comment) so it stops moving every time this column's height
+            changes. GisLayerPanel still caps itself at max-h-70vh with its
+            own internal scroll (see GisLayerPanel.tsx): if this column ever
+            runs out of room, the panel is what should be height-capped
+            further, never the signal legend below. */}
+        <div className={cn('pointer-events-none absolute right-4 top-24 flex flex-col items-end gap-2', zc.workspace)}>
           <GisLayerToggle />
           <GisLayerPanel />
           {!rfMode && <MapDevicePanel />}
-          {!rfMode && <SignalLegend />}
         </div>
         {!rfMode && <ToolHint />}
         <MapNotice />
         <WeatherBar />
         {/* Top-right stack (QA D8/P3) — each item reserves a fixed slot whether
             or not it's currently visible, so nothing shifts when a conditional
-            neighbor toggles: top-3 chips, top-16 basemap switcher, top-28
-            gradient legend, top-40 the toggle/GIS-panel/device-panel column. */}
+            neighbor toggles: top-3 chips, top-11 basemap switcher, top-28
+            gradient legend, top-24 the toggle/GIS-panel/device-panel column.
+            The signal legend is NOT part of this stack (see its own doc
+            comment) — it's pinned bottom-right independently. */}
         <MapCounterChips />
         <MapLayerSwitcher tileStatus={tileStatus} />
+        {!rfMode && <SignalLegend />}
         {!rfMode && <ElevationProfilePanel />}
 
         {/* Deploy popover — positioned in absolute px coords over the map. */}
