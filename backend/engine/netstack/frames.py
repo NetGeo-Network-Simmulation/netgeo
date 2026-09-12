@@ -269,11 +269,44 @@ class Ipv4Packet:
         return f"IPv4 {self.src} -> {self.dst} ttl={self.ttl}{tail}{frag}"
 
 
+# RFC 8200 extension header type numbers this engine can recognize on an
+# ``Ipv6Packet.ext_headers`` chain: Hop-by-Hop Options, Routing, Fragment,
+# Destination Options, plus the two common IPsec headers (RFC 4302/4303) —
+# named individually rather than "anything not in _PROTO_NAMES" because a
+# recognized-vs-not distinction is exactly what ACL classification needs.
+IPV6_EXT_HOP_BY_HOP = 0
+IPV6_EXT_ROUTING = 43
+IPV6_EXT_FRAGMENT = 44
+IPV6_EXT_ESP = 50
+IPV6_EXT_AH = 51
+IPV6_EXT_DEST_OPTS = 60
+_KNOWN_IPV6_EXT_HEADERS = frozenset(
+    {IPV6_EXT_HOP_BY_HOP, IPV6_EXT_ROUTING, IPV6_EXT_FRAGMENT, IPV6_EXT_ESP, IPV6_EXT_AH, IPV6_EXT_DEST_OPTS}
+)
+# RFC 7112: a header chain long enough that a stateless filter can't reach
+# the upper-layer header is itself the attack, regardless of whether every
+# individual header in it is well-formed. 8 is generous headroom over any
+# legitimate chain (real ones rarely exceed 2-3) while still bounding the
+# walk so a hostile chain can't be used to burn CPU (see ext_headers_ok).
+MAX_IPV6_EXT_HEADERS = 8
+
+
 @dataclass(slots=True)
 class Ipv6Packet:
-    """IPv6 header (40 bytes fixed). ``proto`` is the next-header value —
-    named ``proto`` (not ``next_header``) so the forwarding pipeline, ACLs and
-    capture code can treat v4/v6 packets uniformly."""
+    """IPv6 header (40 bytes fixed). ``proto`` is always the resolved
+    upper-layer protocol (matching ``payload``'s real type) — this is a
+    structured simulation, not serialized wire bytes, so nothing needs to
+    walk a byte chain to find it the way real IPv6 forwarding does.
+
+    ``ext_headers`` separately records which RFC 8200 extension headers
+    (Hop-by-Hop, Routing, Fragment, Destination Options, ...) sit in front
+    of that upper-layer header on the wire. It changes nothing for ``proto``/
+    ``payload`` consumers (empty by default, exactly today's behaviour) but
+    lets ACL classification (:meth:`ext_headers_ok`, used by
+    ``Router._acl_permits``) refuse to trust a chain that is too long or
+    contains a header type it doesn't recognize — the RFC 7112 evasion this
+    engine can actually model without a full byte-level v6 header parser.
+    """
 
     src: IPv6Address
     dst: IPv6Address
@@ -282,6 +315,7 @@ class Ipv6Packet:
     dscp: int = 0               # traffic-class DSCP bits
     payload: Icmpv6Message | UdpSegment | TcpSegment | Any = None
     payload_len: int = 0
+    ext_headers: tuple[int, ...] = ()
 
     @property
     def wire_size(self) -> int:
@@ -291,6 +325,17 @@ class Ipv6Packet:
     @property
     def proto_name(self) -> str:
         return _PROTO_NAMES.get(self.proto, str(self.proto))
+
+    def ext_headers_ok(self) -> bool:
+        """False if the extension-header chain is too long (resource-
+        exhaustion bound) or contains a type this engine doesn't recognize
+        (an unparseable chain) — either way, an ACL cannot trust its own
+        proto/port read of this packet. True (including the common case of
+        no extension headers at all) means classification is trustworthy."""
+        return (
+            len(self.ext_headers) <= MAX_IPV6_EXT_HEADERS
+            and all(h in _KNOWN_IPV6_EXT_HEADERS for h in self.ext_headers)
+        )
 
     def summary(self) -> str:
         inner = getattr(self.payload, "summary", None)
