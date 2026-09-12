@@ -24,6 +24,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import {
   MapLibreMap,
   NavigationControl,
+  AttributionControl,
   Marker as MglMarker,
   Popup,
   type GeoJSONSource,
@@ -65,7 +66,6 @@ import { MapDevicePanel } from './MapDevicePanel';
 import { MapOnboardingModal } from './MapOnboardingModal';
 import { MapLayerSwitcher } from './MapLayerSwitcher';
 import { MapCounterChips } from './MapCounterChips';
-import { MapSearch } from './MapSearch';
 import { GisLayerPanel } from './GisLayerPanel';
 import { ElevationProfilePanel } from './ElevationProfilePanel';
 import { MapDeployMenu } from './MapDeployMenu';
@@ -121,9 +121,10 @@ function rasterSource(cfg: {
     // Compliance (gate #3): MapLibre's built-in AttributionControl reads this
     // field off every currently-used source and merges the strings — Esri/OSM/
     // CARTO/OpenTopo credit was silently dropped since Stage 1 because this
-    // field was never forwarded. GlobeBasemap never passes
-    // `attributionControl: false`, so the default control (bottom-right,
-    // compact) is already mounted and just needed sources to read from.
+    // field was never forwarded. GlobeBasemap mounts that control explicitly
+    // at bottom-left (QA-visual #2 — the default bottom-right spot stacked it
+    // behind the zoom control and, before #3's move, the signal legend), so
+    // it just needed sources to read from.
     attribution: cfg.attribution,
   };
 }
@@ -232,8 +233,14 @@ function GlobeBasemap({ onMapChange }: { onMapChange: (map: MapLibreMap | null) 
       style: { version: 8, sources: {}, layers: [] },
       center: [mapCenter[1], mapCenter[0]],
       zoom: mapZoom,
+      // Default attribution control mounts bottom-right, the same corner as
+      // the zoom control below and (pre QA-visual #3) the signal legend —
+      // added back explicitly at bottom-left instead (QA-visual #2), the one
+      // corner nothing else in this view claims.
+      attributionControl: false,
     });
     map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');
+    map.addControl(new AttributionControl({ compact: true }), 'bottom-left');
     map.once('load', () => {
       map.setProjection({ type: 'globe' });
       const s = useMapStore.getState();
@@ -2003,8 +2010,12 @@ function SignalLegend() {
   const checkingLos = useMapStore((s) => s.checkingLos);
   const triggerLosCheck = useMapStore((s) => s.triggerLosCheck);
 
+  // QA-visual #3 (2026-09-12): moved from a fixed bottom-right slot (which
+  // overlapped the map's copyright/attribution control, #2) up into the
+  // top-right stack — it's now a plain flow child of that flex column
+  // (MapView's `top-40` wrapper), not its own absolutely-positioned box.
   return (
-    <div className={cn('pointer-events-auto absolute bottom-10 right-4 space-y-2', zc.workspace)}>
+    <div className="pointer-events-auto w-64 space-y-2">
       {/* LOS check button */}
       <button
         onClick={() => void triggerLosCheck()}
@@ -2310,25 +2321,29 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
         />
 
         {/* Overlay UI */}
-        <MapSearch />
         <MapToolbar />
-        {/* RF mode owns the right dock + bottom bar, so suppress the generic map
-            chrome that would collide (device panel, signal legend, tool hint,
-            center-bottom elevation panel). */}
-        {!rfMode && <SignalLegend />}
-        {/* Signal-strength gradient only describes the RF coverage raster — show it
-            only when that layer is on, so it doesn't float over the top bar/popovers. */}
+        {/* RF mode owns the right dock + bottom bar, so the generic map chrome
+            that would collide (device panel, signal legend, tool hint,
+            center-bottom elevation panel) is suppressed below via `!rfMode`.
+            Signal-strength gradient only describes the RF coverage raster —
+            show it only when that layer is on, so it doesn't float over the
+            top bar/popovers. */}
         {coverageVisible && <GradientLegend />}
-        {/* GIS toggle, GIS panel, and device panel used to share the same fixed
-            `top-N` slot and paint over each other whenever a device was selected
-            (QA: "masih banyak ui yang tumpang tindih"). A flex column stacks them
-            by real rendered height instead of guessed pixel offsets, so the
-            toggle button, the layer tree, and the device inspector are all
-            reachable at once no matter which combination is open. */}
+        {/* GIS toggle, GIS panel, device panel, and (QA-visual #3/#4) the signal
+            legend used to share/collide across fixed `top-N` slots and paint
+            over each other whenever more than one was open at once (QA:
+            "masih banyak ui yang tumpang tindih"). A flex column stacks them
+            by real rendered height instead of guessed pixel offsets, so any
+            combination — including the GIS panel fully expanded with every
+            group open — scrolls within its own reserved slot instead of
+            spilling onto its neighbors. MapCounterChips (top-3) and
+            MapLayerSwitcher (top-16) sit above this column's top-40 start and
+            are unaffected. */}
         <div className={cn('pointer-events-none absolute right-4 top-40 flex max-h-[calc(100%-11rem)] flex-col items-end gap-2 overflow-y-auto', zc.workspace)}>
           <GisLayerToggle />
           <GisLayerPanel />
           {!rfMode && <MapDevicePanel />}
+          {!rfMode && <SignalLegend />}
         </div>
         {!rfMode && <ToolHint />}
         <MapNotice />
