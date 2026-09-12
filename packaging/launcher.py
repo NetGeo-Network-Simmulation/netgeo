@@ -121,6 +121,24 @@ def _try_webview(url: str) -> bool:
     return True
 
 
+def _no_window_reason(args: list[str]) -> str | None:
+    """Return why the native window should be skipped *by request*
+    (`--no-window` flag or `NETGEO_NO_WINDOW=1` env var, same on/off
+    convention as NETGEO_NO_BROWSER), or None to try the window normally.
+
+    Kept separate from `_try_webview`'s own fallback so the log line can
+    say "skipped, you asked" instead of "skipped, it broke" — variant #4
+    of the five distribution forms (see docs/design/13-DISTRIBUTION-PLAN.md
+    local-only note / vault netgeo-distribusi-lima-bentuk) made a deliberate
+    choice, not a WebKitGTK/Qt failure.
+    """
+    if "--no-window" in args:
+        return "--no-window"
+    if os.environ.get("NETGEO_NO_WINDOW") == "1":
+        return "NETGEO_NO_WINDOW=1"
+    return None
+
+
 def _print_version() -> None:
     from app.core.config import APP_VERSION
 
@@ -130,12 +148,15 @@ def _print_version() -> None:
 def _print_help() -> None:
     print("NetGeo desktop launcher")
     print()
-    print("Usage: netgeo [--version] [--help]")
+    print("Usage: netgeo [--version] [--help] [--no-window]")
     print()
-    print("  --version   print the app version and exit")
-    print("  --help      show this message and exit")
+    print("  --version    print the app version and exit")
+    print("  --help       show this message and exit")
+    print("  --no-window  run the backend, open the UI in the system browser")
+    print("               instead of a native window (distribution variant #4)")
     print()
     print("Env vars:")
+    print("  NETGEO_NO_WINDOW=1    same as --no-window (for systemd/containers)")
     print("  NETGEO_NO_BROWSER=1   run the backend headless, no window/browser")
     print("  PYWEBVIEW_GUI=gtk|qt  force the native-window backend")
 
@@ -171,7 +192,14 @@ def main() -> None:
     server_thread.start()
     time.sleep(1.0)  # give uvicorn a moment to bind before opening the window
 
-    if not _try_webview(url):
+    reason = _no_window_reason(args)
+    if reason:
+        print(f"[netgeo-launcher] headless: native window skipped by request ({reason}) — opening system browser.")
+        opened_native = False
+    else:
+        opened_native = _try_webview(url)  # False also logs *why* it failed, via _webview_unavailable
+
+    if not opened_native:
         webbrowser.open(url)
         # webview.start() blocks until the window closes; the browser
         # fallback has no such signal, so just keep the process (and its

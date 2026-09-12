@@ -259,8 +259,41 @@ State persistence: `NETGEO_STATE_STORE` (default
 `MemoryRepository` to a JSON file across restarts when set — this is the
 existing S2 PERSIST-01 mechanism, not something added in this slice.
 
-Env var `NETGEO_NO_BROWSER=1` skips the auto-open-browser step (used for
-non-interactive testing); unset/default behavior is unchanged.
+Env var `NETGEO_NO_BROWSER=1` skips the auto-open-browser step entirely (used
+for non-interactive smoke tests where nothing needs to open at all — no
+window, no browser, API only); unset/default behavior is unchanged.
+
+## Headless mode (distribution variant #4)
+
+Of the five NetGeo distribution forms (native full-offline, native+Google
+Maps, native+remote backend, **headless**, full-online — see vault
+`netgeo-distribusi-lima-bentuk`, local-only), headless is: backend runs
+locally exactly as usual, but the UI opens in the system **browser** instead
+of a native pywebview window. Before this flag existed, that was only an
+accidental fallback path — what happened when WebKitGTK/Qt failed to start.
+It's now an explicit choice:
+
+```
+python packaging/launcher.py --no-window     # flag
+NETGEO_NO_WINDOW=1 python packaging/launcher.py   # env var — for systemd
+                                                   # units/containers where
+                                                   # passing argv is awkward,
+                                                   # same on/off convention
+                                                   # as NETGEO_NO_BROWSER
+```
+
+The log line distinguishes *why* the window was skipped, on purpose:
+
+- Requested: `[netgeo-launcher] headless: native window skipped by request
+  (--no-window) — opening system browser.`
+- WebKitGTK/Qt genuinely failed to start (unrequested): the existing
+  `_webview_unavailable` message — "jendela aplikasi asli tidak tersedia
+  (...)" plus the per-distro install hint.
+
+Requesting `--no-window`/`NETGEO_NO_WINDOW=1` never attempts the native
+window at all, so a real webview failure is never masked as "the user asked
+for this." `NETGEO_NO_BROWSER=1` still wins if both are set — it skips
+opening anything (window or browser), which is what CI/smoke tests want.
 
 ## Not done (explicitly out of scope)
 
