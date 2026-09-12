@@ -295,6 +295,68 @@ window at all, so a real webview failure is never masked as "the user asked
 for this." `NETGEO_NO_BROWSER=1` still wins if both are set — it skips
 opening anything (window or browser), which is what CI/smoke tests want.
 
+## Offline map region (OFFLINE-MAP-3)
+
+The backend can serve basemap tiles from a local MBTiles file instead of the
+internet (`backend/app/services/offline_maps.py`, `GET /api/maps/status` +
+`/api/maps/tiles/{z}/{x}/{y}`); the frontend switches to it automatically
+when one is installed, and falls back to online tiles whenever it isn't (see
+that module's docstring for the exact fallback rules — missing/corrupt file
+both mean "online").
+
+**File location the backend reads by default:**
+`~/.config/netgeo/offline-map.mbtiles` (`NETGEO_OFFLINE_MAP_PATH` in
+`backend/app/core/config.py`; same path on Windows, resolved via
+`%USERPROFILE%\.config\netgeo\offline-map.mbtiles` — `~` just expands to the
+user's home there too).
+
+**No curated region packages are downloaded automatically.** There is no
+hosting for that today — inventing a download server here would be
+dishonest, and a broken promise is worse than no feature. Both installers
+instead offer the two things that are actually true right now:
+
+- **Bring your own file** — you already have a `.mbtiles` (built with
+  `mbutil`/`tippecanoe`/`planetiler`/QGIS export, or handed to you) and want
+  the installer to place it.
+- **A URL you provide yourself** — the installer fetches exactly that URL
+  (`curl` on Linux, `Invoke-WebRequest` on Windows) and nothing else; no
+  built-in host is ever contacted.
+
+**Linux CLI** (`packaging/linux/install.sh`):
+
+```
+./install.sh --offline-map=/path/to/region.mbtiles   # copy a file you have
+./install.sh --offline-map-url=https://example.org/region.mbtiles
+./install.sh --no-offline-map                         # skip, no prompt
+./install.sh                                          # interactive prompt
+                                                        # if run in a terminal;
+                                                        # silently skipped
+                                                        # (safe default) if
+                                                        # run non-interactively
+                                                        # (no tty, e.g. CI)
+```
+
+**Windows GUI** (`packaging/windows/netgeo.iss`, Inno Setup): a wizard page
+titled "Peta Offline (Opsional)" offers the same three choices (skip / local
+file / URL), defaulting to skip. Syntax is consistent with the rest of the
+script (`CreateInputOptionPage`/`CreateInputFilePage`/`CreateInputQueryPage`,
+standard Inno Pascal Script support functions) — **not run-tested**, since
+Inno Setup only runs on Windows and none is reachable from this dev machine
+(same limitation as the rest of the installer, see above).
+
+**Installing your own file after the fact, or removing it:** no installer
+needed — just drop or delete the file at the path above:
+
+```
+mkdir -p ~/.config/netgeo
+cp my-region.mbtiles ~/.config/netgeo/offline-map.mbtiles   # install
+rm ~/.config/netgeo/offline-map.mbtiles                      # remove -> back to online tiles
+```
+
+`uninstall.sh` deliberately never touches `~/.config/netgeo/` (it's user
+data, same as saved projects/state), so an installed offline map survives an
+uninstall/reinstall cycle unless removed by hand.
+
 ## Not done (explicitly out of scope)
 
 - No `.deb`/`.rpm` for Linux (AppImage now exists, see "Linux — AppImage" above), no macOS build.
