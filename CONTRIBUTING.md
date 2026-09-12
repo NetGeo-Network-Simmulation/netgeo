@@ -1,3 +1,5 @@
+*Versi Inggris: [CONTRIBUTING.en.md](CONTRIBUTING.en.md)*
+
 # Contributing to NetGeo
 
 Terima kasih sudah mau berkontribusi. Dokumen ini memuat semua yang kamu butuhkan untuk mengirim PR pertama.
