@@ -44,16 +44,13 @@ describe('bars pinned to a fixed top/bottom edge must NOT use the rail inset', (
 
 describe('chrome actually inside the rail\'s vertical band keeps the inset', () => {
   // MapToolbar floats at top-1/2 -translate-y-1/2 — dead center, the one
-  // control genuinely behind the rail's band. MapSearch/RfWorkspace/MapView
-  // share its left tool column by deliberate design (see MapSearch.tsx's
-  // header comment), not because each one individually overlaps the rail,
-  // so they keep the same offset for visual alignment.
+  // control genuinely behind the rail's band. RfWorkspace shares its left
+  // tool column by deliberate design, not because it individually overlaps
+  // the rail, so it keeps the same offset for visual alignment. (MapSearch
+  // was the other member of this group; QA-visual #1, 2026-09-12, removed
+  // it in favor of the CommandPalette's location search.)
   it('MapToolbar (vertically centered) still uses CHROME_INSET', () => {
     expect(read('map/MapToolbar.tsx')).toContain('CHROME_INSET');
-  });
-
-  it('MapSearch (shares the map tool column) still uses CHROME_INSET', () => {
-    expect(read('map/MapSearch.tsx')).toContain('CHROME_INSET');
   });
 
   it('RfWorkspace (shares the map tool column) still uses CHROME_INSET', () => {

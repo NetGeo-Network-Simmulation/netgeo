@@ -42,10 +42,10 @@ export const RAIL_INSET = 'left-[120px]';
 /** Use ONLY for floating chrome that is actually positioned inside the
  *  rail's vertical band (roughly the middle ±260px of the viewport height —
  *  e.g. MapToolbar's `top-1/2 -translate-y-1/2` dock) or for chrome that
- *  shares a deliberate aligned column with such a control (MapSearch,
- *  RfWorkspace's OSM pill, the map's RF-coverage legend — all part of the
- *  same left tool column as MapToolbar). A bar pinned to a fixed top/bottom
- *  edge is never in the rail's band and must not use this. */
+ *  shares a deliberate aligned column with such a control (RfWorkspace's
+ *  OSM pill, the map's RF-coverage legend — part of the same left tool
+ *  column as MapToolbar). A bar pinned to a fixed top/bottom edge is never
+ *  in the rail's band and must not use this. */
 export const CHROME_INSET = 'left-[136px]';
 /** Padding-based twin of `CHROME_INSET`: same 136px clearance from the rail,
  *  but as inner padding so an in-flow row's own border/background can still
