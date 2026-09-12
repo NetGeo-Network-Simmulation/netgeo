@@ -48,6 +48,8 @@ Node ``intent`` fields understood by the builder (all optional):
     nat: {"inside": ["eth0"], "outside": "eth1"}
     nptv6: {"internal": "fd01:203:405::/48", "external": "2001:db8:1::/48",
             "inside": ["eth0"], "outside": "eth1"}   # RFC 6296, stateless 1:1
+    nat64: {"inside": ["eth0"], "outside": "eth1"}   # RFC 6146, well-known
+            # prefix 64:ff9b::/96 (RFC 6052) — stateful, PAT-style like "nat"
     acl: {"<iface-name>": {"in": [{"action": "deny", "proto": "icmp",
                                    "src": "10.0.0.0/8", "dst": null,
                                    "dst_port": null}], "out": [...]}}
@@ -398,6 +400,10 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
             )
         except (KeyError, ValueError) as exc:
             logger.warning("%s: bad nptv6 config %r: %s", dev.name, nptv6_cfg, exc)
+
+    nat64_cfg = intent.get("nat64") or {}
+    if nat64_cfg.get("outside"):
+        dev.enable_nat64(list(nat64_cfg.get("inside") or []), str(nat64_cfg["outside"]))
 
     for iface_name, directions in (intent.get("acl") or {}).items():
         for direction in ("in", "out"):

@@ -1,6 +1,7 @@
 """NPTv6: IPv6-to-IPv6 Network Prefix Translation (RFC 6296).
 
-Deliberately NOT NAT64/DNS64 (RFC 6146/6147) — out of scope for this slice.
+NAT64/DNS64 (RFC 6146/6147) — the IPv6-only-client-to-IPv4-server case this
+mapping does NOT cover — lives in ``test_nat64.py``.
 
 Unlike NAT44 (``NatBinding``), NPTv6 is stateless and 1:1: the mapping is a
 pure function of the two configured prefixes, so ``Nptv6Mapping`` carries no
