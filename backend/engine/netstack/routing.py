@@ -89,13 +89,15 @@ class Route:
         return d
 
 
-def flow_key_v4(pkt: Ipv4Packet) -> bytes:
+def _flow_key(pkt: Ipv4Packet | Ipv6Packet) -> bytes:
     """Deterministic 5-tuple (src, dst, proto, src_port, dst_port) for ECMP
-    per-flow hashing, encoded as fixed-width bytes.
+    per-flow hashing, encoded as fixed-width bytes. Family-agnostic: v4/v6
+    addresses' own ``.packed`` already differ in length, which is all that
+    distinguishes the two families here.
 
-    Degrades to a 3-tuple (no ports) for packets with no L4 ports — ICMP,
-    non-first fragments — rather than inventing fake ports. Byte order is
-    fixed here and nowhere else, so it need not match wire format."""
+    Degrades to a 3-tuple (no ports) for packets with no L4 ports — ICMP/
+    ICMPv6, non-first fragments — rather than inventing fake ports. Byte
+    order is fixed here and nowhere else, so it need not match wire format."""
     parts = [pkt.src.packed, pkt.dst.packed, pkt.proto.to_bytes(1, "big")]
     sport = getattr(pkt.payload, "src_port", None)
     dport = getattr(pkt.payload, "dst_port", None)
@@ -105,13 +107,24 @@ def flow_key_v4(pkt: Ipv4Packet) -> bytes:
     return b"".join(parts)
 
 
+def flow_key_v4(pkt: Ipv4Packet) -> bytes:
+    return _flow_key(pkt)
+
+
+def flow_key_v6(pkt: Ipv6Packet) -> bytes:
+    return _flow_key(pkt)
+
+
 def _lpm(
-    routes: list[Route], dst: IPv4Address, flow_key: bytes | None = None
-) -> Route | None:
+    routes: list[Route] | list[Route6],
+    dst: IPv4Address | IPv6Address,
+    flow_key: bytes | None = None,
+) -> Route | Route6 | None:
     """Longest-prefix match over a route list; ties broken by (ad, metric),
     and — among routes still tied on (prefixlen, ad, metric), i.e. genuinely
     equal-cost — by a deterministic per-flow hash (ECMP). Shared by the
-    global RIB and every per-VRF RIB.
+    global v4 RIB, every per-VRF RIB, and the v6 RIB (``Route``/``Route6``
+    have the same shape: prefix/next_hop/iface_name/ad/metric).
 
     ``flow_key`` is ``None`` for lookups with no packet context (BGP
     next-hop resolution, ARP/DNS egress, reachability tool, ...): those keep
@@ -203,18 +216,8 @@ class Vrf:
 
 @dataclass(slots=True)
 class Route6:
-    """An IPv6 RIB entry — same shape as :class:`Route`.
-
-    # ponytail: v6 ECMP deferred. ``lookup6`` below is a hand-duplicated LPM
-    # loop, not routed through the shared ``_lpm``/flow-hash used for v4, and
-    # ``egress_for6``/``_forward6`` never build a flow key — wiring ECMP
-    # through here means unifying lookup6 with _lpm *and* threading a v6
-    # flow key (Ipv6Packet has no direct L4-port access like Ipv4Packet) down
-    # through egress_for6 and its L3Device base override. Real work, not a
-    # free extension of the v4 path. Upgrade path: make lookup6 call _lpm
-    # (Route6 already has the required ad/metric/prefix/next_hop/iface_name
-    # fields) and add a flow_key6 param to lookup6/egress_for6/_forward6.
-    """
+    """An IPv6 RIB entry — same shape as :class:`Route`, looked up through
+    the same shared ``_lpm`` (LPM + tie-break + per-flow ECMP hash)."""
 
     prefix: IPv6Network
     next_hop: IPv6Address | None      # None = directly connected
@@ -609,26 +612,17 @@ class Router(L3Device):
         self.routes6.append(route)
         return route
 
-    def lookup6(self, dst: IPv6Address) -> Route6 | None:
-        best: Route6 | None = None
-        for r in self.routes6:
-            if dst not in r.prefix:
-                continue
-            if (
-                best is None
-                or r.prefix.prefixlen > best.prefix.prefixlen
-                or (
-                    r.prefix.prefixlen == best.prefix.prefixlen
-                    and (r.ad, r.metric) < (best.ad, best.metric)
-                )
-            ):
-                best = r
-        return best
+    def lookup6(self, dst: IPv6Address, flow_key: bytes | None = None) -> Route6 | None:
+        """Longest-prefix match; same tie-break + per-flow ECMP hash as
+        :meth:`lookup` (shared ``_lpm``)."""
+        return _lpm(self.routes6, dst, flow_key)
 
-    def egress_for6(self, dst: IPv6Address) -> tuple[Interface, IPv6Address] | None:
+    def egress_for6(
+        self, dst: IPv6Address, flow_key: bytes | None = None
+    ) -> tuple[Interface, IPv6Address] | None:
         if dst.is_link_local or dst.is_multicast:
             return super().egress_for6(dst)
-        route = self.lookup6(dst)
+        route = self.lookup6(dst, flow_key)
         if route is None:
             return None
         next_hop = route.next_hop if route.next_hop is not None else dst
@@ -1083,7 +1077,7 @@ class Router(L3Device):
         ):
             pkt.dst = self.nptv6.to_internal(pkt.dst)
 
-        resolved = self.egress_for6(pkt.dst)
+        resolved = self.egress_for6(pkt.dst, flow_key_v6(pkt))
         if resolved is None:
             net.record_drop("no_route6")
             self._send_icmpv6_error(net, pkt, icmp_type=1, code=0)
