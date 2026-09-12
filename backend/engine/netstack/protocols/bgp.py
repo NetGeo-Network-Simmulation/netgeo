@@ -19,6 +19,12 @@ What is modelled (v3, NG-SIM-08 follow-on — full FSM):
   (never advertised to an eBGP peer);
 - **prefix filtering**: per-neighbor in/out prefix lists with ge/le, first
   match wins, implicit deny when a list is configured;
+- **simple import/export policy knobs** (no route-map language): per-neighbor
+  ``local_pref_in`` stamps local-pref on receipt (never itself accepted from
+  a peer — §5.1.5 well-known discretionary, intra-AS only); per-neighbor
+  ``med_out`` sets MED offered to that eBGP neighbor, reset at every eBGP
+  hop (§5.1.4, non-transitive) but unchanged across iBGP; per-network
+  ``origin`` on ``advertise_network`` (§5.1.1, set at injection time only);
 - **best-path selection (P-5)**: full RFC 4271 §9.1.2.2 (a)-(j) tie-break
   ladder — local-pref, AS-path length, origin type, MED (same neighboring
   AS only, unless ``always_compare_med``), eBGP-over-iBGP, IGP metric to
@@ -104,11 +110,12 @@ class BgpAttrs:
                                   # reachable only by a test constructing
                                   # BgpAttrs directly, no redistribution path
                                   # sets it today.
-    med: int = 0                  # MULTI_EXIT_DISC (§9.1.2.2 (d)); nothing
-                                  # in this engine sets a non-zero MED yet
-                                  # (no redistribute/route-map knob) -- the
-                                  # field and its same-neighbor-AS compare
-                                  # rule exist so a future one can.
+    med: int = 0                  # MULTI_EXIT_DISC (§9.1.2.2 (d)); set via
+                                  # ``add_neighbor(..., med_out=N)`` on the
+                                  # advertising side -- see BgpProcess._advertise
+                                  # for the non-transitive reset at eBGP
+                                  # boundaries (§5.1.4: MED never crosses a
+                                  # second AS hop).
 
     @property
     def wire_size(self) -> int:
@@ -232,6 +239,13 @@ class _Peer:
     transitions: list[tuple[float, str]] = field(default_factory=list)
     plist_in: tuple[PrefixRule, ...] = ()
     plist_out: tuple[PrefixRule, ...] = ()
+    # Import policy (RFC 4271 §5.1.5): local-pref is a well-known
+    # discretionary attribute that only ever circulates *within* this AS --
+    # stamped on receipt from this neighbor, never itself received from one
+    # (an eBGP peer's own local-pref, if any, is not ours to trust).
+    local_pref_in: int | None = None
+    # Export policy (§5.1.4): MED offered specifically to this neighbor.
+    med_out: int | None = None
     rib_in: dict[IPv4Network, BgpAttrs] = field(default_factory=dict)
     # Last Adj-RIB-Out snapshot actually sent — updates go out only on
     # change, otherwise two speakers ping-pong identical UPDATEs forever
@@ -268,8 +282,8 @@ class BgpProcess:
         # off ("bgp always-compare-med") to compare MED across ASes too.
         self.always_compare_med = always_compare_med
         self.peers: dict[IPv4Address, _Peer] = {}
-        # (prefix, communities) advertised by this speaker
-        self.networks: list[tuple[IPv4Network, tuple[str, ...]]] = []
+        # (prefix, communities, origin) advertised by this speaker
+        self.networks: list[tuple[IPv4Network, tuple[str, ...], str]] = []
         self._started = False
         router.processes.append(self)
 
@@ -281,6 +295,8 @@ class BgpProcess:
         rr_client: bool = False,
         prefix_list_in: Iterable | None = None,
         prefix_list_out: Iterable | None = None,
+        local_pref_in: int | None = None,
+        med_out: int | None = None,
     ) -> None:
         ip = IPv4Address(peer_ip)
         self.peers[ip] = _Peer(
@@ -290,15 +306,22 @@ class BgpProcess:
             rr_client=rr_client,
             plist_in=_parse_plist(prefix_list_in),
             plist_out=_parse_plist(prefix_list_out),
+            local_pref_in=local_pref_in,
+            med_out=med_out,
         )
 
     def advertise_network(
-        self, prefix: str | IPv4Network, communities: Iterable[str] = ()
+        self,
+        prefix: str | IPv4Network,
+        communities: Iterable[str] = (),
+        origin: str = "igp",
     ) -> None:
+        if origin not in ORIGIN_RANK:
+            raise ValueError(f"unknown BGP origin {origin!r}")
         net_ = IPv4Network(prefix)
         comms = tuple(communities)
-        if not any(p == net_ for p, _c in self.networks):
-            self.networks.append((net_, comms))
+        if not any(p == net_ for p, _c, _o in self.networks):
+            self.networks.append((net_, comms, origin))
 
     @property
     def is_reflector(self) -> bool:
@@ -588,6 +611,8 @@ class BgpProcess:
             prefix = IPv4Network(prefix_s)
             if not _plist_permits(peer.plist_in, prefix):
                 continue
+            if peer.local_pref_in is not None:
+                attrs = replace(attrs, local_pref=peer.local_pref_in)
             rib[prefix] = attrs
         if rib == peer.rib_in:
             return  # nothing changed — no re-decision, no re-advertisement
@@ -682,7 +707,7 @@ class BgpProcess:
 
     def _decide_and_install(self, net: Network) -> None:
         local = {ip.network for ip in self.router.all_ips()}
-        my_networks = {p for p, _c in self.networks}
+        my_networks = {p for p, _c, _o in self.networks}
         self.router.withdraw_routes("ebgp")
         self.router.withdraw_routes("ibgp")
         for prefix, (attrs, peer_ip) in self.best_paths().items():
@@ -720,7 +745,7 @@ class BgpProcess:
             out[str(prefix)] = attrs
 
         # Locally-originated networks.
-        for prefix, comms in self.networks:
+        for prefix, comms, origin in self.networks:
             offer(
                 prefix,
                 BgpAttrs(
@@ -732,6 +757,10 @@ class BgpProcess:
                     # NB: our own no-export networks ARE offered to eBGP peers
                     # (RFC 1997 binds the *receiving* AS, not the originator).
                     originator=self.router_id if is_ibgp_peer else "",
+                    origin=origin,
+                    # MED is only meaningful toward this one eBGP neighbor
+                    # (§9.1.2.2 (d)); iBGP peers get the neutral default.
+                    med=(peer.med_out or 0) if not is_ibgp_peer else 0,
                 ),
             )
 
@@ -760,6 +789,12 @@ class BgpProcess:
                     # First injection into the AS stamps the originator;
                     # stripped again when the route leaves the AS.
                     originator=(attrs.originator or self.router_id) if is_ibgp_peer else "",
+                    # MED is non-transitive (§5.1.4): it rides unchanged
+                    # through iBGP but is reset at every eBGP hop -- carrying
+                    # a neighboring AS's own MED across a second AS boundary
+                    # would let that AS influence a comparison it has no
+                    # business being part of.
+                    med=attrs.med if is_ibgp_peer else (peer.med_out or 0),
                 ),
             )
 
