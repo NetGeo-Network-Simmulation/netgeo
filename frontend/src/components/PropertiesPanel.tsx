@@ -55,6 +55,7 @@ export function PropertiesPanel() {
   const nodesById = useTopologyStore((s) => s.nodes);
   const [name, setName] = useState('');
   const [locationText, setLocationText] = useState('');
+  const [patchError, setPatchError] = useState<string | null>(null);
 
   useEffect(() => setName(node?.name ?? ''), [node?.id, node?.name]);
   useEffect(() => {
@@ -92,7 +93,11 @@ export function PropertiesPanel() {
   const patch = (p: Partial<typeof node>) => {
     const updated = { ...node, ...p };
     upsertNode(updated);
-    void nodesApi.update(node.id, p).catch(() => {});
+    setPatchError(null);
+    void nodesApi.update(node.id, p).catch((e) => {
+      console.error('Failed to save node change', node.id, e);
+      setPatchError('Failed to save this change to the server. It may not persist.');
+    });
   };
 
   // Device console (P5): per-port admin/PoE/IP edits all round-trip through
@@ -137,6 +142,10 @@ export function PropertiesPanel() {
 
   return (
     <div className="ng-scroll h-full space-y-4 overflow-auto p-3">
+      {patchError && (
+        <p className="rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">{patchError}</p>
+      )}
+
       {/* Node summary header */}
       <div className="flex items-center gap-2.5 rounded-lg border border-fg/8 bg-fg/4 px-3 py-2">
         <div

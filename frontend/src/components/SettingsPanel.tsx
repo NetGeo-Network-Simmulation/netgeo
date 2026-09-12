@@ -26,6 +26,7 @@ import { useNosStore, type CustomNosEntry } from '@/store/nosStore';
 import { devicePacksApi, type DevicePack } from '@/api/client';
 import { cn } from '@/lib/cn';
 import { Select } from '@/components/ui/Select';
+import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
 
 const SPEED_OPTIONS = [0.5, 1, 2, 4, 8].map((s) => ({ value: String(s), label: `${s}×` }));
 
@@ -154,6 +155,7 @@ function GeneralSection() {
 function NosSection() {
   const { customNos, addNos, removeNos } = useNosStore();
   const [showForm, setShowForm] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState<CustomNosEntry | null>(null);
 
   const [formKey, setFormKey] = useState('');
   const [formLabel, setFormLabel] = useState('');
@@ -278,9 +280,23 @@ function NosSection() {
       ) : (
         <div className="space-y-1.5">
           {customNos.map((entry) => (
-            <CustomNosRow key={entry.key} entry={entry} onRemove={() => removeNos(entry.key)} />
+            <CustomNosRow key={entry.key} entry={entry} onRemove={() => setConfirmRemove(entry)} />
           ))}
         </div>
+      )}
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title={`Remove "${confirmRemove.label}"?`}
+          message="This custom NOS definition will be deleted. This can't be undone."
+          confirmLabel="Remove"
+          danger
+          onConfirm={() => {
+            removeNos(confirmRemove.key);
+            setConfirmRemove(null);
+          }}
+          onCancel={() => setConfirmRemove(null)}
+        />
       )}
     </div>
   );
@@ -557,13 +573,19 @@ function DevicePacksSection() {
     queryKey: ['device-packs'],
     queryFn: devicePacksApi.list,
   });
+  const [toggleError, setToggleError] = useState<string | null>(null);
 
   const toggle = useMutation({
     mutationFn: (pack: DevicePack) =>
       pack.enabled ? devicePacksApi.disable(pack.id) : devicePacksApi.enable(pack.id),
     onSuccess: () => {
+      setToggleError(null);
       qc.invalidateQueries({ queryKey: ['device-packs'] });
       qc.invalidateQueries({ queryKey: ['device-types'] });
+    },
+    onError: (e, pack) => {
+      console.error('Failed to toggle device pack', pack.id, e);
+      setToggleError(`Could not ${pack.enabled ? 'disable' : 'enable'} "${pack.name}". Try again.`);
     },
   });
 
@@ -580,6 +602,11 @@ function DevicePacksSection() {
       {isError && (
         <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
           Failed to load device packs.
+        </p>
+      )}
+      {toggleError && (
+        <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+          {toggleError}
         </p>
       )}
 

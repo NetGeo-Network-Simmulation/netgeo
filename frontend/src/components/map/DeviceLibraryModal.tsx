@@ -10,7 +10,7 @@
  * Built-in types are read-only; custom types can be deleted. All network calls
  * surface first-class loading / error / empty states.
  */
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Radio, Smartphone, RadioTower, Network, Router as RouterIcon, Server,
@@ -24,6 +24,7 @@ import {
 } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
 import { Select } from '@/components/ui/Select';
+import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
 
@@ -165,9 +166,23 @@ function DeviceTypeList({
   error: ApiError | null;
   onChanged: () => void;
 }) {
+  const [confirmRemove, setConfirmRemove] = useState<DeviceType | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (isError) console.error('Failed to load device types', error);
+  }, [isError, error]);
+
   const remove = useMutation({
     mutationFn: (id: string) => deviceTypesApi.remove(id),
-    onSuccess: onChanged,
+    onSuccess: () => {
+      setRemoveError(null);
+      onChanged();
+    },
+    onError: (e, id) => {
+      console.error('Failed to delete device type', id, e);
+      setRemoveError('Could not delete this device type. It was not removed — try again.');
+    },
   });
 
   if (isLoading) {
@@ -184,7 +199,7 @@ function DeviceTypeList({
       <div className="grid place-items-center py-16 text-center text-danger/80">
         <AlertTriangle className="h-6 w-6" />
         <p className="mt-2 text-sm">Couldn’t load device types.</p>
-        <p className="mt-1 text-xs text-fg/40">{error?.message ?? 'Network error'}</p>
+        <p className="mt-1 text-xs text-fg/40">Check your connection and try again.</p>
       </div>
     );
   }
@@ -199,47 +214,66 @@ function DeviceTypeList({
   }
 
   return (
-    <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-      {types.map((dt) => {
-        const Icon = iconFor(dt);
-        const color = catColor(dt.category);
-        return (
-          <div
-            key={dt.id}
-            className="group relative flex flex-col gap-2 rounded-xl border border-fg/10 bg-fg/5 p-3 transition-colors hover:border-fg/20"
-          >
+    <>
+      {removeError && (
+        <p className="mb-3 rounded-md bg-danger/10 px-3 py-2 text-xs text-danger">{removeError}</p>
+      )}
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+        {types.map((dt) => {
+          const Icon = iconFor(dt);
+          const color = catColor(dt.category);
+          return (
             <div
-              className="grid h-9 w-9 place-items-center rounded-lg"
-              style={{ background: `${color}22`, color }}
+              key={dt.id}
+              className="group relative flex flex-col gap-2 rounded-xl border border-fg/10 bg-fg/5 p-3 transition-colors hover:border-fg/20"
             >
-              <Icon className="h-5 w-5" />
-            </div>
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium text-fg/90" title={dt.name}>
-                {dt.name}
-              </p>
-              <p className="truncate text-[10px] uppercase tracking-wide text-fg/35">
-                {dt.category}
-              </p>
-            </div>
-            {dt.builtin ? (
-              <span className="absolute right-2 top-2 rounded bg-fg/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-fg/40">
-                Built-in
-              </span>
-            ) : (
-              <button
-                onClick={() => remove.mutate(dt.id)}
-                disabled={remove.isPending}
-                aria-label={`Delete ${dt.name}`}
-                className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md text-fg/30 opacity-0 transition-opacity hover:bg-danger/15 hover:text-danger group-hover:opacity-100"
+              <div
+                className="grid h-9 w-9 place-items-center rounded-lg"
+                style={{ background: `${color}22`, color }}
               >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
-            )}
-          </div>
-        );
-      })}
-    </div>
+                <Icon className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-fg/90" title={dt.name}>
+                  {dt.name}
+                </p>
+                <p className="truncate text-[10px] uppercase tracking-wide text-fg/35">
+                  {dt.category}
+                </p>
+              </div>
+              {dt.builtin ? (
+                <span className="absolute right-2 top-2 rounded bg-fg/10 px-1.5 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-fg/40">
+                  Built-in
+                </span>
+              ) : (
+                <button
+                  onClick={() => setConfirmRemove(dt)}
+                  disabled={remove.isPending}
+                  aria-label={`Delete ${dt.name}`}
+                  className="absolute right-1.5 top-1.5 grid h-6 w-6 place-items-center rounded-md text-fg/30 opacity-0 transition-opacity hover:bg-danger/15 hover:text-danger group-hover:opacity-100"
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {confirmRemove && (
+        <ConfirmDialog
+          title={`Delete "${confirmRemove.name}"?`}
+          message="This device type will be removed from the library. This can't be undone."
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => {
+            remove.mutate(confirmRemove.id);
+            setConfirmRemove(null);
+          }}
+          onCancel={() => setConfirmRemove(null)}
+        />
+      )}
+    </>
   );
 }
 

@@ -49,12 +49,13 @@ import { ArrowLeftRight, Building2, Cable, Check, Move, Network, Pencil, Radio, 
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
 import { semantic } from '@/theme/tokens';
-import { physicalApi, type ApiError } from '@/api/client';
+import { physicalApi } from '@/api/client';
 import { haversineM, useMapStore } from '@/store/mapStore';
 import { useTopologyStore } from '@/store/topologyStore';
 import { useUiStore } from '@/store/uiStore';
 import { fmtKm } from '@/components/rf/rfLogic';
 import { DeviceIcon } from '@/components/canvas/DeviceIcon';
+import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
 import { MapContextMenu } from './MapContextMenu';
 import type { LinkType, NodeModel, NodeStatus, Site } from '@/api/types';
 
@@ -107,6 +108,8 @@ export function SitePopup({ site, px, onClose }: Props) {
   const [editing, setEditing] = useState(false);
   const [name, setName] = useState(site.name);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const nodeById = new Map(nodes.map((n) => [n.id, n]));
   const devicesAtSite = nodes.filter((n) => n.site_id === site.id);
@@ -138,6 +141,10 @@ export function SitePopup({ site, px, onClose }: Props) {
       void queryClient.invalidateQueries({ queryKey: ['topology', projectId] });
       onClose();
     },
+    onError: (e) => {
+      console.error('Failed to delete site', site.id, e);
+      setDeleteError('Could not delete this site. It was not removed — try again.');
+    },
   });
 
   const renameSite = useMutation({
@@ -147,7 +154,10 @@ export function SitePopup({ site, px, onClose }: Props) {
       setEditing(false);
       setRenameError(null);
     },
-    onError: (e) => setRenameError((e as unknown as ApiError).message || 'Failed to rename site.'),
+    onError: (e) => {
+      console.error('Failed to rename site', site.id, e);
+      setRenameError('Could not rename this site. Try again.');
+    },
   });
 
   const cancelEdit = () => {
@@ -248,7 +258,7 @@ export function SitePopup({ site, px, onClose }: Props) {
                 <Move className="h-3.5 w-3.5" />
               </button>
               <button
-                onClick={() => removeSite.mutate()}
+                onClick={() => setConfirmDelete(true)}
                 disabled={removeSite.isPending}
                 aria-label="Delete site"
                 className="grid h-6 w-6 place-items-center rounded-md text-fg/40 hover:bg-danger/10 hover:text-danger disabled:opacity-50"
@@ -266,9 +276,9 @@ export function SitePopup({ site, px, onClose }: Props) {
           )}
         </div>
 
-        {renameError && (
+        {(renameError || deleteError) && (
           <div className="flex items-center gap-1.5 bg-danger/15 px-3.5 py-1.5 text-[11px] text-danger">
-            <X className="h-3 w-3 shrink-0" /> {renameError}
+            <X className="h-3 w-3 shrink-0" /> {renameError || deleteError}
           </div>
         )}
 
@@ -380,6 +390,25 @@ export function SitePopup({ site, px, onClose }: Props) {
           siteId={site.id}
           initialCategoryKey={addCategory}
           onClose={() => setAddCategory(null)}
+        />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title={`Delete "${site.name}"?`}
+          message={
+            devicesAtSite.length > 0
+              ? `Its ${devicesAtSite.length} device${devicesAtSite.length === 1 ? '' : 's'} will be unassigned from this site. This can't be undone.`
+              : "This can't be undone."
+          }
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => {
+            setConfirmDelete(false);
+            setDeleteError(null);
+            removeSite.mutate();
+          }}
+          onCancel={() => setConfirmDelete(false)}
         />
       )}
     </>
