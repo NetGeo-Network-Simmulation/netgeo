@@ -113,7 +113,11 @@ export function ProjectsWorkspace() {
 
   return (
     <div className="absolute inset-0 overflow-y-auto bg-surface">
-      <div className="mx-auto w-full max-w-[1600px] p-6">
+      {/* pl-[116px]: 16px past the floating rail's x=100 right edge (rail is
+          left-6 + 76px wide) — the page's own surface bleeds to x=0 (AppShell)
+          but this scrolling column is real content, not a pannable canvas, so
+          it needs a real gutter instead of rendering under the rail. */}
+      <div className="mx-auto w-full max-w-[1600px] pt-6 pr-6 pb-6 pl-[116px]">
         {/* Page header */}
         <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
           <div>

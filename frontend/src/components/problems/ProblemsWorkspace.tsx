@@ -280,69 +280,70 @@ export function ProblemsWorkspace() {
   }
 
   return (
-    <div className="absolute inset-0 flex justify-center bg-surface">
-      {/* Cap the two-pane split so the table doesn't stretch edge-to-edge on
-          wide monitors (~1900px) — width was previously unbounded flex-1. */}
-      <div className="flex h-full w-full max-w-[1400px]">
-        {/* Left: problem list */}
-        <div className="flex min-w-0 flex-1 flex-col border-r border-fg/10">
-          {/* Header */}
-          <div className="flex flex-col gap-4 border-b border-fg/10 bg-panel px-6 pt-5 pb-4">
-            <div className="flex items-end justify-between gap-4">
-              <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Problems</h1>
-              <div className="flex items-center gap-3">
-                <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
-                  <Search className="h-4 w-4 text-fg/40" aria-hidden />
-                  <input
-                    value={search}
-                    onChange={(e) => setSearch(e.target.value)}
-                    placeholder="Search nodes, problems…"
-                    aria-label="Search problems"
-                    className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
-                  />
-                </label>
-                <button
-                  onClick={ackAll}
-                  disabled={counts.all === 0}
-                  className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-                >
-                  Acknowledge all
-                </button>
-              </div>
-            </div>
-            {/* Filter chips */}
-            <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
-              <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
-              <FilterChip
-                active={filter === 'critical'}
-                onClick={() => setFilter('critical')}
-                label="Critical"
-                count={counts.critical}
-                icon={CircleAlert}
-                tone="text-danger"
+    <div className="absolute inset-0 flex bg-surface" role="region" aria-label="Problem Center">
+      {/* Left: problem list. This column's own background/border-r bleed to
+          x=0 (AppShell); its content gets pl-[116px] — 16px past the
+          floating rail's x=100 right edge — instead so the header controls
+          and table rows never render under the rail. No max-w cap here:
+          Surya reported the previous max-w-[1400px] leaving empty margins on
+          both sides instead of hugging the viewport edges. */}
+      <div className="flex min-w-0 flex-1 flex-col border-r border-fg/10">
+        {/* Header — no page title: the Problems tab in TopBar's sub-nav
+            already carries this page's identity, so an in-page h1 was a
+            duplicate (root gets aria-label="Problem Center" above instead). */}
+        <div className="flex flex-col gap-4 border-b border-fg/10 bg-panel pt-5 pr-6 pb-4 pl-[116px]">
+          <div className="flex items-center justify-end gap-3">
+            <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
+              <Search className="h-4 w-4 text-fg/40" aria-hidden />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search nodes, problems…"
+                aria-label="Search problems"
+                className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
               />
-              <FilterChip
-                active={filter === 'warning'}
-                onClick={() => setFilter('warning')}
-                label="Warning"
-                count={counts.warning}
-                icon={AlertTriangle}
-                tone="text-warning"
-              />
-              <FilterChip
-                active={filter === 'info'}
-                onClick={() => setFilter('info')}
-                label="Info"
-                count={counts.info}
-                icon={Info}
-                tone="text-accent"
-              />
-            </div>
+            </label>
+            <button
+              onClick={ackAll}
+              disabled={counts.all === 0}
+              className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+            >
+              Acknowledge all
+            </button>
           </div>
+          {/* Filter chips */}
+          <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
+            <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
+            <FilterChip
+              active={filter === 'critical'}
+              onClick={() => setFilter('critical')}
+              label="Critical"
+              count={counts.critical}
+              icon={CircleAlert}
+              tone="text-danger"
+            />
+            <FilterChip
+              active={filter === 'warning'}
+              onClick={() => setFilter('warning')}
+              label="Warning"
+              count={counts.warning}
+              icon={AlertTriangle}
+              tone="text-warning"
+            />
+            <FilterChip
+              active={filter === 'info'}
+              onClick={() => setFilter('info')}
+              label="Info"
+              count={counts.info}
+              icon={Info}
+              tone="text-accent"
+            />
+          </div>
+        </div>
 
-          {/* Table / empty */}
-          <div className="ng-scroll min-h-0 flex-1 overflow-auto p-6">
-            {isLoading ? (
+        {/* Table / empty */}
+        <div className="ng-scroll min-h-0 flex-1 overflow-auto pt-6 pr-6 pb-6 pl-[116px]">
+          {isLoading ? (
               <p className="p-4 text-sm text-fg/40">Deriving problems…</p>
             ) : counts.all === 0 ? (
               <div className="grid h-full place-items-center text-center">
@@ -403,7 +404,6 @@ export function ProblemsWorkspace() {
             </div>
           )}
         </aside>
-      </div>
     </div>
   );
 }

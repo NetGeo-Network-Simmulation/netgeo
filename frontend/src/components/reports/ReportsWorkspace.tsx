@@ -130,60 +130,60 @@ export function ReportsWorkspace() {
   const canDownload = selected === 'summary' ? !!reportQ.data : (bomQ.data?.length ?? 0) > 0;
 
   return (
-    <div className="absolute inset-0 flex justify-center bg-surface">
-      {/* Cap the two-pane split so the preview's toolbar doesn't stretch to
-          the full monitor width around a 720px-wide "paper" (~1900px). */}
-      <div className="flex h-full w-full max-w-[1280px]">
-        {/* Left: report type cards */}
-        <div className="flex w-[380px] shrink-0 flex-col border-r border-fg/10 bg-panel">
-          <div className="border-b border-fg/10 px-6 pt-5 pb-4">
-            <h1 className="font-display text-2xl font-semibold tracking-tight text-fg">Reports Center</h1>
-            <p className="mt-1 text-sm text-fg/50">Generate and manage engineering documentation.</p>
+    <div className="absolute inset-0 flex bg-surface" role="region" aria-label="Reports Center">
+      {/* Left: report type cards. This column's own background/border-r bleed
+          to x=0 (AppShell); the card grid gets pl-[116px] — 16px past the
+          floating rail's x=100 right edge — instead so cards never render
+          under the rail. No max-w cap here: Surya reported the previous
+          max-w-[1280px] leaving empty margins on both sides instead of
+          hugging the viewport edges. No page title either — the Reports
+          tab in TopBar's sub-nav already carries this page's identity, so
+          the in-page h1 + subtitle were a duplicate (root gets
+          aria-label="Reports Center" above instead). */}
+      <div className="flex w-[380px] shrink-0 flex-col border-r border-fg/10 bg-panel">
+        <div className="ng-scroll grid min-h-0 flex-1 grid-cols-2 content-start gap-3 overflow-y-auto pt-4 pr-4 pb-4 pl-[116px]">
+          {REPORTS.map((r) => (
+            <ReportCard key={r.id} report={r} active={r.id === selected} onSelect={() => r.available && setSelected(r.id)} />
+          ))}
+        </div>
+      </div>
+
+      {/* Right: document preview */}
+      <main className="flex min-w-0 flex-1 flex-col bg-recess/20">
+        {/* Toolbar */}
+        <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-fg/10 bg-panel px-6">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => window.print()}
+              disabled={!canDownload}
+              className="flex items-center gap-2 rounded border border-fg/10 px-3 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+            >
+              <Printer className="h-[18px] w-[18px]" aria-hidden />
+              Download PDF
+            </button>
+            <button
+              onClick={downloadHtml}
+              disabled={!canDownload}
+              className="flex items-center gap-2 rounded border border-fg/10 px-3 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+            >
+              <Code2 className="h-[18px] w-[18px]" aria-hidden />
+              Download HTML
+            </button>
           </div>
-          <div className="ng-scroll grid min-h-0 flex-1 grid-cols-2 content-start gap-3 overflow-y-auto p-4">
-            {REPORTS.map((r) => (
-              <ReportCard key={r.id} report={r} active={r.id === selected} onSelect={() => r.available && setSelected(r.id)} />
-            ))}
-          </div>
+          <span className="rounded border border-fg/10 bg-recess/30 px-3 py-1.5 font-mono text-[12px] text-fg/60">
+            Template: Standard
+          </span>
         </div>
 
-        {/* Right: document preview */}
-        <main className="flex min-w-0 flex-1 flex-col bg-recess/20">
-          {/* Toolbar */}
-          <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-fg/10 bg-panel px-6">
-            <div className="flex items-center gap-2">
-              <button
-                onClick={() => window.print()}
-                disabled={!canDownload}
-                className="flex items-center gap-2 rounded border border-fg/10 px-3 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-              >
-                <Printer className="h-[18px] w-[18px]" aria-hidden />
-                Download PDF
-              </button>
-              <button
-                onClick={downloadHtml}
-                disabled={!canDownload}
-                className="flex items-center gap-2 rounded border border-fg/10 px-3 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-              >
-                <Code2 className="h-[18px] w-[18px]" aria-hidden />
-                Download HTML
-              </button>
-            </div>
-            <span className="rounded border border-fg/10 bg-recess/30 px-3 py-1.5 font-mono text-[12px] text-fg/60">
-              Template: Standard
-            </span>
-          </div>
-
-          {/* Preview */}
-          <div className="ng-scroll min-h-0 flex-1 overflow-y-auto p-8">
-            {selected === 'summary' ? (
-              <SummaryPreview loading={reportQ.isLoading} error={reportQ.error} html={reportQ.data} />
-            ) : (
-              <BomPreview loading={bomQ.isLoading} error={bomQ.error} rows={bomQ.data ?? []} title={activeMeta.title} />
-            )}
-          </div>
-        </main>
-      </div>
+        {/* Preview */}
+        <div className="ng-scroll min-h-0 flex-1 overflow-y-auto p-8">
+          {selected === 'summary' ? (
+            <SummaryPreview loading={reportQ.isLoading} error={reportQ.error} html={reportQ.data} />
+          ) : (
+            <BomPreview loading={bomQ.isLoading} error={bomQ.error} rows={bomQ.data ?? []} title={activeMeta.title} />
+          )}
+        </div>
+      </main>
     </div>
   );
 }
