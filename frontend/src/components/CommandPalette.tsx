@@ -7,14 +7,25 @@
  *
  * Commands cover Phase-1 scope: module navigation, add device, run simulation,
  * open CLI/diagnostics, fit canvas, export config, and jump-to-device.
+ *
+ * QA-visual #1 (2026-09-12): also absorbs the map's old floating "Search
+ * location…" box (removed — MapSearch.tsx) as a two-step location search:
+ * typing text that isn't (yet) a location search shows a "Search … as a
+ * location" entry; running it calls Nominatim once (geocodeService), same
+ * as MapSearch did, and its own results replace that entry with "Fly to …"
+ * commands. Two-step by design, not one geocode call per keystroke — the
+ * provider's usage policy (see geocodeService.ts) forbids autocomplete-per-
+ * keystroke and caps requests at 1/s.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Search, CornerDownLeft } from 'lucide-react';
 import { useUiStore, type DrawerTab } from '@/store/uiStore';
 import { useTopoUiStore } from '@/store/topoUiStore';
 import { useTopologyStore } from '@/store/topologyStore';
+import { useMapStore } from '@/store/mapStore';
 import { simApi } from '@/api/client';
 import type { NodeModel } from '@/api/types';
+import { geocode, type GeoResult } from '@/services/geocodeService';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
 
@@ -23,6 +34,9 @@ interface Command {
   title: string;
   hint?: string;
   run: () => void;
+  /** Skip the palette's default close-on-run — used by the location-search
+   *  trigger, which needs to stay open while its geocode call resolves. */
+  keepOpen?: boolean;
 }
 
 /** Subsequence match: true if every char of `q` appears in order in `text`. */
@@ -64,13 +78,46 @@ export function CommandPalette() {
   const [active, setActive] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Location search (QA-visual #1) — `geoQuery` is the trimmed text the last
+  // geocode() call ran for; results stay attached to that exact text so
+  // editing the query falls back to the trigger row instead of showing stale
+  // results for a different place.
+  const [geoQuery, setGeoQuery] = useState<string | null>(null);
+  const [geoResults, setGeoResults] = useState<GeoResult[] | null>(null);
+  const [geoLoading, setGeoLoading] = useState(false);
+  const geoAbortRef = useRef<AbortController | null>(null);
+
   useEffect(() => {
     if (open) {
       setQ('');
       setActive(0);
       requestAnimationFrame(() => inputRef.current?.focus());
+    } else {
+      geoAbortRef.current?.abort();
+      setGeoQuery(null);
+      setGeoResults(null);
+      setGeoLoading(false);
     }
   }, [open]);
+
+  const runGeoSearch = (query: string) => {
+    geoAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    geoAbortRef.current = ctrl;
+    setGeoLoading(true);
+    setGeoQuery(query);
+    geocode(query, ctrl.signal)
+      .then((rows) => {
+        if (geoAbortRef.current !== ctrl) return; // superseded by a newer search
+        setGeoResults(rows);
+        setGeoLoading(false);
+      })
+      .catch((err) => {
+        if ((err as Error).name === 'AbortError' || geoAbortRef.current !== ctrl) return;
+        setGeoResults([]);
+        setGeoLoading(false);
+      });
+  };
 
   const close = () => closeModal();
 
@@ -128,16 +175,50 @@ export function CommandPalette() {
       }
     }
 
-    return [...staticMatches, ...deviceMatches];
+    // Place/address search (QA-visual #1 — absorbed from the removed
+    // MapSearch box). `q.trim()` (not lowercased `query`) so Nominatim sees
+    // the text as typed.
+    const trimmed = q.trim();
+    const locationCommands: Command[] = [];
+    if (trimmed) {
+      if (geoQuery === trimmed && geoResults !== null) {
+        if (geoResults.length === 0) {
+          locationCommands.push({ id: 'geo-empty', title: 'No matching places', hint: 'Location', run: () => {} });
+        }
+        geoResults.forEach((r, i) => {
+          locationCommands.push({
+            id: `geo-${i}`,
+            title: `Fly to ${r.label}`,
+            hint: 'Location',
+            run: () => {
+              setViewMode('map');
+              useMapStore.getState().setSearchResult(r);
+            },
+          });
+        });
+      } else {
+        locationCommands.push({
+          id: 'search-location',
+          title: geoLoading ? `Searching "${trimmed}"…` : `Search "${trimmed}" as a location`,
+          hint: 'Location',
+          keepOpen: true,
+          run: () => {
+            if (!geoLoading) runGeoSearch(trimmed);
+          },
+        });
+      }
+    }
+
+    return [...staticMatches, ...deviceMatches, ...locationCommands];
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q, nodes, setViewMode, openPicker, projectId, setSimState, openModal, fit, select]);
+  }, [q, nodes, setViewMode, openPicker, projectId, setSimState, openModal, fit, select, geoQuery, geoResults, geoLoading]);
 
   if (!open) return null;
 
   const run = (c: Command | undefined) => {
     if (!c) return;
     c.run();
-    close();
+    if (!c.keepOpen) close();
   };
 
   return (
@@ -175,7 +256,7 @@ export function CommandPalette() {
                 run(commands[active]);
               }
             }}
-            placeholder="Type a command or search devices, IPs…"
+            placeholder="Type a command, search devices/IPs, or find a place…"
             aria-label="Command palette input"
             className="w-full bg-transparent text-sm text-fg/90 placeholder:text-fg/35 outline-none"
           />

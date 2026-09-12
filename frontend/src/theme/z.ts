@@ -17,7 +17,7 @@ export const Z = {
   workspace: 100, // workspace chrome: toolbars, side panels, trays, legends
   drawer: 200, // BottomDrawer
   dock: 300, // SimulationDock transport
-  popover: 400, // TopBar dropdowns, UpdatesButton, MapSearch results
+  popover: 400, // TopBar dropdowns, UpdatesButton
   modal: 500, // ModalScrim + every modal (command, picker, settings, …)
   toast: 600, // transient notice / flash chips
 } as const;

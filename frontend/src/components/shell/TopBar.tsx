@@ -158,7 +158,7 @@ export function TopBar({ projectName, conn }: TopBarProps) {
           aria-label="Open command palette"
         >
           <Search className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1 truncate">Search devices, IPs, or run a command…</span>
+          <span className="flex-1 truncate">Search devices, IPs, places, or run a command…</span>
           <kbd className="hidden shrink-0 rounded border border-fg/15 px-1.5 py-0.5 font-mono text-[10px] sm:inline">⌘K</kbd>
         </button>
       </div>
