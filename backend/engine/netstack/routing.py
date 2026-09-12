@@ -21,7 +21,7 @@ from ipaddress import (
     IPv6Address,
     IPv6Network,
 )
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from engine.events import EventType, SimEvent
 from engine.netstack.addr import ALL_NODES_V6, ALL_ROUTERS_V6, BROADCAST_MAC, MacAddr
@@ -420,6 +420,84 @@ class Nptv6Mapping:
         return self._translate(addr, self.internal, outbound=False)
 
 
+# ----- NAT64 (RFC 6146) ----------------------------------------------------------------
+# RFC 6052 §2.1 "Well-Known Prefix". Unlike NPTv6's arbitrary configured
+# prefixes, this one is fixed by the RFC — no config knob for it.
+NAT64_WELLKNOWN_PREFIX = IPv6Network("64:ff9b::/96")
+NAT64_MAX_PORT = 65535
+# RFC 6146 §3.5 recommends separate TCP/UDP/ICMP timers (TCP transitory vs.
+# established, UDP ~5 min, ICMP ~60s); one flat idle timeout collapses that
+# into a single number instead of three.
+# ponytail: split per-proto if a test ever needs TCP sessions to outlive UDP.
+NAT64_SESSION_TIMEOUT = 60.0
+
+
+def _nat64_embed(v4: IPv4Address) -> IPv6Address:
+    """RFC 6052 §2.2: with a /96 prefix, the 32-bit IPv4 address sits
+    contiguously in the low 32 bits (no interleaved "u" octet — that's only
+    needed for prefixes shorter than /96)."""
+    return IPv6Address(int(NAT64_WELLKNOWN_PREFIX.network_address) | int(v4))
+
+
+def _nat64_extract(v6: IPv6Address) -> IPv4Address | None:
+    """Inverse of :func:`_nat64_embed`; ``None`` if ``v6`` isn't in the
+    well-known prefix at all."""
+    if v6 not in NAT64_WELLKNOWN_PREFIX:
+        return None
+    return IPv4Address(int(v6) & 0xFFFFFFFF)
+
+
+# RFC 6145 §4.2/4.3 ICMP type/code translation — only the subset that carries
+# a stable per-flow key this engine can bind on (echo) or that a NAT64 router
+# plausibly needs to relay (unreachable/too-big/time-exceeded). NDP (133-136)
+# never reaches here: it's link-local, filtered in ``_on_ipv6`` long before
+# ``_forward6``'s NAT64 hook.
+def _icmp6_to_icmp4(msg: Icmpv6Message) -> IcmpMessage | None:
+    if msg.type == 128:    # echo request
+        return IcmpMessage(type=8, ident=msg.ident, seq=msg.seq, data_len=msg.data_len)
+    if msg.type == 129:    # echo reply
+        return IcmpMessage(type=0, ident=msg.ident, seq=msg.seq, data_len=msg.data_len)
+    if msg.type == 1:      # destination unreachable
+        code = {0: 1, 1: 1, 3: 1, 4: 3}.get(msg.code, 1)
+        return IcmpMessage(type=3, code=code, orig_ident=msg.orig_ident, orig_seq=msg.orig_seq)
+    if msg.type == 2:      # packet too big -> fragmentation needed
+        return IcmpMessage(type=3, code=4, orig_ident=msg.orig_ident, orig_seq=msg.orig_seq)
+    if msg.type == 3:      # time exceeded
+        return IcmpMessage(type=11, code=msg.code, orig_ident=msg.orig_ident, orig_seq=msg.orig_seq)
+    return None
+
+
+def _icmp4_to_icmp6(msg: IcmpMessage) -> Icmpv6Message | None:
+    if msg.type == 8:      # echo request
+        return Icmpv6Message(type=128, ident=msg.ident, seq=msg.seq, data_len=msg.data_len)
+    if msg.type == 0:      # echo reply
+        return Icmpv6Message(type=129, ident=msg.ident, seq=msg.seq, data_len=msg.data_len)
+    if msg.type == 3:      # destination unreachable
+        if msg.code == 4:  # fragmentation needed -> packet too big
+            return Icmpv6Message(type=2, code=0, orig_ident=msg.orig_ident, orig_seq=msg.orig_seq)
+        code = 1 if msg.code == 3 else 0
+        return Icmpv6Message(type=1, code=code, orig_ident=msg.orig_ident, orig_seq=msg.orig_seq)
+    if msg.type == 11:     # time exceeded
+        return Icmpv6Message(type=3, code=msg.code, orig_ident=msg.orig_ident, orig_seq=msg.orig_seq)
+    return None
+
+
+@dataclass(slots=True)
+class Nat64Binding:
+    """RFC 6146 stateful binding: one (proto, inside key) <-> (outside key)
+    pair, exactly the NAT44 ``NatBinding`` shape but crossing address
+    families. The IPv4 remote isn't stored — it's always recoverable
+    algorithmically from whichever side of the packet carries the embedded
+    address (destination outbound, source inbound), so it needs no slot
+    here any more than NPTv6 needs a binding table at all."""
+
+    inside_ip6: IPv6Address
+    inside_key: int
+    outside_ip4: IPv4Address
+    outside_key: int
+    proto: str   # "icmp" | "udp" | "tcp" — the v4-side name, shared by both directions
+
+
 @dataclass(slots=True)
 class DhcpPool:
     network: IPv4Network
@@ -489,6 +567,14 @@ class Router(L3Device):
         self._nat_bindings: list[NatBinding] = []
         self._nat_next_key = 20000
         self.nptv6: Nptv6Mapping | None = None
+        # NAT64 (RFC 6146)
+        self.nat64_inside: set[str] = set()            # iface names
+        self.nat64_outside: str | None = None
+        self._nat64_bindings: list[Nat64Binding] = []
+        self._nat64_next_key = 1024
+        # (proto, outside_key) -> expiry-timer epoch (sequence-guard, same
+        # idiom as _frag_timer_seq/_arp_age_seq/pool.lease_seq).
+        self._nat64_seq: dict[tuple[str, int], int] = {}
         # Services
         self.dhcp_pools: list[DhcpPool] = []
         self.dns_zone: dict[str, IPv4Address] = {}
@@ -689,6 +775,19 @@ class Router(L3Device):
         if not self._acl_permits(self.acl_in.get(iface.name), pkt):
             net.record_drop("acl_deny_in")
             self._send_icmp_error(net, pkt, icmp_type=3, code=13)  # admin prohibited
+            return
+
+        # NAT64 return traffic: an IPv4 reply addressed to this router's own
+        # outside address, for a session a v6-only inside host opened. Fully
+        # handled here (translated + re-injected into the v6 side) — unlike
+        # NAT44 inbound below, there's no "continue forwarding" step in the
+        # same address family to fall through to.
+        if (
+            self.nat64_outside
+            and iface.name == self.nat64_outside
+            and iface.has_ip(pkt.dst)
+            and self._nat64_inbound(net, pkt)
+        ):
             return
 
         # NAT precedes local delivery: traffic arriving on the outside iface
@@ -1069,6 +1168,18 @@ class Router(L3Device):
             return
         pkt.hop_limit -= 1
 
+        # NAT64 outbound: an inside host reaching into the well-known prefix
+        # is leaving the IPv6 realm entirely, so this hop's translation
+        # replaces the rest of the IPv6 forwarding pipeline (route lookup,
+        # NPTv6, ACL-out) with the IPv4 send path instead.
+        if (
+            self.nat64_outside
+            and in_iface.name in self.nat64_inside
+            and pkt.dst in NAT64_WELLKNOWN_PREFIX
+        ):
+            self._nat64_outbound(net, pkt)
+            return
+
         # NPTv6 inbound: destination arriving from outside, addressed into
         # the external prefix, must be translated back to internal *before*
         # route lookup — the route table only knows the internal prefix.
@@ -1360,6 +1471,159 @@ class Router(L3Device):
             inside_ifaces=frozenset(inside),
             outside_iface=outside,
         )
+
+    # ----- NAT64 (RFC 6146) -----------------------------------------------------------------
+    def enable_nat64(self, inside: list[str], outside: str) -> None:
+        """IPv6-only ``inside`` interfaces reach IPv4 through ``outside``, via
+        the RFC 6052 well-known prefix (:data:`NAT64_WELLKNOWN_PREFIX`).
+        Single outside IPv4 address (this router's own ``outside`` interface)
+        — the same PAT model as :meth:`enable_nat`, no separate address pool.
+        # ponytail: no static/inbound port-forward (RFC 6146 allows a
+        # v4-initiated flow too, like NAT44's ``port_forwards``); add if a
+        # lab scenario needs one.
+        """
+        self.nat64_inside = set(inside)
+        self.nat64_outside = outside
+
+    def _nat64_l4_out(
+        self, l4: Icmpv6Message | UdpSegment | TcpSegment | Any
+    ) -> tuple[str, int, IcmpMessage | UdpSegment | TcpSegment] | None:
+        """(v4-side proto name, per-flow key, translated-or-reused L4
+        payload) for an outbound (v6->v4) packet; ``None`` for an ICMPv6
+        type this engine doesn't translate (NDP never reaches here — it's
+        link-local, filtered in ``_on_ipv6`` before ``_forward6`` runs)."""
+        if isinstance(l4, Icmpv6Message):
+            icmp4 = _icmp6_to_icmp4(l4)
+            return None if icmp4 is None else ("icmp", l4.ident, icmp4)
+        if isinstance(l4, UdpSegment):
+            return "udp", l4.src_port, l4
+        if isinstance(l4, TcpSegment):
+            return "tcp", l4.src_port, l4
+        return None
+
+    def _nat64_outbound(self, net: Network, pkt: Ipv6Packet) -> None:
+        dst4 = _nat64_extract(pkt.dst)
+        out_iface = self.interfaces.get(self.nat64_outside)
+        outside_ip = out_iface.ip.ip if out_iface and out_iface.ip else None
+        parsed = self._nat64_l4_out(pkt.payload)
+        if dst4 is None or outside_ip is None or parsed is None:
+            net.record_drop("nat64_untranslatable")
+            return
+        proto, key, payload4 = parsed
+        binding = next(
+            (
+                b
+                for b in self._nat64_bindings
+                if b.inside_ip6 == pkt.src and b.inside_key == key and b.proto == proto
+            ),
+            None,
+        )
+        if binding is None:
+            if self._nat64_next_key > NAT64_MAX_PORT:
+                net.record_drop("nat64_pool_exhausted")
+                return
+            binding = Nat64Binding(
+                inside_ip6=pkt.src,
+                inside_key=key,
+                outside_ip4=outside_ip,
+                outside_key=self._nat64_next_key,
+                proto=proto,
+            )
+            self._nat64_next_key += 1
+            self._nat64_bindings.append(binding)
+        if isinstance(payload4, IcmpMessage):
+            payload4.ident = binding.outside_key
+        else:
+            payload4.src_port = binding.outside_key
+        self._arm_nat64_timer(net, proto, binding.outside_key)
+        ipv4_proto = {"icmp": PROTO_ICMP, "tcp": PROTO_TCP, "udp": PROTO_UDP}[proto]
+        self.send_ip(
+            net,
+            Ipv4Packet(
+                src=binding.outside_ip4, dst=dst4, proto=ipv4_proto,
+                ttl=pkt.hop_limit, payload=payload4,
+            ),
+        )
+
+    def _nat64_inbound(self, net: Network, pkt: Ipv4Packet) -> bool:
+        """Restore the inside IPv6 destination for a NAT64 reply. True if a
+        binding matched — the packet is fully translated and re-injected
+        into the v6 side here, so the caller has nothing left to do."""
+        l4 = pkt.payload
+        if isinstance(l4, IcmpMessage):
+            payload6 = _icmp4_to_icmp6(l4)
+            if payload6 is None:
+                return False
+            key, proto = l4.ident, "icmp"
+        elif isinstance(l4, (UdpSegment, TcpSegment)):
+            payload6, key, proto = l4, l4.dst_port, pkt.proto_name
+        else:
+            return False
+        binding = next(
+            (b for b in self._nat64_bindings if b.proto == proto and b.outside_key == key),
+            None,
+        )
+        if binding is None:
+            return False
+        if pkt.ttl <= 1:
+            net.record_drop("ttl_expired")
+            self._send_icmp_error(net, pkt, icmp_type=11, code=0)
+            return True
+        if isinstance(payload6, Icmpv6Message):
+            payload6.ident = binding.inside_key
+        else:
+            payload6.dst_port = binding.inside_key
+        self._arm_nat64_timer(net, proto, binding.outside_key)
+        self.send_ip6(
+            net,
+            Ipv6Packet(
+                src=_nat64_embed(pkt.src),
+                dst=binding.inside_ip6,
+                proto=PROTO_ICMPV6 if proto == "icmp" else pkt.proto,
+                hop_limit=pkt.ttl - 1,
+                payload=payload6,
+            ),
+        )
+        return True
+
+    def _arm_nat64_timer(self, net: Network, proto: str, outside_key: int) -> None:
+        """(Re)start this session's idle-expiry timer — same sequence-guard
+        idiom as ``_arm_frag_timer``/DHCP's ``_arm_lease_expiry``: a stale
+        callback from a superseded (refreshed, or already-expired-and-reused)
+        generation recognizes itself via the epoch mismatch and no-ops."""
+        key = (proto, outside_key)
+        seq = self._nat64_seq.get(key, 0) + 1
+        self._nat64_seq[key] = seq
+        net.scheduler.schedule_after(
+            NAT64_SESSION_TIMEOUT,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e, k=key, s=seq: self._nat64_expire(k, s),
+                node_id=self.node_id,
+            ),
+        )
+
+    def _nat64_expire(self, key: tuple[str, int], seq: int) -> None:
+        if self._nat64_seq.get(key) != seq:
+            return  # superseded: refreshed by traffic, or already gone
+        self._nat64_seq.pop(key, None)
+        proto, outside_key = key
+        self._nat64_bindings = [
+            b
+            for b in self._nat64_bindings
+            if not (b.proto == proto and b.outside_key == outside_key)
+        ]
+
+    def nat64_rows(self) -> list[dict]:
+        return [
+            {
+                "proto": b.proto,
+                "inside": f"{b.inside_ip6}:{b.inside_key}",
+                "outside": f"{b.outside_ip4}:{b.outside_key}",
+            }
+            for b in self._nat64_bindings
+        ]
 
     # ----- DHCP server --------------------------------------------------------------------
     def add_dhcp_pool(self, pool: DhcpPool) -> None:
