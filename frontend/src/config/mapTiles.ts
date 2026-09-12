@@ -44,44 +44,36 @@ export const MAP_TILES = {
     maxZoom: 19,
     subdomains: 'abc',
   },
-
-  /**
-   * Hybrid — Esri World Imagery satellite base (no overlay).
-   * Best for combining real-world imagery with infrastructure planning.
-   */
-  hybrid: {
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution:
-      'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community',
-    maxZoom: 19,
-  },
-
-  /**
-   * CartoDB Dark Matter — dark basemap optimized for data visualization.
-   * Good for signal coverage heat-map overlays.
-   */
-  dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution:
-      '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/">CARTO</a>',
-    maxZoom: 19,
-    subdomains: 'abcd',
-  },
-
-  /**
-   * OpenTopoMap — topographic map with elevation contours.
-   * Useful for terrain-aware signal propagation planning.
-   */
-  topo: {
-    url: 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',
-    attribution:
-      'Map data: &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors, <a href="http://viewfinderpanoramas.org">SRTM</a> | Map style: &copy; <a href="https://opentopomap.org">OpenTopoMap</a> (<a href="https://creativecommons.org/licenses/by-sa/3.0/">CC-BY-SA</a>)',
-    maxZoom: 17,
-    subdomains: 'abc',
-  },
 } as const satisfies Record<string, TileLayerConfig>;
 
 export type MapTileKey = keyof typeof MAP_TILES;
 
 /** Default tile layer to use on first load. */
 export const DEFAULT_TILE: MapTileKey = 'street';
+
+/**
+ * QA-visual #5 (2026-09-12): the basemap picker was cut from 5 choices down
+ * to these 2 — `hybrid`/`dark`/`topo` are gone from MAP_TILES above. Their
+ * underlying data (hillshade, contour/DEM) is untouched: GisLayerPanel's
+ * terrain group reads its own tile configs straight from config/gisLayers.ts,
+ * which never referenced this file.
+ *
+ * Nothing in the app currently persists `mapLayer` (no project field, no
+ * localStorage — grepped clean), so a stale 'hybrid'/'dark'/'topo' can't
+ * actually reach the store today. This is the safety net anyway, in case a
+ * future save/load path resurrects the field: `normalizeMapLayer` maps each
+ * retired key to its closest surviving basemap instead of an undefined
+ * `MAP_TILES[key]` lookup going through to a blank map.
+ */
+const LEGACY_TILE_FALLBACK: Record<string, MapTileKey> = {
+  hybrid: 'satellite', // same Esri World Imagery URL as `satellite`, exact match
+  dark: 'street',      // closest surviving line-drawn (non-imagery) style
+  topo: 'street',      // closest surviving line-drawn (non-imagery) style
+};
+
+/** Coerce any string to a valid `MapTileKey`, remapping retired basemap keys
+ *  instead of letting an unknown one fall through to a blank map. */
+export function normalizeMapLayer(key: string): MapTileKey {
+  if (key in MAP_TILES) return key as MapTileKey;
+  return LEGACY_TILE_FALLBACK[key] ?? DEFAULT_TILE;
+}

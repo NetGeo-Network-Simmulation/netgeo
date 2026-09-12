@@ -1,14 +1,20 @@
 /**
- * MapLayerSwitcher — basemap selector (Satellite / Street / Hybrid), top-right.
+ * MapLayerSwitcher — basemap selector (Satellite / Street), top-right.
  * Mirrors the UISP Design Center layer toggle, which docks basemap controls
  * top-right instead of colliding with the left-side navigation rail
  * (QA D8 — docs/design/16-UISP-PARITY-PLAN.md). Backed by `mapStore.mapLayer`
  * and the free, key-less providers in `config/mapTiles.ts`.
  *
+ * QA-visual #5 (2026-09-12): cut from 5 choices (Satellite/Street/Hybrid/
+ * Dark/Topo) to just these 2 — Hybrid/Dark/Topo are UI-picker choices only;
+ * their underlying terrain/hillshade/contour DATA stays available to the
+ * engine and to the GIS Layers panel (config/gisLayers.ts), which never
+ * shared these tile configs in the first place.
+ *
  * Sits above MapCounterChips' slot in the top-right stack — see the
  * top-3/top-16/top-28/top-40 rhythm comment in MapView.tsx.
  */
-import { Satellite, Map as MapIcon, Layers, Moon, Mountain } from 'lucide-react';
+import { Satellite, Map as MapIcon } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
 import type { MapTileKey } from '@/config/mapTiles';
 import { cn } from '@/lib/cn';
@@ -17,9 +23,6 @@ import { zc } from '@/theme/z';
 const LAYERS: { key: MapTileKey; label: string; icon: typeof Satellite }[] = [
   { key: 'satellite', label: 'Satellite', icon: Satellite },
   { key: 'street', label: 'Street', icon: MapIcon },
-  { key: 'hybrid', label: 'Hybrid', icon: Layers },
-  { key: 'dark', label: 'Dark', icon: Moon },
-  { key: 'topo', label: 'Topo', icon: Mountain },
 ];
 
 export interface MapLayerSwitcherProps {
