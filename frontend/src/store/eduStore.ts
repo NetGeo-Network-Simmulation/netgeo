@@ -34,6 +34,10 @@ interface EduState {
   selectedId: string | null;
   mode: EduMode;
   draft: ActivityCreate;
+  /** JSON snapshot of `draft` as of the last `selectForAuthor` call — the
+   *  baseline `isDraftDirty` diffs against to warn before an unsaved draft
+   *  is discarded (toBrowse). */
+  draftBaseline: string;
   liveReport: GradeReport | null;
   lastResult: GradeResult | null;
   startedAt: number | null;
@@ -44,6 +48,8 @@ interface EduState {
 
   loadActivities: () => Promise<void>;
   toBrowse: () => void;
+  /** True while in author mode with edits not reflected in `draftBaseline`. */
+  isDraftDirty: () => boolean;
   selectForAuthor: (id: string | null) => void;
   selectForStudent: (id: string) => void;
   updateDraft: (patch: Partial<ActivityCreate>) => void;
@@ -71,6 +77,7 @@ export const useEduStore = create<EduState>((set, get) => ({
   selectedId: null,
   mode: 'browse',
   draft: blankDraft(),
+  draftBaseline: JSON.stringify(blankDraft()),
   liveReport: null,
   lastResult: null,
   startedAt: null,
@@ -90,9 +97,15 @@ export const useEduStore = create<EduState>((set, get) => ({
 
   toBrowse: () => set({ mode: 'browse', selectedId: null, liveReport: null, lastResult: null }),
 
+  isDraftDirty: () => {
+    const s = get();
+    return s.mode === 'author' && JSON.stringify(s.draft) !== s.draftBaseline;
+  },
+
   selectForAuthor: (id) => {
     if (!id) {
-      set({ mode: 'author', selectedId: null, draft: blankDraft(), error: null });
+      const draft = blankDraft();
+      set({ mode: 'author', selectedId: null, draft, draftBaseline: JSON.stringify(draft), error: null });
       return;
     }
     const a = get().activities.find((x) => x.id === id);
@@ -107,7 +120,7 @@ export const useEduStore = create<EduState>((set, get) => ({
           answer: a.answer,
         }
       : blankDraft();
-    set({ mode: 'author', selectedId: id, draft, error: null });
+    set({ mode: 'author', selectedId: id, draft, draftBaseline: JSON.stringify(draft), error: null });
   },
 
   selectForStudent: (id) =>

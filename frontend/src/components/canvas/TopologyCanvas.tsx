@@ -225,7 +225,9 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
   );
 
   const onNodeDragStop: OnNodeDrag<Node<DeviceNodeData>> = useCallback((_e, node) => {
-    void nodesApi.move(node.id, node.position.x, node.position.y).catch(() => {});
+    void nodesApi
+      .move(node.id, node.position.x, node.position.y)
+      .catch(() => setMutationError('Failed to save the new position — it may revert on reload.'));
   }, []);
 
   /* --- Auto-layout (E3): explicit, destructive, never runs on its own ------ */
@@ -240,10 +242,17 @@ export function TopologyCanvas({ topLeftExtra }: { topLeftExtra?: ReactNode } = 
       confirmLabel: 'Auto-layout',
       onConfirm: () => {
         const positions = hierarchyLayout(Array.from(nodesMap.values()), Array.from(linksMap.values()));
-        for (const [id, pos] of positions) {
-          moveNode(id, pos.x, pos.y);
-          void nodesApi.move(id, pos.x, pos.y).catch(() => {});
-        }
+        for (const [id, pos] of positions) moveNode(id, pos.x, pos.y);
+        void Promise.allSettled(
+          Array.from(positions, ([id, pos]) => nodesApi.move(id, pos.x, pos.y)),
+        ).then((results) => {
+          const failed = results.filter((r) => r.status === 'rejected').length;
+          if (failed > 0) {
+            setMutationError(
+              `Auto-layout applied, but ${failed} node position${failed === 1 ? '' : 's'} failed to save — they may revert on reload.`,
+            );
+          }
+        });
       },
     });
   }, [nodesMap, linksMap, moveNode]);

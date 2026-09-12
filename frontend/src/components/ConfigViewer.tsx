@@ -86,8 +86,9 @@ export function ConfigViewer() {
         </button>
         <button
           onClick={regenerate}
+          disabled={loading}
           aria-label="Regenerate config"
-          className="grid h-7 w-7 place-items-center rounded text-fg/70 hover:bg-fg/10"
+          className="grid h-7 w-7 place-items-center rounded text-fg/70 hover:bg-fg/10 disabled:opacity-40"
         >
           <RefreshCw className={cn('h-4 w-4', loading && 'animate-spin')} />
         </button>

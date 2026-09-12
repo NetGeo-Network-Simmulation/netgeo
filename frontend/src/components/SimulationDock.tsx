@@ -8,7 +8,7 @@
  */
 import { useEffect, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ListVideo, Pause, Play, RotateCcw, SkipBack, SkipForward } from 'lucide-react';
+import { AlertTriangle, ListVideo, Pause, Play, RotateCcw, SkipBack, SkipForward } from 'lucide-react';
 import { labApi } from '@/api/client';
 import { useLabStore } from '@/store/labStore';
 import { useUiStore } from '@/store/uiStore';
@@ -40,6 +40,16 @@ export function SimulationDock() {
   const ledgerOpen = useUiStore((s) => s.drawerOpen && s.drawerTab === 'ledger');
   const qc = useQueryClient();
   const [playing, setPlaying] = useState(false);
+  const [seekError, setSeekError] = useState<string | null>(null);
+
+  // Visible, auto-dismissing — mirrors MapView's MapNotice idiom (transient
+  // pill above a floating control), the closest existing pattern to this
+  // dock (SimulationDock has no banner slot of its own).
+  useEffect(() => {
+    if (!seekError) return;
+    const t = setTimeout(() => setSeekError(null), 4000);
+    return () => clearTimeout(t);
+  }, [seekError]);
 
   const q = useQuery({
     queryKey: ['ledger', projectId],
@@ -62,9 +72,14 @@ export function SimulationDock() {
   const seek = useMutation({
     mutationFn: (seq: number) => labApi.seek(projectId!, seq),
     onSuccess: (d) => {
+      setSeekError(null);
       setMode(d.mode);
       setCursor(d.seq);
       refresh();
+    },
+    onError: (e) => {
+      console.error('seek failed', e);
+      setSeekError('Failed to jump to that point in the simulation.');
     },
   });
 
@@ -84,7 +99,16 @@ export function SimulationDock() {
   }, [playing, busy, speed]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
-    <div className={cn('pointer-events-auto fixed bottom-24 left-1/2 -translate-x-1/2', zc.dock)}>
+    <>
+      {seekError && (
+        <div className={cn('pointer-events-none fixed bottom-[172px] left-1/2 -translate-x-1/2', zc.toast)}>
+          <div className="glass-strong flex items-center gap-2 rounded-full border border-danger/40 px-4 py-1.5 text-xs text-danger shadow-glass">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            {seekError}
+          </div>
+        </div>
+      )}
+      <div className={cn('pointer-events-auto fixed bottom-24 left-1/2 -translate-x-1/2', zc.dock)}>
       <div className="glass-strong flex items-center gap-1 rounded-full border border-fg/15 px-2 py-1.5 shadow-dock">
         <DockBtn
           label="Restart"
@@ -161,7 +185,8 @@ export function SimulationDock() {
           <ListVideo className="h-4 w-4" />
         </DockBtn>
       </div>
-    </div>
+      </div>
+    </>
   );
 }
 

@@ -9,10 +9,11 @@
  * duplicated. A segmented Author|Student switch appears only once a saved activity
  * is selected: that shared selection is what makes this one workspace, not two.
  */
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowLeft, PenLine, GraduationCap } from 'lucide-react';
 import { TopologyCanvas } from '@/components/canvas/TopologyCanvas';
 import { useEduStore } from '@/store/eduStore';
+import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
 import { cn } from '@/lib/cn';
 import { ActivityListPanel } from './ActivityListPanel';
 import { ActivityAuthorPanel } from './ActivityAuthorPanel';
@@ -52,19 +53,37 @@ function EduModeBar() {
   const mode = useEduStore((s) => s.mode);
   const selectedId = useEduStore((s) => s.selectedId);
   const toBrowse = useEduStore((s) => s.toBrowse);
+  const isDraftDirty = useEduStore((s) => s.isDraftDirty);
   const selectForAuthor = useEduStore((s) => s.selectForAuthor);
   const selectForStudent = useEduStore((s) => s.selectForStudent);
+  const [confirmLeave, setConfirmLeave] = useState(false);
+
+  const handleBack = () => (isDraftDirty() ? setConfirmLeave(true) : toBrowse());
 
   return (
     <div className="flex items-center gap-2">
       <button
-        onClick={toBrowse}
+        onClick={handleBack}
         aria-label="Back to activities"
         className="glass-strong inline-flex items-center gap-1.5 rounded-lg border border-fg/15 px-2.5 py-1.5 text-xs font-medium text-fg/80 shadow-glass hover:text-fg"
       >
         <ArrowLeft className="h-3.5 w-3.5" />
         <span className="hidden sm:inline">Activities</span>
       </button>
+
+      {confirmLeave && (
+        <ConfirmDialog
+          title="Discard unsaved activity?"
+          message="This activity draft has unsaved changes. Leaving now will discard them."
+          confirmLabel="Discard"
+          danger
+          onConfirm={() => {
+            setConfirmLeave(false);
+            toBrowse();
+          }}
+          onCancel={() => setConfirmLeave(false)}
+        />
+      )}
 
       {selectedId && (
         <div
