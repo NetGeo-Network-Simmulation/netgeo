@@ -63,7 +63,9 @@ async def import_archive(body: dict, r: Annotated[MemoryRepository, Depends(repo
 @router.get("/projects/{project_id}")
 async def get_project(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:
-        proj = await r.get_project(project_id)
+        # N-6b: go through topology() (not get_project()) so `mode` reflects
+        # the project's actual nodes — see derive_project_mode.
+        proj = (await r.topology(project_id)).project
     except StoreNotFound as exc:
         raise translate_not_found(exc) from exc
     # NG-N6: capabilities is derived from `mode`, not stored — see
