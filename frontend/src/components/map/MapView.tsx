@@ -2329,17 +2329,19 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
             show it only when that layer is on, so it doesn't float over the
             top bar/popovers. */}
         {coverageVisible && <GradientLegend />}
-        {/* GIS toggle, GIS panel, device panel, and (QA-visual #3/#4) the signal
-            legend used to share/collide across fixed `top-N` slots and paint
-            over each other whenever more than one was open at once (QA:
-            "masih banyak ui yang tumpang tindih"). A flex column stacks them
-            by real rendered height instead of guessed pixel offsets, so any
-            combination — including the GIS panel fully expanded with every
-            group open — scrolls within its own reserved slot instead of
-            spilling onto its neighbors. MapCounterChips (top-3) and
+        {/* GIS toggle, GIS panel, device panel, and signal legend stack by real
+            rendered height instead of guessed pixel offsets (QA:
+            "masih banyak ui yang tumpang tindih"). MapCounterChips (top-3) and
             MapLayerSwitcher (top-16) sit above this column's top-40 start and
-            are unaffected. */}
-        <div className={cn('pointer-events-none absolute right-4 top-40 flex max-h-[calc(100%-11rem)] flex-col items-end gap-2 overflow-y-auto', zc.workspace)}>
+            are unaffected.
+            QA-visual #1 (2026-09-12): the column itself never scrolls — the
+            basemap switcher stays up top (separate, above), the signal legend
+            stays at the bottom, and GIS Layers sits between. GisLayerPanel
+            already caps itself at max-h-70vh with its own internal scroll
+            (see GisLayerPanel.tsx), so that's the only thing that scrolls if
+            the combined stack ever doesn't fit — the outer column no longer
+            adds a second, redundant scroll region on top of it. */}
+        <div className={cn('pointer-events-none absolute right-4 top-40 flex flex-col items-end gap-2', zc.workspace)}>
           <GisLayerToggle />
           <GisLayerPanel />
           {!rfMode && <MapDevicePanel />}
