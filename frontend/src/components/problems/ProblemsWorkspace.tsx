@@ -291,27 +291,11 @@ export function ProblemsWorkspace() {
         {/* Header — no page title: the Problems tab in TopBar's sub-nav
             already carries this page's identity, so an in-page h1 was a
             duplicate (root gets aria-label="Problem Center" above instead). */}
-        <div className="flex flex-col gap-4 border-b border-fg/10 bg-panel pt-5 pr-6 pb-4 pl-[116px]">
-          <div className="flex items-center justify-end gap-3">
-            <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
-              <Search className="h-4 w-4 text-fg/40" aria-hidden />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search nodes, problems…"
-                aria-label="Search problems"
-                className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
-              />
-            </label>
-            <button
-              onClick={ackAll}
-              disabled={counts.all === 0}
-              className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-            >
-              Acknowledge all
-            </button>
-          </div>
-          {/* Filter chips */}
+        <div className="flex flex-col gap-3 border-b border-fg/10 bg-panel pt-4 pr-6 pb-4 pl-[116px]">
+          {/* Filter chips lead the header — first row, so this row sits at
+              the top-left of the content area right after the minimum
+              pt-4/pl-[116px] inset (Surya's QA: the chip row read as too far
+              from the corner when it followed the search/acknowledge row). */}
           <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
             <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
             <FilterChip
@@ -338,6 +322,25 @@ export function ProblemsWorkspace() {
               icon={Info}
               tone="text-accent"
             />
+          </div>
+          <div className="flex items-center justify-end gap-3">
+            <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
+              <Search className="h-4 w-4 text-fg/40" aria-hidden />
+              <input
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search nodes, problems…"
+                aria-label="Search problems"
+                className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
+              />
+            </label>
+            <button
+              onClick={ackAll}
+              disabled={counts.all === 0}
+              className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+            >
+              Acknowledge all
+            </button>
           </div>
         </div>
 
