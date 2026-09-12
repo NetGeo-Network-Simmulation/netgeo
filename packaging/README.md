@@ -42,11 +42,36 @@ This is a **kerangka** — the simplest thing that runs, not a finished product.
   installer) is a disabled (`if: false`) stub step — no credentials of any
   kind are in this repo.
 
-## System prerequisites (Linux native window)
+## Native window backend: Qt/PySide6 (bundled), GTK (system, fallback)
 
-`launcher.py` opens NetGeo in a native window via `pywebview` (WebKitGTK).
-That needs system packages — **not** installed by pip — that may not be on
-a minimal machine:
+`launcher.py` opens NetGeo in a native window via `pywebview`. As of the
+native-window slice, the packaged (PyInstaller/AppImage/installer) build
+forces `PYWEBVIEW_GUI=qt` and ships its own Qt runtime: `packaging/
+requirements.txt` pulls `pywebview[pyside6]` (PySide6 + QtPy), and
+`netgeo.spec` lists the concrete `PySide6.QtWebEngine*` submodules as
+`hiddenimports` so PyInstaller runs its own bundled
+`hook-PySide6.QtWebEngineCore.py` — this collects the QtWebEngineProcess
+helper binary, Qt resources and translations straight into the onedir
+bundle. No system package is required for this path; it's a genuinely
+self-contained window, not a system dependency the user has to install.
+
+**Why not GTK (the previous attempt)?** Proven dead end, not a guess:
+PyInstaller ships zero hooks for `gi`/PyGObject — nothing in this pipeline
+collects `.typelib` files or the WebKitGTK shared-library tree, so even with
+`gi` importable at build time the bundle would still need to resolve those
+from system paths at runtime, which varies by distro and CPython minor
+version (see the older investigation below). Qt/PySide6 has none of that:
+the wheel is self-contained and PyInstaller's own hooks (verified present in
+`pyinstaller==6.22.2`'s `hooks/` directory) already know how to collect it in
+full — the same reason nearly every PyInstaller+"native window" tutorial
+uses Qt, not GTK.
+
+GTK stays as a **secondary, system-provided fallback**: `_try_webview()`'s
+`PYWEBVIEW_GUI` `setdefault` still lets a source-run dev override to `gtk`,
+and if Qt itself fails to start (missing base X11/OpenGL libs on a very
+minimal system), pywebview's own guilib still tries GTK next before giving
+up — at which point `launcher.py` falls back to the system browser exactly
+as before, logging why:
 
 ```bash
 # Fedora

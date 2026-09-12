@@ -57,6 +57,20 @@ jobs:
             backend/requirements.txt
             packaging/requirements.txt
 
+      # PySide6 (native window backend) is a compiled Qt build — PyInstaller's
+      # Analysis step must actually `import PySide6.QtWebEngineWidgets` to
+      # find it, which dlopen()s libQt6*.so and pulls in base X11/OpenGL libs
+      # this runner image doesn't ship by default. Without these the build
+      # itself fails at Analysis, not just at runtime.
+      - name: Install Qt runtime libs (Linux, for PySide6 import at build time)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libgl1 libegl1 libxkbcommon0 libxcb-cursor0 libnss3 \
+            libxcomposite1 libxdamage1 libxrandr2 libxtst6 libasound2 \
+            libatspi2.0-0
+
       - name: Install backend + packaging dependencies
         run: |
           python -m pip install --upgrade pip
