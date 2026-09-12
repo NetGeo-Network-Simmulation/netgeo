@@ -10,6 +10,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { Radio as RadioIcon } from 'lucide-react';
 import { nodesApi } from '@/api/client';
 import type { NodeMountType, UnrackedNode } from '@/api/types';
+import { Select } from '@/components/ui/Select';
 import { cn } from '@/lib/cn';
 
 const MOUNT_TYPES: NodeMountType[] = ['pole', 'wall', 'strand', 'ground', 'ceiling'];
@@ -48,20 +49,19 @@ export function UnrackedDevicesPanel({
         {nodes.map((n) => (
           <div key={n.id} className="flex flex-wrap items-center gap-1.5">
             <span className="min-w-0 flex-1 truncate text-fg">{n.name}</span>
-            <select
+            <Select
               aria-label={`Tipe mount untuk ${n.name}`}
-              className={cn(fieldCls, 'w-28')}
+              className="w-28"
               value={n.mount?.type ?? ''}
-              onChange={(e) => {
-                const type = e.target.value as NodeMountType | '';
+              onChange={(v) => {
+                const type = v as NodeMountType | '';
                 patchMount.mutate({ nodeId: n.id, type, heightAglM: n.mount?.height_agl_m ?? null });
               }}
-            >
-              <option value="">(belum dipasang)</option>
-              {MOUNT_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
+              options={[
+                { value: '', label: '(belum dipasang)' },
+                ...MOUNT_TYPES.map((t) => ({ value: t, label: t })),
+              ]}
+            />
             <input
               type="number"
               aria-label={`Tinggi AGL (m) untuk ${n.name}`}
