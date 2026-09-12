@@ -113,10 +113,11 @@ class Switch(Device):
         name: str,
         node_id: str | None = None,
         nos: str = "forgeos",
+        mode: str = "sim",
         stp_enabled: bool = True,
         priority: int = 32768,
     ) -> None:
-        super().__init__(name, node_id, nos)
+        super().__init__(name, node_id, nos, mode)
         self.stp_enabled = stp_enabled
         self.priority = priority
         # (vlan, mac) -> iface name

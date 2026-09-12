@@ -110,14 +110,15 @@ def build_network(topo: Topology, seed: int = 0) -> Network:
 
     for n in topo.nodes:
         kind = str(n.kind)
+        mode = str(n.mode)
         if kind in _L2_KINDS:
-            dev: Device = Switch(n.name, node_id=n.id, nos=str(n.nos))
+            dev: Device = Switch(n.name, node_id=n.id, nos=str(n.nos), mode=mode)
         elif kind == "firewall":
-            dev = Firewall(n.name, node_id=n.id, nos=str(n.nos))
+            dev = Firewall(n.name, node_id=n.id, nos=str(n.nos), mode=mode)
         elif kind in _HOST_KINDS:
-            dev = Host(n.name, node_id=n.id, nos=str(n.nos))
+            dev = Host(n.name, node_id=n.id, nos=str(n.nos), mode=mode)
         else:  # router and anything router-like
-            dev = Router(n.name, node_id=n.id, nos=str(n.nos))
+            dev = Router(n.name, node_id=n.id, nos=str(n.nos), mode=mode)
         net.add_device(dev)
 
         intent = n.intent or {}
