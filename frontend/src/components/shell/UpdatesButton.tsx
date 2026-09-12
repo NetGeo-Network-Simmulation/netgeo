@@ -16,6 +16,7 @@ import {
   type UpdateStatus,
 } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
+import { ConfirmDialog } from './ConfirmDialog';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
 
@@ -120,14 +121,12 @@ export function UpdatesButton() {
     return () => document.removeEventListener('mousedown', handler);
   }, [open, closeModal]);
 
-  const apply = useCallback(async () => {
-    // The admin session authorises the update; only prompt for the extra
-    // shared secret when the backend says one is configured.
-    let token: string | undefined;
-    if (info?.token_required) {
-      token = window.prompt('Enter the update token (UPDATE_TOKEN) to apply:') ?? undefined;
-      if (!token) return;
-    }
+  // QA-visual #2: the shared secret is typed into a themed dialog (password
+  // field, never logged) instead of window.prompt — `runApply` is the actual
+  // work, deferred behind `tokenPrompt` when the backend requires a token.
+  const [tokenPrompt, setTokenPrompt] = useState(false);
+
+  const runApply = useCallback(async (token?: string) => {
     setBusy(true);
     try {
       setStatus(await updateApi.apply(token));
@@ -151,7 +150,14 @@ export function UpdatesButton() {
     } finally {
       setBusy(false);
     }
-  }, [info?.token_required]);
+  }, []);
+
+  const apply = useCallback(() => {
+    // The admin session authorises the update; only prompt for the extra
+    // shared secret when the backend says one is configured.
+    if (info?.token_required) setTokenPrompt(true);
+    else void runApply();
+  }, [info?.token_required, runApply]);
 
   const available = info?.update_available ?? false;
   // We are mid-check with nothing to show yet — distinct from "up to date".
@@ -218,7 +224,7 @@ export function UpdatesButton() {
                 </p>
               )}
               <button
-                onClick={() => void apply()}
+                onClick={apply}
                 disabled={busy || info?.can_apply === false}
                 className="mt-3 flex w-full items-center justify-center gap-2 rounded-md bg-accent px-3 py-1.5 font-medium text-accent-fg disabled:opacity-50"
               >
@@ -254,6 +260,20 @@ export function UpdatesButton() {
             </p>
           )}
         </div>
+      )}
+
+      {tokenPrompt && (
+        <ConfirmDialog
+          title="Update token required"
+          message="This backend requires the shared UPDATE_TOKEN to apply an update."
+          confirmLabel="Apply update"
+          passwordLabel="Update token"
+          onConfirm={(token) => {
+            setTokenPrompt(false);
+            if (token) void runApply(token);
+          }}
+          onCancel={() => setTokenPrompt(false)}
+        />
       )}
     </div>
   );
