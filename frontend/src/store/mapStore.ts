@@ -32,7 +32,7 @@ import { create } from 'zustand';
 import type { LosStatus } from '@/services/signalSim';
 import type { GeoResult } from '@/services/geocodeService';
 import type { MapTileKey } from '@/config/mapTiles';
-import { DEFAULT_TILE } from '@/config/mapTiles';
+import { DEFAULT_TILE, normalizeMapLayer } from '@/config/mapTiles';
 import { GIS_LAYERS } from '@/config/gisLayers';
 import { wirelessApi } from '@/api/client';
 
@@ -250,7 +250,10 @@ interface MapState {
   selectDevice: (id: string | null) => void;
   setTool: (tool: MapTool) => void;
   dismissOnboarding: () => void;
-  setMapLayer: (layer: MapTileKey) => void;
+  /** Accepts `string`, not just `MapTileKey` — normalizes a retired basemap
+   *  key (see config/mapTiles.ts's `normalizeMapLayer`) instead of trusting
+   *  the caller's type at runtime. */
+  setMapLayer: (layer: string) => void;
   setRainRate: (rate: number) => void;
   setCheckingLos: (v: boolean) => void;
   updateLinkLos: (linkId: string, los: LosStatus, obstructionDb: number) => void;
@@ -355,7 +358,7 @@ export const useMapStore = create<MapState>((set, get) => ({
   selectDevice: (id) => set({ selectedDeviceId: id }),
   setTool: (tool) => set({ tool }),
   dismissOnboarding: () => set({ showOnboarding: false }),
-  setMapLayer: (mapLayer) => set({ mapLayer }),
+  setMapLayer: (layer) => set({ mapLayer: normalizeMapLayer(layer) }),
   setRainRate: (rainRate) => {
     set({ rainRate });
     get().rebuildLinks();
