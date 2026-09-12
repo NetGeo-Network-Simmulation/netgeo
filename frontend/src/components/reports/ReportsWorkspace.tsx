@@ -141,7 +141,7 @@ export function ReportsWorkspace() {
           less width this column and the cards column on the right both
           claim, the more is left for the document in the middle. */}
       <div className="flex w-[300px] shrink-0 flex-col border-r border-fg/10 bg-panel">
-        <div className="flex flex-col gap-2 py-6 pr-6 pl-[116px]">
+        <div className="flex flex-col gap-2 pt-4 pr-4 pb-4 pl-[116px]">
           <button
             onClick={() => window.print()}
             disabled={!canDownload}
@@ -177,9 +177,17 @@ export function ReportsWorkspace() {
           old 2-column grid so the document keeps most of the width. No page
           title either — the Reports tab in TopBar's sub-nav already carries
           this page's identity (root gets aria-label="Reports Center" above
-          instead). */}
+          instead). `p-4` matches the left column's inset so both rails start
+          their content at the same 16px offset from the corner instead of
+          the old py-6/pr-6 (24px) that made the left column read as
+          centered rather than pinned. flex-1 + min-h-0 here sizes this as a
+          SCROLL VIEWPORT (needed so 4 cards never overflow a short window),
+          not a stretch target — cards pack at the default flex-start (top)
+          with no h-full/justify-between on them or on this wrapper, so any
+          leftover height stays empty below the cards, never divided into
+          them. */}
       <div className="flex w-[300px] shrink-0 flex-col border-l border-fg/10 bg-panel">
-        <div className="ng-scroll flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-4">
+        <div className="ng-scroll flex min-h-0 flex-1 flex-col justify-start gap-3 overflow-y-auto p-4">
           {REPORTS.map((r) => (
             <ReportCard key={r.id} report={r} active={r.id === selected} onSelect={() => r.available && setSelected(r.id)} />
           ))}
