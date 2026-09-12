@@ -71,6 +71,25 @@ def test_main_help_flag_prints_and_exits_without_serving(monkeypatch, capsys):
     assert "serving on" not in out
 
 
+def test_no_window_reason_flag_and_env(monkeypatch):
+    """--no-window and NETGEO_NO_WINDOW=1 both trigger the headless-by-request
+    path (distribution variant #4); neither present -> None (try the window)."""
+    monkeypatch.delenv("NETGEO_NO_WINDOW", raising=False)
+    assert launcher._no_window_reason(["--no-window"]) == "--no-window"
+    assert launcher._no_window_reason([]) is None
+
+    monkeypatch.setenv("NETGEO_NO_WINDOW", "1")
+    assert launcher._no_window_reason([]) == "NETGEO_NO_WINDOW=1"
+
+
+def test_help_flag_documents_no_window(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--help"])
+    launcher.main()
+    out = capsys.readouterr().out
+    assert "--no-window" in out
+    assert "NETGEO_NO_WINDOW" in out
+
+
 def test_try_webview_succeeds_when_backend_available(monkeypatch):
     """Sanity check the happy path too: start() returning normally -> True."""
     fake_webview = type(sys)("webview")
