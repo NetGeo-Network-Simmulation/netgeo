@@ -12,7 +12,7 @@ bukan selisih yang kami maklumi.*
 
 [![CI](https://github.com/NetGeo-Network-Simmulation/netgeo/actions/workflows/backend.yml/badge.svg)](https://github.com/NetGeo-Network-Simmulation/netgeo/actions)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Version](https://img.shields.io/badge/version-1.2.123-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.124-brightgreen)
 ![Channel](https://img.shields.io/badge/channel-beta-blueviolet)
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![React](https://img.shields.io/badge/react-18-61dafb)
@@ -51,17 +51,32 @@ membawa runtime Qt sendiri. Itu bukan bug yang perlu "dioptimasi".
 
 ### Unduh rilis (jalur tercepat)
 
-Ambil aset dari tag terbaru di [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.123):
+Ambil aset dari tag terbaru di [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.124):
 
 | Aset | Ukuran | Apa isinya |
 |---|---|---|
 | `NetGeo-x86_64.AppImage` | 231.6 MB | Window Qt native, Linux, tanpa langkah instalasi — `chmod +x`, jalankan |
-| `netgeo-1.2.123-setup.exe` | 157.9 MB | Installer Windows, window native — **sudah dibangun, belum pernah diuji jalan di Windows asli** |
+| `netgeo_1.2.124_amd64.deb` | — | Debian/Ubuntu, `apt` yang pasang dependensi Qt |
+| `netgeo-1.2.124-1.x86_64.rpm` | — | Fedora/RHEL, `dnf` yang pasang dependensi Qt |
+| `netgeo-1.2.124-setup.exe` | 157.9 MB | Installer Windows, window native — **sudah dibangun, belum pernah diuji jalan di Windows asli** |
 | `netgeo-linux-x86_64.tar.gz` | 253.5 MB | Bundle onedir, Linux, extract lalu jalankan `netgeo` |
 
-Ketiganya sama-sama lewat jalur window native (bentuk #1/#2/#3 di atas, minus bagian yang belum
-dibangun). Jadi hari ini perilakunya persis bentuk #4: backend lokal, peta online. Isi tiap aset
-dan cara buildnya ada di `packaging/README.md`.
+Ketiganya (AppImage, exe, tarball) sama-sama lewat jalur window native (bentuk #1/#2/#3 di atas,
+minus bagian yang belum dibangun). Jadi hari ini perilakunya persis bentuk #4: backend lokal, peta
+online. Isi tiap aset dan cara buildnya ada di `packaging/README.md`.
+
+Punya Fedora, RHEL, Debian, atau Ubuntu? Pakai `.deb`/`.rpm`, bukan AppImage. Paket ini
+mendaftarkan dependensinya, jadi `apt`/`dnf` yang pasang runtime Qt/QtWebEngine buat kamu —
+bukan kamu yang bawa semuanya sendiri seperti AppImage.
+
+```
+sudo apt install ./netgeo_1.2.124_amd64.deb    # Debian, Ubuntu
+sudo dnf install ./netgeo-1.2.124-1.x86_64.rpm # Fedora, RHEL
+```
+
+Copot lewat `apt remove netgeo` / `dnf remove netgeo` kapan saja — keduanya cuma menghapus file
+yang mereka pasang sendiri di `/opt` dan `/usr`, tidak pernah menyentuh `~/.config/netgeo/`, jadi
+peta offline kamu aman.
 
 ### Instalasi Docker / server (bentuk #5 — online penuh)
 
