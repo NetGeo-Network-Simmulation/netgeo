@@ -4,9 +4,8 @@
 # Builds the PyInstaller all-in-one bundle (D1 edition, docs/design/13) for
 # Windows and Linux, wraps it into an install-ready artifact per platform
 # (Windows: Inno Setup .exe installer; Linux: tarball + packaging/linux/
-# install.sh + AppImage), and uploads both the raw onedir bundle and the
-# wrapped artifacts. No .deb/.rpm yet — that remains a later track. No
-# signing yet — see the stub step below.
+# install.sh + AppImage + .deb + .rpm), and uploads both the raw onedir
+# bundle and the wrapped artifacts. No signing yet — see the stub step below.
 #
 # Trigger: manual + release tags only (not every push — desktop builds are
 # comparatively expensive wall-clock).
@@ -69,7 +68,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libgl1 libegl1 libxkbcommon0 libxcb-cursor0 libnss3 \
             libxcomposite1 libxdamage1 libxrandr2 libxtst6 libasound2 \
-            libatspi2.0-0
+            libatspi2.0-0 rpm
 
       - name: Install backend + packaging dependencies
         run: |
@@ -156,6 +155,30 @@ jobs:
           path: packaging/NetGeo-x86_64.AppImage
           if-no-files-found: error
 
+      - name: Build Linux .deb package
+        if: matrix.os == 'ubuntu-22.04'
+        run: ./packaging/linux/build-deb.sh packaging/dist/netgeo
+
+      - name: Upload Linux .deb package
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgeo-deb-linux-unsigned
+          path: packaging/*.deb
+          if-no-files-found: error
+
+      - name: Build Linux .rpm package
+        if: matrix.os == 'ubuntu-22.04'
+        run: ./packaging/linux/build-rpm.sh packaging/dist/netgeo
+
+      - name: Upload Linux .rpm package
+        if: matrix.os == 'ubuntu-22.04'
+        uses: actions/upload-artifact@v4
+        with:
+          name: netgeo-rpm-linux-unsigned
+          path: packaging/*.rpm
+          if-no-files-found: error
+
       # -----------------------------------------------------------------
       # Windows code signing — SIGNPATH STUB, NOT WIRED UP.
       #
@@ -203,6 +226,16 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: netgeo-appimage-linux-unsigned
+          path: dist-release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: netgeo-deb-linux-unsigned
+          path: dist-release
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: netgeo-rpm-linux-unsigned
           path: dist-release
 
       - uses: softprops/action-gh-release@f3cad8bcbf209fe591aa1823e372c5d96b7fc800 # v2.3.1
