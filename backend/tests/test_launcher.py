@@ -90,6 +90,39 @@ def test_help_flag_documents_no_window(monkeypatch, capsys):
     assert "NETGEO_NO_WINDOW" in out
 
 
+def test_run_webview_in_subprocess_true_on_clean_exit(monkeypatch):
+    """Child process exits 0 (window opened and closed normally) -> True."""
+    monkeypatch.setattr(launcher, "_relaunch_argv", lambda: [sys.executable, "-c", "pass"])
+    assert launcher._run_webview_in_subprocess("http://127.0.0.1:1") is True
+
+
+def test_run_webview_in_subprocess_false_and_no_raise_on_sigabrt(monkeypatch, capsys):
+    """A child that dies from a signal (the real bug: Qt SIGABRT when no
+    GL/EGL/GLX/Vulkan surface is available) must not crash the parent — it
+    reports False and names the signal, same as any other native failure."""
+    abort_script = "import os, signal; os.kill(os.getpid(), signal.SIGABRT)"
+    monkeypatch.setattr(launcher, "_relaunch_argv", lambda: [sys.executable, "-c", abort_script])
+    ok = launcher._run_webview_in_subprocess("http://127.0.0.1:1")
+    assert ok is False
+    assert "SIGABRT" in capsys.readouterr().err
+
+
+def test_window_child_flag_runs_try_webview_and_exits(monkeypatch):
+    """`--window-child <url>` must call _try_webview(url) and exit via its
+    result, without mounting the frontend or starting uvicorn."""
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--window-child", "http://x"])
+    monkeypatch.setattr(launcher, "_try_webview", lambda url: url == "http://x")
+    monkeypatch.setattr(launcher, "_mount_frontend", lambda: (_ for _ in ()).throw(
+        AssertionError("--window-child must not mount/serve anything")
+    ))
+    try:
+        launcher.main()
+    except SystemExit as exc:
+        assert exc.code == 0
+    else:
+        raise AssertionError("--window-child must call sys.exit()")
+
+
 def test_try_webview_succeeds_when_backend_available(monkeypatch):
     """Sanity check the happy path too: start() returning normally -> True."""
     fake_webview = type(sys)("webview")
