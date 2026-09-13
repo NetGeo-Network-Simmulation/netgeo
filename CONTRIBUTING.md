@@ -37,7 +37,7 @@ cd frontend && npm run typecheck && npm run build
 
 `ruff` ada di `backend/requirements.txt` (bagian dev/test), jadi `pip install -r requirements.txt` di atas sudah mencakupnya.
 
-CI di GitHub Actions menjalankan hal yang sama di tiap PR — PR yang gagal CI tidak di-merge.
+CI di GitHub Actions menjalankan pengecekan yang sama di tiap PR — gagal CI, PR-nya tidak di-merge.
 
 ### Tes jalur emulasi NOS (marker `podman`)
 
