@@ -15,7 +15,9 @@ Smoke:  curl http://127.0.0.1:<port>/api/health
 from __future__ import annotations
 
 import os
+import signal
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -95,6 +97,14 @@ def _try_webview(url: str) -> bool:
     # so a source-run dev with only system GTK installed can still force it
     # back with PYWEBVIEW_GUI=gtk.
     os.environ.setdefault("PYWEBVIEW_GUI", "qt")
+    # ponytail: forces Qt's own compositor (QRhi) to a CPU rasterizer instead
+    # of probing EGL/GLX/Vulkan/GBM. Confirmed empirically (2026-09-13, this
+    # bug) on Fedora 44 Wayland with no EGL surface available: without this,
+    # Qt fails RHI init and QtWebEngine never renders (or the process aborts
+    # outright); with it, the window opens and WebEngine renders normally
+    # (falls back to Chromium's --disable-gpu-compositing on its own).
+    # setdefault so a machine that *does* have working GL can override back.
+    os.environ.setdefault("QT_QUICK_BACKEND", "software")
     try:
         import webview
     except ImportError as exc:
@@ -119,6 +129,42 @@ def _try_webview(url: str) -> bool:
         print(_webview_unavailable(exc), file=sys.stderr)
         return False
     return True
+
+
+def _relaunch_argv() -> list[str]:
+    """Command to re-invoke this same launcher as a child process (frozen
+    PyInstaller build: the bundled exe itself; source run: the interpreter
+    plus this file)."""
+    if FROZEN:
+        return [sys.executable]
+    return [sys.executable, str(Path(__file__).resolve())]
+
+
+def _run_webview_in_subprocess(url: str) -> bool:
+    """Try the native window in a child process, not this one.
+
+    Qt can die with SIGABRT when it can't build a usable GL/EGL/GLX/Vulkan
+    surface (confirmed on this bug: happens on plain Wayland with no EGL,
+    and again — worse — when QT_QPA_PLATFORM=xcb is forced). A SIGABRT
+    kills the process before any Python try/except runs, so it cannot be
+    caught in-process. Running the window in a child process means only the
+    child dies; this (parent) process — and the uvicorn thread it's about
+    to start — is untouched and can fall back to the browser normally.
+    """
+    try:
+        result = subprocess.run(_relaunch_argv() + ["--window-child", url])
+    except OSError as exc:
+        print(_webview_unavailable(exc), file=sys.stderr)
+        return False
+    if result.returncode == 0:
+        return True
+    if result.returncode < 0:
+        sig = signal.Signals(-result.returncode).name
+        reason = f"jendela asli dihentikan paksa oleh sinyal {sig} (kemungkinan driver grafis tidak sanggup membuat context GL/EGL/GLX/Vulkan)"
+    else:
+        reason = f"jendela asli keluar dengan kode {result.returncode}"
+    print(_webview_unavailable(RuntimeError(reason)), file=sys.stderr)
+    return False
 
 
 def _no_window_reason(args: list[str]) -> str | None:
@@ -172,6 +218,13 @@ def main() -> None:
     if "--help" in args or "-h" in args:
         _print_help()
         return
+    if "--window-child" in args:
+        # ponytail: internal-only re-exec target for _run_webview_in_
+        # subprocess — undocumented on purpose, never typed by a user.
+        # Isolated here (before mounting/serving anything) so this process
+        # does nothing but try the window and report success via exit code.
+        url = args[args.index("--window-child") + 1]
+        sys.exit(0 if _try_webview(url) else 1)
 
     _mount_frontend()
     port = _free_port()
@@ -197,7 +250,7 @@ def main() -> None:
         print(f"[netgeo-launcher] headless: native window skipped by request ({reason}) — opening system browser.")
         opened_native = False
     else:
-        opened_native = _try_webview(url)  # False also logs *why* it failed, via _webview_unavailable
+        opened_native = _run_webview_in_subprocess(url)  # isolates a Qt SIGABRT away from this process
 
     if not opened_native:
         webbrowser.open(url)
