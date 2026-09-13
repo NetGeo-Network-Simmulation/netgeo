@@ -10,6 +10,9 @@ set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &>/dev/null && pwd)"
 BUNDLE_DIR="${1:-$REPO_ROOT/packaging/dist-container/dist/netgeo}"
+# Absolute for the same reason as build-rpm.sh: keep both scripts working
+# no matter what the caller's cwd is.
+BUNDLE_DIR="$(cd -- "$BUNDLE_DIR" &>/dev/null && pwd || echo "$BUNDLE_DIR")"
 STAGE="$REPO_ROOT/packaging/linux/deb-build"
 OUT_DIR="$REPO_ROOT/packaging"
 

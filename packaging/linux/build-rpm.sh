@@ -8,7 +8,11 @@
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &>/dev/null && pwd)"
+# rpmbuild runs %install from its own _topdir, so a relative path handed
+# in by CI (e.g. `packaging/dist/netgeo`) would resolve against the wrong
+# directory and fail with "cannot stat". Pin it to an absolute path here.
 BUNDLE_DIR="${1:-$REPO_ROOT/packaging/dist-container/dist/netgeo}"
+BUNDLE_DIR="$(cd -- "$BUNDLE_DIR" &>/dev/null && pwd || echo "$BUNDLE_DIR")"
 TOPDIR="$REPO_ROOT/packaging/linux/rpm-build"
 OUT_DIR="$REPO_ROOT/packaging"
 
