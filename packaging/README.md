@@ -394,10 +394,49 @@ data user, sama seperti project/state tersimpan), jadi peta offline yang
 terpasang selamat dari siklus uninstall/reinstall kecuali dihapus
 manual.
 
+### Linux — .deb dan .rpm
+
+```
+./packaging/linux/build-deb.sh packaging/dist/netgeo   # → packaging/netgeo_<version>_amd64.deb
+./packaging/linux/build-rpm.sh packaging/dist/netgeo   # → packaging/netgeo-<version>-1.x86_64.rpm
+```
+
+Membungkus onedir bundle yang sama dengan AppImage/tarball, tapi lewat
+`dpkg-deb`/`rpmbuild` langsung (keduanya sudah ada di mesin ini dan di
+runner CI `ubuntu-22.04` — `rpmbuild` datang dari paket apt `rpm`,
+bukan dari distro RPM). `fpm`/`nfpm` sengaja tidak dipakai — tidak
+menambah dependency untuk sesuatu yang dua tool sistem sudah bisa
+kerjakan.
+
+Tata letak paket: bundle ke `/opt/netgeo/`, symlink `/usr/bin/netgeo`,
+desktop entry + ikon hicolor standar FHS (`/usr/share/applications`,
+`/usr/share/icons/hicolor/*/apps`). Dependency Qt/QtWebEngine
+dideklarasikan di package metadata (`Depends:`/`Requires:`) dengan nama
+per-distro yang berbeda — lihat komentar di `build-deb.sh` (nama
+Debian/Ubuntu) dan `packaging/linux/rpm/netgeo.spec` (nama Fedora/RHEL)
+untuk pemetaannya; `apt install`/`dnf install` menarik paket-paket itu
+otomatis, keuntungan nyata dibanding AppImage yang membundel semuanya
+sendiri.
+
+Uninstall lewat package manager (`apt remove`/`dnf remove`) tidak
+pernah menyentuh `~/.config/netgeo/` — dpkg/rpm hanya menghapus file
+yang mereka miliki sendiri di bawah `/opt` dan `/usr`, tidak pernah
+menulis atau menghapus apa pun di `$HOME`, jadi peta offline pengguna
+selamat tanpa logika ekstra (beda dari `uninstall.sh` yang harus
+menjaga ini secara eksplisit karena dia memasang ke `~/.local/share/`).
+
+Diuji lokal dengan bundle stub (bukan build PyInstaller sungguhan):
+`dpkg-deb -I`/`-c` dan `rpm -qpi`/`-qpl`/`--requires` semua bersih,
+tidak ada auto-Requires liar dari rpmbuild (dimatikan lewat
+`__requires_exclude_from` di spec, karena `/opt/netgeo` berisi `.so`
+pinned PyInstaller, bukan binary yang boleh di-`ldd` otomatis). **Belum
+diuji**: build dengan onedir sungguhan (butuh `pyinstaller` + frontend
+build), instalasi nyata via `apt install ./netgeo_*.deb` /
+`dnf install ./netgeo-*.rpm` di mesin bersih, dan jalur CI end-to-end.
+
 ## Belum dikerjakan (sengaja di luar scope)
 
-- Belum ada `.deb`/`.rpm` untuk Linux (AppImage sudah ada sekarang,
-  lihat "Linux — AppImage" di atas), belum ada build macOS.
+- Belum ada build macOS.
 - Belum ada code signing (installer dan binary Windows unsigned; lihat
   step yang dimatikan di `desktop.yml` dan
   `docs/qa/code-signing-native-distribution`).
