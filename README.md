@@ -37,7 +37,7 @@ merencanakan atau memvalidasi topologi tanpa harus menyentuh perangkat produksi.
 
 ## Cara pasang
 
-NetGeo dirilis dalam lima bentuk, tapi baru dua yang beneran jalan hari ini. Baca dulu tabelnya
+NetGeo dirilis dalam lima bentuk, tapi baru dua yang benar-benar bisa dipakai hari ini. Baca dulu tabelnya
 sebelum milih. Ukuran filenya memang besar, dan itu disengaja — window native-nya asli, jadi ikut
 membawa runtime Qt sendiri. Itu bukan bug yang perlu "dioptimasi".
 
@@ -187,7 +187,7 @@ harness-nya: engine ini memang belum punya cara untuk mengatur atribut-atribut i
 best-path-nya sudah ada tapi tidak bisa disentuh siapa pun yang memakainya. `add_neighbor(...,
 local_pref_in=N, med_out=N)` dan `advertise_network(..., origin=...)` menutup celah itu di
 v1.2.123, jadi kasus oracle untuk ketiganya sekarang tinggal soal waktu, bukan lagi mustahil
-dikerjakan. Begitu MED bisa diatur, langsung ketahuan satu bug beneran: nilainya bocor lintas
+dikerjakan. Begitu MED bisa diatur, langsung ketahuan satu bug nyata: nilainya bocor lintas
 batas eBGP, tersembunyi selama ini karena nilainya memang selalu nol.
 
 Selebihnya, ini engine pure-Python (tanpa dependensi native — jalan di Linux, Windows, ARM) yang
@@ -220,7 +220,7 @@ yang diklaim ada tapi ternyata rusak di tanganmu:
   sudah dibangun dan diperiksa, belum diverifikasi end-to-end.
 - Tidak ada isolasi multi-tenant di bentuk full-online (#5) — satu instance bersama, satu set data
   untuk semua.
-- Bentuk distribusi #1 (peta beneran offline), #2 (Google Maps), #3 (backend remote untuk window
+- Bentuk distribusi #1 (peta yang benar-benar offline), #2 (Google Maps), #3 (backend remote untuk window
   native) belum ada — lihat tabel di atas.
 
 ---
