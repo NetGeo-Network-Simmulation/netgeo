@@ -50,35 +50,35 @@ ini). Ini **kerangka** — hal paling sederhana yang jalan, bukan produk jadi.
 
 `launcher.py` membuka NetGeo di jendela native lewat `pywebview`. Sejak
 slice native-window, build yang dipaketkan (PyInstaller/AppImage/installer)
-memaksa `PYWEBVIEW_GUI=qt` dan membawa runtime Qt-nya sendiri:
+memaksa `PYWEBVIEW_GUI=qt` dan membawa runtime Qt-nya sendiri.
 `packaging/requirements.txt` menarik `pywebview[pyside6]` (PySide6 +
 QtPy), dan `netgeo.spec` mendaftarkan submodule `PySide6.QtWebEngine*`
-yang konkret sebagai `hiddenimports` supaya PyInstaller menjalankan
-`hook-PySide6.QtWebEngineCore.py` bawaannya sendiri — ini mengumpulkan
+yang konkret sebagai `hiddenimports`. Efeknya, PyInstaller menjalankan
+`hook-PySide6.QtWebEngineCore.py` bawaannya sendiri, yang mengumpulkan
 binary helper QtWebEngineProcess, resource Qt, dan file terjemahan
-langsung ke dalam bundle onedir. Tidak ada system package yang dibutuhkan
-untuk jalur ini; ini jendela yang benar-benar self-contained, bukan
-dependency sistem yang harus diinstal user.
+langsung ke dalam bundle onedir. Jalur ini tidak butuh system package
+apa pun — jendelanya benar-benar self-contained, bukan dependency
+sistem yang harus diinstal user.
 
-**Kenapa bukan GTK (percobaan sebelumnya)?** Jalan buntu yang terbukti,
-bukan dugaan: PyInstaller tidak punya satu pun hook untuk `gi`/PyGObject —
-tidak ada apa pun di pipeline ini yang mengumpulkan file `.typelib` atau
-pohon shared-library WebKitGTK, jadi meski `gi` bisa di-import saat build,
-bundle-nya tetap perlu me-resolve itu dari system path saat runtime, yang
-beda-beda tergantung distro dan versi minor CPython (lihat investigasi
-lama di bawah). Qt/PySide6 tidak punya masalah itu: wheel-nya
-self-contained dan hook bawaan PyInstaller (terverifikasi ada di direktori
-`hooks/` milik `pyinstaller==6.22.2`) sudah tahu cara mengumpulkannya
-secara lengkap — alasan yang sama kenapa hampir semua tutorial
-PyInstaller+"native window" pakai Qt, bukan GTK.
+**Kenapa bukan GTK (percobaan sebelumnya)?** Ini jalan buntu yang
+terbukti, bukan dugaan. PyInstaller tidak punya satu pun hook untuk
+`gi`/PyGObject — tidak ada apa pun di pipeline ini yang mengumpulkan
+file `.typelib` atau pohon shared-library WebKitGTK. Jadi meski `gi`
+bisa di-import saat build, bundle-nya tetap harus me-resolve itu dari
+system path saat runtime, dan itu beda-beda tergantung distro dan versi
+minor CPython (lihat investigasi lama di bawah). Qt/PySide6 tidak punya
+masalah itu: wheel-nya self-contained, dan hook bawaan PyInstaller
+(terverifikasi ada di direktori `hooks/` milik `pyinstaller==6.22.2`)
+sudah tahu cara mengumpulkannya secara lengkap. Alasan yang sama kenapa
+hampir semua tutorial PyInstaller+"native window" pakai Qt, bukan GTK.
 
-GTK tetap ada sebagai **fallback sekunder yang disediakan sistem**:
+GTK tetap ada sebagai **fallback sekunder yang disediakan sistem**.
 `setdefault` pada `PYWEBVIEW_GUI` di `_try_webview()` masih memungkinkan
-dev yang run dari source meng-override ke `gtk`, dan kalau Qt sendiri
-gagal start (lib dasar X11/OpenGL tidak ada di sistem yang sangat
-minimal), guilib pywebview sendiri masih mencoba GTK berikutnya sebelum
-menyerah — di titik itu `launcher.py` fallback ke browser sistem persis
-seperti sebelumnya, mencatat alasannya:
+dev yang run dari source meng-override ke `gtk`. Kalau Qt sendiri gagal
+start (lib dasar X11/OpenGL tidak ada di sistem yang sangat minimal),
+guilib pywebview sendiri masih mencoba GTK berikutnya sebelum menyerah —
+di titik itu `launcher.py` jatuh ke browser sistem persis seperti
+sebelumnya, dan mencatat alasannya:
 
 ```bash
 # Fedora
@@ -107,32 +107,34 @@ benar-benar dijalankan.
 
 **`pyinstaller netgeo.spec` yang dijalankan langsung di mesin ini (Fedora
 44, glibc 2.43) menghasilkan binary yang tidak akan jalan di distro yang
-lebih tua.** Terbukti, bukan teori: bundle hasil build Fedora yang
-dikirim ke VM Ubuntu 24.04 baru (glibc 2.39) gagal dengan
+lebih tua.** Ini terbukti, bukan cuma teori: bundle hasil build Fedora
+yang dikirim ke VM Ubuntu 24.04 baru (glibc 2.39) gagal dengan
 `GLIBC_ABI_GNU2_TLS' not found (required by libpython3.14.so.1.0)` —
-repro lengkap di `docs/qa/launcher-vm-ubuntu-2026-08-28.md` (lokal-only).
-Alasannya: PyInstaller me-link glibc *host build*-nya secara statis, dan
-glibc hanya jalan maju (glibc lebih tua → distro lebih baru itu aman;
-glibc lebih baru → distro lebih tua itu tidak).
+repro lengkap ada di `docs/qa/launcher-vm-ubuntu-2026-08-28.md`
+(lokal-only). Sebabnya: PyInstaller me-link glibc *host build*-nya
+secara statis, dan glibc cuma jalan maju — glibc lebih tua ke distro
+lebih baru itu aman, tapi glibc lebih baru ke distro lebih tua itu
+tidak.
 
 **Perbaikan: build di dalam `packaging/linux/build-in-container.sh`.**
-Script ini menjalankan `pyinstaller netgeo.spec` yang sama di dalam
-container Podman rootless berbasis `ubuntu:22.04` (glibc 2.35, python3.11
-— yang terbaru yang tersedia di sana), jadi glibc floor binary hasilnya
-2.35, bukan apa pun yang kebetulan dijalankan mesin ini. Tanpa dependency
-baru: Podman sudah terinstal dan sudah dipakai di mesin ini (lihat vault
-`research/spike-frr-podman.md`).
+Script ini menjalankan `pyinstaller netgeo.spec` yang sama, tapi di
+dalam container Podman rootless berbasis `ubuntu:22.04` (glibc 2.35,
+python3.11 — yang terbaru yang tersedia di sana). Hasilnya, glibc floor
+binary jadi 2.35, bukan apa pun yang kebetulan berjalan di mesin ini.
+Tidak ada dependency baru: Podman sudah terinstal dan sudah dipakai di
+mesin ini (lihat vault `research/spike-frr-podman.md`).
 
 ```
 ./packaging/linux/build-in-container.sh          # → packaging/dist-container/dist/netgeo
 cd packaging/linux && ./install.sh                # per-user, tanpa root
 ```
 
-`frontend/dist` di-build di host duluan (Node ada di sini; tidak diinstal
-di container) lalu di-bind-mount masuk. Named volume Podman
+`frontend/dist` di-build di host duluan (Node ada di sini, tidak
+diinstal di container), lalu di-bind-mount masuk. Named volume Podman
 (`netgeo-build-apt-cache`, `netgeo-build-pip-cache`) menyimpan unduhan
-apt/pip lintas re-run — egress environment ini terukur ~115 KB/s, jadi
-mengunduh ulang semuanya tiap retry itu berat sekali kalau tidak begini.
+apt/pip lintas re-run. Egress environment ini cuma ~115 KB/s, jadi
+tanpa cache ini, mengunduh ulang semuanya tiap retry bakal berat
+sekali.
 
 **Terverifikasi jalan, dua arah, 2026-08-28:**
 - Di-build di container, dijalankan **di mesin ini (Fedora 44)**: `/` →
@@ -171,17 +173,17 @@ fallback yang sama berlaku.
 ```
 
 `build-appimage.sh` mengunduh `linuxdeploy` + `linuxdeploy-plugin-appimage`
-(continuous release GitHub, total ~36 MB, di-cache di
-`packaging/linux/.appimage-tools/` — gitignored) di jalan pertamanya,
-membangun `AppDir` secara manual di sekitar bundle onedir (script
-`AppRun` meng-exec binary `netgeo` yang sudah ada di tempatnya — lib
-milik onedir itu sendiri sudah dipin ke glibc-2.35 dan self-contained,
-jadi pengejaran dependency oleh `linuxdeploy` sengaja dilewati, itu cuma
-akan berisiko menimpa mereka dengan `.so` sistem yang tidak cocok), lalu
-menjalankan `--appimage-extract-and-run` milik plugin-nya untuk
-mengompresnya (environment ini tidak punya jaminan FUSE mount untuk
-AppImage bersarang, rootless + tanpa sudo — extract-and-run menghindari
-itu).
+di jalan pertamanya (continuous release GitHub, total ~36 MB, di-cache
+di `packaging/linux/.appimage-tools/` — gitignored). Dari situ dia
+membangun `AppDir` secara manual di sekitar bundle onedir: script
+`AppRun` tinggal meng-exec binary `netgeo` yang sudah ada di tempatnya.
+Lib milik onedir itu sendiri sudah dipin ke glibc-2.35 dan
+self-contained, jadi pengejaran dependency oleh `linuxdeploy` sengaja
+dilewati — kalau dipaksakan, itu cuma berisiko menimpanya dengan `.so`
+sistem yang tidak cocok. Langkah terakhir, `--appimage-extract-and-run`
+milik plugin-nya dipakai untuk mengompresnya, karena environment ini
+tidak punya jaminan FUSE mount untuk AppImage bersarang (rootless,
+tanpa sudo) — extract-and-run menghindari itu.
 
 **Ukuran output: 27 MB** (`NetGeo-x86_64.AppImage`, 28 023 288 byte).
 
@@ -193,37 +195,36 @@ headless Ubuntu 24.04):**
    tetap bergantung pada `.so` sistem?* **Tetap bergantung —
    dikonfirmasi, bukan dugaan.**
    `find packaging/dist-container/dist/netgeo -iname '*.typelib'` tidak
-   mengembalikan apa pun; extension `_gi*.so` juga tidak dibundel —
-   analisis statis PyInstaller cuma menarik stub `gi/__init__.py` yang
-   pure-Python (file .py itu portable, jadi ikut terbawa), bukan binary
+   mengembalikan apa pun, dan extension `_gi*.so` juga tidak dibundel.
+   Analisis statis PyInstaller cuma menarik stub `gi/__init__.py` yang
+   pure-Python — file .py itu portable jadi ikut terbawa — bukan binary
    introspection yang sudah dikompilasi atau file data `.typelib` apa
-   pun. Menjalankan binary hasil build mereproduksi ini persis sama baik
-   di host Fedora (yang *punya* `webkit2gtk4.1` + `python3-gobject`
+   pun. Menjalankan binary hasil build mereproduksi ini persis sama,
+   baik di host Fedora (yang *punya* `webkit2gtk4.1` + `python3-gobject`
    terinstal) maupun VM Ubuntu headless (yang tidak punya):
    `ImportError: cannot import name '_gi' from partially initialized
    module 'gi'`.
 2. *Apakah `python3-gi` dari apt Ubuntu 22.04 (dibangun untuk python3.10
    default-nya) benar-benar bisa di-import dari venv
    versi-minor-berbeda lewat `--system-site-packages`?* **Tidak —
-   dikonfirmasi salah, root cause ditemukan: mismatch ABI C-extension
-   CPython, bukan kelalaian packaging.** Diisolasi di container
-   sekali-pakai: `python3.10 -m venv --system-site-packages` bisa
-   import `gi` dan resolve `WebKit2-4.1.typelib` dari system path
+   dikonfirmasi salah, dan root cause-nya ketemu: mismatch ABI
+   C-extension CPython, bukan kelalaian packaging.** Diisolasi di
+   container sekali-pakai: `python3.10 -m venv --system-site-packages`
+   bisa import `gi` dan resolve `WebKit2-4.1.typelib` dari system path
    tanpa masalah (`OK 3.10 venv: <IntrospectionModule 'WebKit2' from
-   '/usr/lib/x86_64-linux-gnu/girepository-1.0/WebKit2-4.1.typelib'>`)
-   — package apt yang *sama*, tapi di-import dari `python3.11 -m venv
-   --system-site-packages`, malah gagal dengan `ImportError` `_gi`
-   yang identik dengan yang dilihat di bundle sungguhan.
-   `build-in-container.sh` build dengan python3.11 (yang terbaru di
+   '/usr/lib/x86_64-linux-gnu/girepository-1.0/WebKit2-4.1.typelib'>`).
+   Tapi package apt yang *sama*, kalau di-import dari `python3.11 -m
+   venv --system-site-packages`, malah gagal dengan `ImportError`
+   `_gi` yang identik dengan yang muncul di bundle sungguhan.
+   `build-in-container.sh` build pakai python3.11 (yang terbaru di
    repo `ubuntu:22.04` sendiri — lihat komentar header-nya), selisih
-   satu versi minor dari build python3.10 milik `python3-gi` apt —
-   selisih itu saja sudah fatal untuk jendela native, lepas dari soal
-   bundling typelib. Tidak diubah di sini: mengganti build ke
-   python3.10 untuk menutup celah ini adalah perbaikan nyata dan
-   bertarget, tapi sengaja tidak dimasukkan ke slice ini sesuai
-   instruksi untuk tidak memaksakan bundling yang rapuh cuma supaya
-   kelihatan selesai — fallback browser yang sudah ada sudah
-   menutupinya dengan benar.
+   satu versi minor dari build python3.10 milik `python3-gi` apt.
+   Selisih itu saja sudah fatal untuk jendela native, lepas dari soal
+   bundling typelib. Ini sengaja tidak diubah di sini: mengganti build
+   ke python3.10 untuk menutup celah ini memang perbaikan nyata dan
+   bertarget, tapi instruksinya jangan memaksakan bundling yang rapuh
+   cuma supaya kelihatan selesai — fallback browser yang sudah ada
+   sudah menutupinya dengan benar.
 3. *Ukuran akhir AppImage?* **27 MB**, lihat di atas.
 
 **Terverifikasi jalan, dua arah, 2026-08-30 (pola dua-mesin yang sama
@@ -257,17 +258,17 @@ cd windows && iscc netgeo.iss
 
 Menghasilkan `packaging/windows/dist-installer/netgeo-<version>-setup.exe`,
 di mana `<version>` adalah `APP_VERSION` milik
-`backend/app/core/config.py` (CI mengirimnya lewat
-`iscc /DMyAppVersion=...`; `iscc netgeo.iss` manual tanpa override jatuh
-ke konstanta di `netgeo.iss`, yang bisa saja basi — kirim
-`/DMyAppVersion=` secara eksplisit untuk build manual). Terinstal ke
-`%LOCALAPPDATA%\NetGeo`, shortcut Start Menu + Desktop opsional,
-mendaftarkan uninstaller, `PrivilegesRequired=lowest` (tanpa prompt
-admin). CI sekarang build ini di `windows-latest` (Inno Setup sudah
-terpasang di image runner itu) dan mengunggahnya sebagai
+`backend/app/core/config.py`. CI mengirimnya lewat
+`iscc /DMyAppVersion=...`; kalau `iscc netgeo.iss` dijalankan manual
+tanpa override, dia jatuh ke konstanta di `netgeo.iss` yang bisa saja
+basi — jadi kirim `/DMyAppVersion=` secara eksplisit untuk build manual.
+Installer-nya terinstal ke `%LOCALAPPDATA%\NetGeo`, shortcut Start Menu
++ Desktop opsional, mendaftarkan uninstaller, `PrivilegesRequired=lowest`
+(tanpa prompt admin). CI sekarang build ini di `windows-latest` (Inno
+Setup sudah terpasang di image runner itu) dan mengunggahnya sebagai
 `netgeo-installer-windows-unsigned`. **Surya perlu menguji ini di mesin
 Windows sungguhan** — double-click, konfirmasi alur SmartScreen "Run
-anyway", entry Start Menu, pembersihan uninstall — sebelum dianggap
+anyway", entry Start Menu, pembersihan uninstall — sebelum ini dianggap
 terverifikasi.
 
 ## Postgres / Redis — sudah diselidiki, BUKAN blocker
@@ -279,7 +280,7 @@ sudah di-grep, nol hit di luar `config.py`. `get_repo()` di
 in-memory; `app/store/postgres.py` ada tapi tidak pernah di-import. Hook
 `lifespan` FastAPI di `main.py` tidak membuka koneksi DB atau Redis apa
 pun. Jadi backend-nya **sudah jalan standalone**: tidak butuh Docker,
-Postgres, atau Redis untuk D1. Dikonfirmasi dengan menjalankan
+Postgres, atau Redis untuk D1. Ini dikonfirmasi dengan menjalankan
 `launcher.py` (dan binary PyInstaller-nya) langsung di mesin ini tanpa
 satu pun infra service yang hidup.
 
@@ -290,9 +291,9 @@ ini mekanisme S2 PERSIST-01 yang sudah ada, bukan sesuatu yang
 ditambahkan di slice ini.
 
 Env var `NETGEO_NO_BROWSER=1` melewati langkah auto-buka-browser
-sepenuhnya (dipakai untuk smoke test non-interaktif di mana tidak ada
-apa pun yang perlu dibuka — tanpa jendela, tanpa browser, API saja);
-perilaku unset/default tidak berubah.
+sepenuhnya (dipakai untuk smoke test non-interaktif yang tidak perlu
+membuka apa pun — tanpa jendela, tanpa browser, API saja). Perilaku
+unset/default tidak berubah.
 
 ## Mode headless (varian distribusi #4)
 
@@ -332,10 +333,10 @@ atau browser), yang memang diinginkan CI/smoke test.
 
 Backend bisa melayani basemap tile dari file MBTiles lokal, bukan dari
 internet (`backend/app/services/offline_maps.py`, `GET /api/maps/status`
-+ `/api/maps/tiles/{z}/{x}/{y}`); frontend berpindah ke situ otomatis
-begitu ada yang terinstal, dan fallback ke tile online kapan pun tidak
-ada (lihat docstring modul itu untuk aturan fallback persisnya — file
-hilang/rusak dua-duanya berarti "online").
++ `/api/maps/tiles/{z}/{x}/{y}`). Frontend berpindah ke situ otomatis
+begitu ada yang terinstal, dan fallback ke tile online kapan pun file
+itu tidak ada (lihat docstring modul itu untuk aturan fallback
+persisnya — file hilang atau rusak, dua-duanya berarti "online").
 
 **Lokasi file yang dibaca backend secara default:**
 `~/.config/netgeo/offline-map.mbtiles` (`NETGEO_OFFLINE_MAP_PATH` di
