@@ -51,7 +51,11 @@ packaging/netgeo-linux-x86_64.tar.gz
 packaging/windows/dist-installer/
 packaging/linux/AppDir/
 packaging/linux/.appimage-tools/
+packaging/linux/deb-build/
+packaging/linux/rpm-build/
 packaging/*.AppImage
+packaging/*.deb
+packaging/*.rpm
 
 # --- Local desktop-artifact test scratch (not part of any slice) ---
 /netgeo-linux.zip
