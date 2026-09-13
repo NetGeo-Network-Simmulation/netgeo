@@ -19,6 +19,15 @@
 # libs with mismatched system ones. AppDir is hand-built; linuxdeploy-
 # plugin-appimage only squashes it (that's its whole job — see its own
 # docs, it doesn't deploy dependencies itself, `linuxdeploy` core does).
+#
+# strip-system-libs.sh (run on $BUNDLE_DIR upstream, in CI / build-in-
+# container.sh) removes bundled libstdc++.so.6/libgcc_s.so.1/libX11.so.6
+# so they can't fight the host's mesa driver ABI (FIX-GLIBCXX). This
+# AppImage has NO package manager to declare a dependency with, unlike the
+# .deb/.rpm — it now requires the host to already provide those libs. That
+# is a safe bet (every C++ program needs libstdc++/libgcc_s; libX11 covers
+# both native X11 and XWayland-on-Wayland) but is a real new requirement,
+# stated here rather than left implicit.
 set -euo pipefail
 
 REPO_ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." &>/dev/null && pwd)"

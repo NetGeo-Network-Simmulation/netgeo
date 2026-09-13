@@ -50,13 +50,22 @@ done
 # Fedora names in packaging/linux/rpm/netgeo.spec — see also the
 # "Install Qt runtime libs" step in .github/workflows/desktop.yml, which
 # installs these same packages to make PyInstaller's own Analysis pass.
+#
+# libstdc++6 + libx11-6: strip-system-libs.sh (run on the bundle before this
+# script) deliberately removes the bundled libstdc++.so.6/libX11.so.6 so the
+# app links the system's copies instead (see that script's comment for why).
+# Declaring them here is what makes `apt install ./netgeo_*.deb` guarantee
+# they exist. libgcc_s.so.1 isn't named directly — its package name has
+# changed across Debian/Ubuntu releases (libgcc1 vs libgcc-s1) while
+# libstdc++6 has always depended on whichever is current, so pulling it in
+# transitively is more stable than guessing a name here.
 cat > "$STAGE/DEBIAN/control" <<EOF
 Package: netgeo
 Version: $VERSION
 Section: net
 Priority: optional
 Architecture: amd64
-Depends: libgl1, libegl1, libxkbcommon0, libxcb-cursor0, libnss3, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libasound2, libatspi2.0-0
+Depends: libgl1, libegl1, libxkbcommon0, libxcb-cursor0, libnss3, libxcomposite1, libxdamage1, libxrandr2, libxtst6, libasound2, libatspi2.0-0, libstdc++6, libx11-6
 Maintainer: NetGeo <noreply@netgeo.invalid>
 Homepage: https://github.com/suryaex/netgeo
 Description: Network simulation + GIS/digital-twin platform

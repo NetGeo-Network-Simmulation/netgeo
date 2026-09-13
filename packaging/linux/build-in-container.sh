@@ -93,4 +93,6 @@ podman run --rm --network=host \
         /build-venv/bin/pyinstaller netgeo.spec --distpath /out/dist --workpath /tmp/build --noconfirm
     '
 
+"$REPO_ROOT/packaging/linux/strip-system-libs.sh" "$OUT_DIR/dist/netgeo"
+
 echo "Bundle written to $OUT_DIR/dist/netgeo (built with python3.11 on glibc 2.35)."
