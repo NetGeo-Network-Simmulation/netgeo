@@ -80,6 +80,14 @@ jobs:
         working-directory: packaging
         run: pyinstaller netgeo.spec --distpath ./dist --workpath ./build --noconfirm
 
+      # Must run before every downstream step (raw artifact upload, tarball,
+      # AppImage, .deb, .rpm) — they all copy packaging/dist/netgeo verbatim,
+      # so stripping here once fixes all of them. See the script itself for
+      # why these specific libs and not others.
+      - name: Strip bundled libs that must match the system driver (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: ./packaging/linux/strip-system-libs.sh packaging/dist/netgeo
+
       - name: Upload unsigned artifact
         uses: actions/upload-artifact@v4
         with:

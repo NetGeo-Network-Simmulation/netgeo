@@ -21,7 +21,14 @@ URL: https://github.com/suryaex/netgeo
 BuildArch: x86_64
 # Fedora/RHEL names for the same Qt/QtWebEngine runtime libs apt installs
 # under Debian/Ubuntu names in .github/workflows/desktop.yml.
-Requires: mesa-libGL, mesa-libEGL, libxkbcommon, xcb-util-cursor, nss, libXcomposite, libXdamage, libXrandr, libXtst, alsa-lib, at-spi2-core
+#
+# libstdc++ + libX11: strip-system-libs.sh (run on the bundle before this
+# is packaged) deliberately removes the bundled libstdc++.so.6/libX11.so.6
+# so the app links the system's copies instead — see that script for why.
+# Declaring them here is what makes `dnf install ./netgeo-*.rpm` guarantee
+# they exist. libgcc_s.so.1 isn't named directly: libstdc++ already
+# requires the matching libgcc, so it rides along transitively.
+Requires: mesa-libGL, mesa-libEGL, libxkbcommon, xcb-util-cursor, nss, libXcomposite, libXdamage, libXrandr, libXtst, alsa-lib, at-spi2-core, libstdc++, libX11
 
 %description
 NetGeo simulates IP/routing networks with a GIS/digital-twin overlay for
