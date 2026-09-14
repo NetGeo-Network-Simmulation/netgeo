@@ -58,7 +58,14 @@ html.native-shell body {
       var(--ng-bg-0, #0f0f0e) 62%
     )
     fixed;
-  border-radius: 10px;
+  /* 24px, not a guess: this machine's active GTK4 theme
+     (~/.themes/MacTahoe-Dark/gtk-4.0/gtk.css `window.csd { border-radius:
+     24px }, .maximized { border-radius: 0 }`) is what every other
+     non-maximized window on this box actually renders at — confirmed the
+     old 10px really was rendering (native.grab() alpha ramp 0->255 over
+     px 5-9 at that radius) but read as "still square" next to those
+     (Surya QA) simply because it was less than half as round. */
+  border-radius: 24px;
   /* `overflow: hidden` alone does not clip `position: fixed` descendants
      (modals, toasts, the command palette) to this rounded shape — a fixed
      element's containing block is the viewport unless an ancestor

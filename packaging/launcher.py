@@ -71,6 +71,49 @@ def _mount_frontend() -> None:
         )
 
 
+def _dri_driver_path() -> str | None:
+    """Best-effort real 64-bit Mesa DRI driver directory on this host, or
+    None if it can't find one (never guess — see call site).
+
+    Root cause this fixes (reproduced live against the installed
+    netgeo-1.2.125.1 package on this exact machine, Fedora 44):
+    ``MESA-LOADER: failed to open iris: /usr/lib/dri/iris_dri.so: wrong ELF
+    class: ELFCLASS32 (search paths /usr/lib/x86_64-linux-gnu/dri:
+    $ORIGIN/dri:/usr/lib/dri, ...)`` followed by ``EGL: Failed to
+    initialize GBM device.`` The bundled ``_internal/libgbm.so.1`` was
+    compiled on the release job's Ubuntu-22.04 runner, so Mesa's compiled-
+    in default dri-search-path is Debian's layout — it never contains
+    Fedora/RHEL's real 64-bit path (``/usr/lib64/dri``), so the loader
+    falls through to ``/usr/lib/dri``. On Debian that IS the 64-bit dir;
+    on this Fedora box it's the *32-bit* i686-multilib one (`rpm -q
+    mesa-dri-drivers` here lists both .x86_64 and .i686) — same libgbm
+    default search path, opposite meaning per distro, hence ELFCLASS32.
+
+    Not fixed by hardcoding "/usr/lib64/dri" — that would just move the
+    same blind-guess bug to whichever distro doesn't use that path (Arch,
+    Debian). Verified instead by actually reading the ELF class byte
+    (offset 4 of the file, 2 == 64-bit) of a real ``*_dri.so`` in each
+    candidate dir, so this only ever points at a driver that will actually
+    load in this (64-bit CPython/Qt) process.
+    """
+    import glob
+
+    for candidate in (
+        "/usr/lib64/dri",  # Fedora / RHEL / openSUSE 64-bit
+        "/usr/lib/x86_64-linux-gnu/dri",  # Debian / Ubuntu 64-bit
+        "/usr/lib/dri",  # Arch (and Debian/Ubuntu's own default guess)
+    ):
+        for so_path in glob.glob(f"{candidate}/*_dri.so"):
+            try:
+                with open(so_path, "rb") as f:
+                    header = f.read(5)
+            except OSError:
+                continue
+            if header[:4] == b"\x7fELF" and header[4] == 2:  # ELFCLASS64
+                return candidate
+    return None
+
+
 def _webview_unavailable(exc: Exception | None) -> str:
     detail = f" ({exc})" if exc else ""
     return (
@@ -379,6 +422,13 @@ def _try_webview(url: str) -> bool:
     # (falls back to Chromium's --disable-gpu-compositing on its own).
     # setdefault so a machine that *does* have working GL can override back.
     os.environ.setdefault("QT_QUICK_BACKEND", "software")
+    # setdefault: never override a user who already set LIBGL_DRIVERS_PATH
+    # themselves. See _dri_driver_path() for why this can't be a hardcoded
+    # path (would just swap which distro it's wrong on).
+    if "LIBGL_DRIVERS_PATH" not in os.environ:
+        driver_path = _dri_driver_path()
+        if driver_path:
+            os.environ["LIBGL_DRIVERS_PATH"] = driver_path
     try:
         import webview
     except ImportError as exc:
