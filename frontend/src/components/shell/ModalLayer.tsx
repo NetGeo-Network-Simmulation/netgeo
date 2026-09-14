@@ -10,10 +10,12 @@
  */
 import { useEffect } from 'react';
 import { useUiStore } from '@/store/uiStore';
+import { useAuthStore } from '@/store/authStore';
 import { ModalScrim } from './ModalScrim';
 import { SettingsPanel } from '@/components/SettingsPanel';
 import { ScenariosPanel } from '@/components/ScenariosPanel';
 import { OnboardingModal, ONBOARDING_KEY } from '@/components/OnboardingModal';
+import { FirstRunMapSetup } from '@/components/FirstRunMapSetup';
 import { AddressingWizard } from '@/components/lab/AddressingWizard';
 import { IconLibraryModal } from '@/components/icons/IconLibraryModal';
 
@@ -22,16 +24,34 @@ export function ModalLayer() {
   const openModal = useUiStore((s) => s.openModal);
   const closeModal = useUiStore((s) => s.closeModal);
 
+  // First-run map source: claim the slot before the workflow tour below, if
+  // this session just created the admin account (QA 2026-09-14). Runs first
+  // in declaration order so it wins the single-slot race on the same mount.
+  useEffect(() => {
+    if (useAuthStore.getState().justCompletedSetup && useUiStore.getState().activeModal === null) {
+      openModal('mapSourceSetup');
+    }
+  }, [openModal]);
+
   // First-run onboarding: claim the modal slot once, if nothing else holds it.
   useEffect(() => {
     if (localStorage.getItem(ONBOARDING_KEY) === 'true') return;
     if (useUiStore.getState().activeModal === null) openModal('onboarding');
   }, [openModal]);
 
+  const dismissMapSourceSetup = () => {
+    useAuthStore.getState().clearJustCompletedSetup();
+    // Chain into the workflow tour exactly as if nothing had intervened.
+    if (localStorage.getItem(ONBOARDING_KEY) !== 'true') openModal('onboarding');
+    else closeModal();
+  };
+
   const dismissOnboarding = () => {
     localStorage.setItem(ONBOARDING_KEY, 'true');
     closeModal();
   };
+
+  if (activeModal === 'mapSourceSetup') return <FirstRunMapSetup onDone={dismissMapSourceSetup} />;
 
   if (activeModal === 'onboarding') return <OnboardingModal onClose={dismissOnboarding} />;
 

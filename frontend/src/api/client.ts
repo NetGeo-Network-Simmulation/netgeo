@@ -223,6 +223,25 @@ export interface MapsStatus {
 
 export const mapsApi = {
   status: () => http.get<MapsStatus>('/maps/status').then((r) => r.data),
+  /** Install a user-supplied .mbtiles file as the offline basemap
+   *  (OFFLINE-MAP-3 — first-run setup + Settings, no CLI/installer needed). */
+  uploadOfflineMap: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return http
+      .post<MapsStatus>('/maps/offline-map/upload', form, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 0, // region files can be hundreds of MB
+      })
+      .then((r) => r.data);
+  },
+  /** Download a .mbtiles file from a URL server-side and install it. */
+  installOfflineMapFromUrl: (url: string) =>
+    http
+      .post<MapsStatus>('/maps/offline-map/download', { url }, { timeout: 0 })
+      .then((r) => r.data),
+  /** Remove the installed file, reverting to the online basemap. */
+  removeOfflineMap: () => http.delete<MapsStatus>('/maps/offline-map').then((r) => r.data),
 };
 
 /* ------------------------------- Nodes ----------------------------------- */

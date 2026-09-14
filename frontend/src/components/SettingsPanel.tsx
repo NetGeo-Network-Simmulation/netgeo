@@ -5,7 +5,7 @@
  *   2. Network OS — manage built-in NOS list + add custom NOS/images
  *   3. Account — username display, sign-out
  */
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   Cpu,
@@ -23,7 +23,7 @@ import {
 import { useUiStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
 import { useNosStore, type CustomNosEntry } from '@/store/nosStore';
-import { devicePacksApi, type DevicePack } from '@/api/client';
+import { devicePacksApi, mapsApi, type ApiError, type DevicePack } from '@/api/client';
 import { cn } from '@/lib/cn';
 import { Select } from '@/components/ui/Select';
 import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
@@ -139,12 +139,123 @@ function GeneralSection() {
         />
       </Row>
 
+      <SectionHeading>Offline Map</SectionHeading>
+      <OfflineMapSection />
+
       <SectionHeading>About</SectionHeading>
       <div className="rounded-lg border border-fg/10 bg-fg/5 px-4 py-3 text-sm text-fg/60">
         <p className="font-medium text-fg/80">NetGeo v{__APP_VERSION__} Alpha</p>
         <p className="mt-0.5 text-xs">
           Network Simulation · Planning · GIS Digital-Twin · AI — React + FastAPI
         </p>
+      </div>
+    </div>
+  );
+}
+
+/** Change the map source later — the same choice offered once during
+ *  first-run setup (FirstRunMapSetup), reachable here afterward so skipping
+ *  it there is never a one-way door. */
+function OfflineMapSection() {
+  const queryClient = useQueryClient();
+  const statusQ = useQuery({ queryKey: ['maps-status'], queryFn: mapsApi.status });
+  const [url, setUrl] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['maps-status'] });
+  const onError = (err: unknown, fallback: string) =>
+    setError((err as ApiError)?.message || fallback);
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => mapsApi.uploadOfflineMap(file),
+    onSuccess: () => { setError(null); invalidate(); },
+    onError: (err) => onError(err, 'Could not install that file.'),
+  });
+  const urlMutation = useMutation({
+    mutationFn: (u: string) => mapsApi.installOfflineMapFromUrl(u),
+    onSuccess: () => { setError(null); setUrl(''); invalidate(); },
+    onError: (err) => onError(err, 'Download failed.'),
+  });
+  const removeMutation = useMutation({
+    mutationFn: () => mapsApi.removeOfflineMap(),
+    onSuccess: () => { setError(null); invalidate(); },
+    onError: (err) => onError(err, 'Could not remove the offline file.'),
+  });
+
+  const status = statusQ.data;
+  const busy = uploadMutation.isPending || urlMutation.isPending || removeMutation.isPending;
+
+  return (
+    <div className="space-y-3">
+      <div className="rounded-lg border border-fg/10 bg-fg/5 px-4 py-3 text-sm">
+        {status?.available ? (
+          <>
+            <p className="font-medium text-fg/80">
+              Offline file installed{status.region ? `: ${status.region}` : ''}
+            </p>
+            <p className="mt-0.5 text-xs text-fg/40">
+              The map is served from this file instead of the internet.
+            </p>
+          </>
+        ) : (
+          <p className="text-fg/60">Using the online map (default). No offline file installed.</p>
+        )}
+      </div>
+
+      {error && (
+        <p className="rounded-md border border-danger/30 bg-danger/10 px-3 py-2 text-xs text-danger">
+          {error}
+        </p>
+      )}
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".mbtiles"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) uploadMutation.mutate(file);
+          e.target.value = '';
+        }}
+      />
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={busy}
+          className="rounded-md border border-fg/10 bg-fg/5 px-3 py-1.5 text-xs text-fg/70 transition-colors hover:border-accent/50 hover:text-accent disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {uploadMutation.isPending ? 'Installing…' : 'Upload .mbtiles file…'}
+        </button>
+        {status?.available && (
+          <button
+            onClick={() => removeMutation.mutate()}
+            disabled={busy}
+            className="rounded-md border border-fg/10 bg-fg/5 px-3 py-1.5 text-xs text-fg/50 transition-colors hover:border-danger/40 hover:text-danger disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {removeMutation.isPending ? 'Removing…' : 'Use online map instead'}
+          </button>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <input
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          placeholder="https://example.com/region.mbtiles"
+          className={inputCls}
+        />
+        <button
+          onClick={() => urlMutation.mutate(url.trim())}
+          disabled={busy || !url.trim()}
+          className={cn(
+            'shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-accent-fg transition-colors',
+            busy || !url.trim() ? 'cursor-not-allowed bg-accent/40' : 'bg-accent hover:bg-accent-soft',
+          )}
+        >
+          {urlMutation.isPending ? 'Downloading…' : 'Install from URL'}
+        </button>
       </div>
     </div>
   );

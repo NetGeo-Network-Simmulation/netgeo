@@ -18,16 +18,31 @@ Stdlib beats a new dependency here.
 
 Tiles are read per-request via SQL — the file (can be hundreds of MB) is
 never loaded into memory as a whole.
+
+``install_from_stream``/``install_from_url`` (OFFLINE-MAP-3) let the operator
+supply a region file from the app itself — first-run onboarding, or later via
+Settings — instead of only through the CLI installer flags, which never run
+for a .rpm/.deb package install (those have no interactive step).
 """
 from __future__ import annotations
 
 import logging
 import sqlite3
+import tempfile
+from collections.abc import Callable
 from pathlib import Path
+from typing import BinaryIO
+
+import httpx
 
 from app.core.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+# Sanity cap so a mistyped URL / huge upload can't silently fill the disk.
+# Real region packages (a metro area to a small province at street zoom) are
+# tens to low hundreds of MB; whole-country extracts can reach a few GB.
+MAX_OFFLINE_MAP_BYTES = 4 * 1024**3  # 4 GiB
 
 
 def _resolve_path() -> Path | None:
@@ -125,3 +140,82 @@ def get_tile(z: int, x: int, y: int) -> tuple[bytes, str] | None:
     if row is None:
         return None
     return row[0], _content_type(row[0])
+
+
+def _target_path() -> Path:
+    """Where an installed region file lives, regardless of whether it exists
+    yet — unlike ``_resolve_path`` this never returns None (needed to know
+    where to *write*)."""
+    raw = get_settings().NETGEO_OFFLINE_MAP_PATH
+    if not raw:
+        raise ValueError("no offline-map path is configured (NETGEO_OFFLINE_MAP_PATH)")
+    return Path(raw).expanduser()
+
+
+def _require_tiles_table(path: Path) -> None:
+    """Raise ValueError unless ``path`` is a readable MBTiles file."""
+    conn = _connect(path)
+    try:
+        tables = {
+            row[0]
+            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        }
+    finally:
+        conn.close()
+    if "tiles" not in tables:
+        raise ValueError("not a valid MBTiles file (missing 'tiles' table)")
+
+
+def _write_capped(chunks, dest: BinaryIO) -> None:
+    """Copy an iterable of byte chunks into ``dest``, aborting past the size
+    cap — shared by both the upload (file object) and download (httpx
+    iterator) paths."""
+    written = 0
+    for chunk in chunks:
+        written += len(chunk)
+        if written > MAX_OFFLINE_MAP_BYTES:
+            raise ValueError(f"file exceeds the {MAX_OFFLINE_MAP_BYTES // 1024**3} GiB limit")
+        dest.write(chunk)
+
+
+def _install_atomic(write: Callable[[BinaryIO], None]) -> dict:
+    """Write into a temp file next to the target, validate, then atomically
+    replace — a crash or invalid file mid-write never corrupts a previously
+    working offline map."""
+    target = _target_path()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(dir=target.parent, suffix=".mbtiles.part")
+    tmp_path = Path(tmp_name)
+    try:
+        with open(fd, "wb") as out:
+            write(out)
+        _require_tiles_table(tmp_path)
+        tmp_path.replace(target)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    return get_status()
+
+
+def install_from_stream(fileobj: BinaryIO) -> dict:
+    """Install an uploaded MBTiles file as the offline map. Raises
+    ``ValueError`` (bad/oversized file) or ``sqlite3.Error`` (unreadable)."""
+    chunks = iter(lambda: fileobj.read(1024 * 1024), b"")
+    return _install_atomic(lambda out: _write_capped(chunks, out))
+
+
+def install_from_url(url: str) -> dict:
+    """Download an MBTiles file from ``url`` and install it. Raises
+    ``ValueError``, ``sqlite3.Error``, or ``httpx.HTTPError``."""
+    if not url.startswith(("http://", "https://")):
+        raise ValueError("url must start with http:// or https://")
+    with httpx.stream("GET", url, follow_redirects=True, timeout=60.0) as resp:
+        resp.raise_for_status()
+        return _install_atomic(lambda out: _write_capped(resp.iter_bytes(1024 * 1024), out))
+
+
+def remove_installed() -> dict:
+    """Delete the installed offline map file, if any — reverting to online
+    tiles. A no-op (not an error) when nothing is installed."""
+    _target_path().unlink(missing_ok=True)
+    return get_status()

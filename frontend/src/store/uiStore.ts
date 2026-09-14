@@ -29,6 +29,7 @@ export type ModalId =
   | 'fiberDetail'
   | 'onboarding'
   | 'mapOnboarding'
+  | 'mapSourceSetup'
   | 'addressingWizard'
   | 'iconLibrary'
   | 'updates'
