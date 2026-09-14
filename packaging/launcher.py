@@ -80,9 +80,6 @@ def _webview_unavailable(exc: Exception | None) -> str:
     )
 
 
-_QT_MODULES = ("PySide6", "PyQt6", "PyQt5")
-
-
 class _WindowBridge:
     """js_api bridge for the frameless window's own title bar (frontend
     NativeTitleBar.tsx, called as window.pywebview.api.*).
@@ -149,25 +146,51 @@ class _WindowBridge:
     def _native(self):
         return self._window.native
 
-    def _is_qt(self, native: object) -> bool:
-        return type(native).__module__.split(".")[0] in _QT_MODULES
+    def _is_qt(self) -> bool:
+        """Which pywebview platform backend is actually driving this window.
+
+        NOT `type(native).__module__` (the previous check): `BrowserView`,
+        the native widget class, is defined *inside pywebview's own*
+        webview/platforms/qt.py (`class BrowserView(QMainWindow)`), so its
+        `__module__` is always "webview.platforms.qt" — never "PySide6" —
+        no matter which backend is active. That made the old check always
+        False, so every window op fell through to the GTK branch, which
+        needs `gi`, which is never bundled (confirmed live: Surya's drag
+        attempt on the installed 1.2.125.1 package raised exactly
+        `ModuleNotFoundError: No module named 'gi'` from inside begin_move).
+
+        pywebview itself already tracks which backend won: `Window._initialize`
+        (webview/window.py) stores the winning platform module on
+        `self.gui`, and every built-in Window method dispatches through it
+        (`self.gui.destroy_window(...)` etc) — that's the one place
+        pywebview keeps this fact, so read it from there instead of
+        re-deriving it from a widget class that happens to live in
+        pywebview's own package regardless of backend. This can't go stale
+        the way the old check did: as long as pywebview keeps using `.gui`
+        to dispatch (its own core mechanism), this reads the true answer.
+        """
+        gui = getattr(self._window, "gui", None)
+        return bool(gui) and gui.__name__.rsplit(".", 1)[-1] == "qt"
 
     def _run_on_gui_thread(self, fn) -> None:
-        native = self._native()
-        if self._is_qt(native):
-            try:
+        try:
+            if self._is_qt():
                 from PySide6.QtCore import QTimer
                 from PySide6.QtWidgets import QApplication
 
                 QTimer.singleShot(0, QApplication.instance(), fn)
-            except Exception:
-                pass  # ponytail: marshal failed to schedule — skip the op,
-                # never run it off-thread (see class docstring: that
-                # fallback is what used to abort the process)
-        else:
-            from gi.repository import GLib
+            else:
+                from gi.repository import GLib
 
-            GLib.idle_add(fn)
+                GLib.idle_add(fn)
+        except Exception:
+            pass  # ponytail: marshal failed to schedule (e.g. `gi` missing —
+            # never bundled, so the GTK branch is only ever reachable on a
+            # source run with system GTK installed) — skip the op, never run
+            # it off-thread or let it raise into the js_api caller (see class
+            # docstring: an off-thread Qt call is what used to abort the
+            # process; an uncaught raise here is what used to print the
+            # `gi` traceback to stderr and silently kill the window op).
 
     def button_layout(self) -> dict:
         """Called once by NativeTitleBar.tsx on mount — see _button_layout()."""
@@ -182,7 +205,7 @@ class _WindowBridge:
     def toggle_maximize(self) -> None:
         def _do() -> None:
             native = self._native()
-            if self._is_qt(native):
+            if self._is_qt():
                 native.showNormal() if native.isMaximized() else native.showMaximized()
             else:
                 native.unmaximize() if native.is_maximized() else native.maximize()
@@ -192,7 +215,7 @@ class _WindowBridge:
     def begin_move(self) -> None:
         def _do() -> None:
             native = self._native()
-            if self._is_qt(native):
+            if self._is_qt():
                 handle = native.windowHandle()
                 if handle is not None:
                     handle.startSystemMove()
@@ -211,7 +234,7 @@ class _WindowBridge:
 
         def _do() -> None:
             native = self._native()
-            if self._is_qt(native):
+            if self._is_qt():
                 from PySide6.QtCore import Qt as QtNS
 
                 edges = {
@@ -352,6 +375,22 @@ def _try_webview(url: str) -> bool:
         easy_drag=False,  # would else make the WHOLE window draggable, breaking map/canvas clicks
         transparent=True,  # required for the CSS border-radius rounded corners to actually show
         background_color="#0F0F0E",  # theme/tokens.ts --ng-bg-0 — avoids a white flash before CSS paints
+        # Surya QA, 2026-09-14: default pywebview size (800x600) left the
+        # topology UI "berantakan" — rail overlapping the filter chips/
+        # search field, top-toolbar buttons pushed off-screen. Measured
+        # live with Playwright against this same built frontend.dist (not
+        # guessed): layout is intact at 1040x700, and breaks (search field
+        # clipped to "…ce or IP…", OSPF chip clipped off, rail overlapping
+        # the filter row) at both 1000x720 (width-driven) and 1040x650
+        # (height-driven — the left rail's fixed content height no longer
+        # fits). min_size below adds a small margin over that measured
+        # floor; initial size is a comfortable common laptop resolution
+        # well above it, not a fix for the clipping itself (still real at
+        # the floor — see class docstring / packaging/README.md for that
+        # open item).
+        width=1440,
+        height=900,
+        min_size=(1100, 720),
     )
     bridge.bind(window)
     try:
