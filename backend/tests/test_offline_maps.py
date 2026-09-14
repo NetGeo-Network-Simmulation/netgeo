@@ -93,3 +93,81 @@ async def test_configured_path_that_does_not_exist_is_unavailable(client, tmp_pa
     status = (await client.get("/api/maps/status")).json()
     assert status["available"] is False
     assert status["path"] is None
+
+
+# --------------------------------------------------------------------------
+# Install endpoints (OFFLINE-MAP-3) — upload / download-by-URL / remove.
+# The .rpm/.deb install path has no interactive step, so these let the
+# in-app first-run screen (and Settings, later) install a region file
+# instead of only the CLI installer flags.
+# --------------------------------------------------------------------------
+
+
+def _mbtiles_bytes() -> bytes:
+    """A minimal-but-valid MBTiles file, as raw bytes (for upload)."""
+    import tempfile
+
+    with tempfile.NamedTemporaryFile(suffix=".mbtiles") as f:
+        _make_mbtiles(f.name)
+        return open(f.name, "rb").read()
+
+
+async def test_upload_installs_and_status_reflects_it(client, tmp_path, monkeypatch):
+    target = tmp_path / "installed.mbtiles"
+    monkeypatch.setattr(get_settings(), "NETGEO_OFFLINE_MAP_PATH", str(target))
+
+    resp = await client.post(
+        "/api/maps/offline-map/upload",
+        files={"file": ("region.mbtiles", _mbtiles_bytes(), "application/octet-stream")},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["available"] is True
+    assert target.is_file()
+
+    status = (await client.get("/api/maps/status")).json()
+    assert status["available"] is True
+    assert status["region"] == "Test Region"
+
+
+async def test_upload_rejects_non_mbtiles_and_leaves_nothing_behind(client, tmp_path, monkeypatch):
+    target = tmp_path / "installed.mbtiles"
+    monkeypatch.setattr(get_settings(), "NETGEO_OFFLINE_MAP_PATH", str(target))
+
+    resp = await client.post(
+        "/api/maps/offline-map/upload",
+        files={"file": ("garbage.mbtiles", b"not a sqlite file", "application/octet-stream")},
+    )
+    assert resp.status_code == 422
+    assert not target.exists()
+    # No leftover .part temp files either.
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_download_rejects_non_http_url(client, tmp_path, monkeypatch):
+    target = tmp_path / "installed.mbtiles"
+    monkeypatch.setattr(get_settings(), "NETGEO_OFFLINE_MAP_PATH", str(target))
+
+    resp = await client.post("/api/maps/offline-map/download", json={"url": "file:///etc/passwd"})
+    assert resp.status_code == 422
+    assert not target.exists()
+
+
+async def test_remove_deletes_installed_file(client, tmp_path, monkeypatch):
+    target = tmp_path / "installed.mbtiles"
+    _make_mbtiles(target)
+    monkeypatch.setattr(get_settings(), "NETGEO_OFFLINE_MAP_PATH", str(target))
+
+    assert (await client.get("/api/maps/status")).json()["available"] is True
+
+    resp = await client.delete("/api/maps/offline-map")
+    assert resp.status_code == 200
+    assert resp.json()["available"] is False
+    assert not target.exists()
+
+
+async def test_remove_is_a_noop_when_nothing_installed(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(get_settings(), "NETGEO_OFFLINE_MAP_PATH", str(tmp_path / "nope.mbtiles"))
+
+    resp = await client.delete("/api/maps/offline-map")
+    assert resp.status_code == 200
+    assert resp.json()["available"] is False

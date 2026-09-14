@@ -18,6 +18,12 @@ interface AuthState {
   loggingIn: boolean;
   /** null = unknown (not checked yet); true = first-run setup pending. */
   setupRequired: boolean | null;
+  /** True for the rest of this session right after `setup()` succeeds —
+   *  ModalLayer reads it once to trigger the first-run map-source screen.
+   *  Deliberately in-memory only (not persisted): setup can succeed at most
+   *  once per server, so losing this on reload just means the operator opens
+   *  Settings → General instead, not a stuck or repeating prompt. */
+  justCompletedSetup: boolean;
 
   login: (username: string, password: string) => Promise<boolean>;
   logout: () => void;
@@ -26,6 +32,8 @@ interface AuthState {
   checkSetup: () => Promise<void>;
   /** First-run setup: create the admin account, then sign in with its token. */
   setup: (username: string, password: string) => Promise<boolean>;
+  /** Consume the justCompletedSetup flag once ModalLayer has acted on it. */
+  clearJustCompletedSetup: () => void;
   /** Change the signed-in user's password. Resolves to an error message or null. */
   changePassword: (currentPassword: string, newPassword: string) => Promise<string | null>;
 }
@@ -40,6 +48,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   loginError: null,
   loggingIn: false,
   setupRequired: null,
+  justCompletedSetup: false,
 
   login: async (username, password) => {
     set({ loggingIn: true, loginError: null });
@@ -104,6 +113,7 @@ export const useAuthStore = create<AuthState>((set) => ({
         loginError: null,
         loggingIn: false,
         setupRequired: false,
+        justCompletedSetup: true,
       });
       return true;
     } catch (err) {
@@ -125,6 +135,8 @@ export const useAuthStore = create<AuthState>((set) => ({
       return false;
     }
   },
+
+  clearJustCompletedSetup: () => set({ justCompletedSetup: false }),
 
   changePassword: async (currentPassword, newPassword) => {
     try {

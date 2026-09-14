@@ -104,11 +104,7 @@ export function LoginPage() {
           {/* Header stripe */}
           <div className="border-b border-fg/10 px-8 pb-6 pt-8 text-center">
             <div className="mx-auto mb-4 grid h-14 w-14 place-items-center rounded-2xl bg-accent shadow-lg shadow-accent/40">
-              {isSetup ? (
-                <ShieldCheck className="h-7 w-7 text-accent-fg" />
-              ) : (
-                <BrandMark className="h-7 w-7 text-accent-fg" />
-              )}
+              <BrandMark className="h-7 w-7 text-accent-fg" />
             </div>
             <h1 className="text-xl font-semibold text-fg">NetGeo</h1>
             <p className="mt-1 text-sm text-fg/50">
