@@ -7,31 +7,27 @@ and timing are never compared -- see ORACLE_HARNESS.md.
 
 Criteria compared, each isolated so a mismatch points at exactly one RFC
 tie-break step:
+- (a) higher local-pref wins, all else tied
+      -> test_oracle_bgp_prefers_higher_local_pref
 - (b) shortest AS-path wins, all else tied
       -> test_oracle_bgp_prefers_shorter_as_path
+- (c) lowest origin type wins (igp < egp < incomplete), AS-path tied
+      -> test_oracle_bgp_prefers_igp_origin_over_incomplete
+- (d) lowest MED wins, compared only between routes from the same
+      neighboring AS
+      -> test_oracle_bgp_prefers_lower_med_same_as
 - (e) eBGP beats iBGP, all else tied
       -> test_oracle_bgp_prefers_ebgp_over_ibgp
 
-Criteria SKIPPED, and why -- a real engine gap, not a harness shortcoming
-(see the field comments on ``BgpAttrs`` in engine/netstack/protocols/bgp.py):
-- (a) local-pref, (c) origin type, (d) MED: this engine has no route-map /
-  redistribute config surface that ever produces a non-default value for
-  these three attributes through a real message flow -- local_pref is
-  always 100 on origination, origin is always "igp", med is always 0. The
-  only way to hand the sim side a different value is to poke ``BgpAttrs``/
-  ``rib_in`` directly, exactly like ``test_bgp_bestpath.py``'s pure
-  decision-process unit tests already do. Doing that here while FRR gets a
-  real route-map on the wire would compare two different things dressed up
-  as one -- config surface on FRR's side, hand-injected attributes on the
-  sim's -- which is exactly the "berpura-pura membandingkan" this harness
-  is told to avoid. Skipped rather than faked; revisit once the sim grows
-  real route-map support.
-- Re-checked 2026-09-12 per an explicit request to add local-pref and origin
-  oracle cases (treating MED alone as the risky one): all three hit the
-  identical wall, not just MED. ``add_neighbor``/``advertise_network`` take
-  no local-pref/origin/MED override of any kind (grepped -- confirmed), so
-  none of the three can be produced on the sim side without the same
-  hand-injection this file already refuses to do for the other two.
+(a)/(c)/(d) became writable only in v1.2.123, when ``add_neighbor`` grew
+``local_pref_in``/``med_out`` and ``advertise_network`` grew ``origin``.
+Before that, driving a non-default local-pref/origin/MED into the sim meant
+poking ``BgpAttrs``/``rib_in`` directly (as ``test_bgp_bestpath.py``'s pure
+decision-process unit tests still do), which would have compared a real FRR
+route-map against a hand-injected sim attribute -- two different things
+dressed up as one, exactly the "berpura-pura membandingkan" this harness is
+told to avoid. All five RFC 4271 §9.1.2.2 tie-break criteria this engine
+implements now have an oracle case.
 
 FRR knobs pinned explicitly in every node's config (not left at whatever the
 image defaults to):
@@ -46,20 +42,14 @@ image defaults to):
   future test that does reach it isn't silently decided by FRR's non-RFC
   "oldest path" default instead of router-id.
 - ``bgp deterministic-med``: ON, so MED-adjacent comparisons don't inherit
-  FRR's arrival-order artifact from its off-mode grouping (irrelevant to the
-  two scenarios here -- neither sets a MED -- pinned for the same
-  future-proofing reason as compare-routerid above).
+  FRR's arrival-order artifact from its off-mode grouping (also exercised
+  for real by ``test_oracle_bgp_prefers_lower_med_same_as`` below).
 - ``no bgp ebgp-requires-policy`` / ``no bgp network import-check``: not
   outcome knobs -- without them FRR's RFC 8212 default refuses to exchange
   routes with no attached route-map at all, and ``network`` refuses to
   advertise a prefix with no matching RIB entry. Neither knob is part of
   RFC 4271 §9.1.2.2; both exist purely so the topology comes up at all,
   mirroring the sim's own ``advertise_network()`` which has no such gates.
-
-CORRECTION (v1.2.123): the gap described above is CLOSED. ``add_neighbor`` now
-takes ``local_pref_in`` / ``med_out`` and ``advertise_network`` takes ``origin``,
-so those three attributes can be driven through a real message flow and oracle
-cases for them are writable. Do not cite the paragraphs above as a live blocker.
 """
 from __future__ import annotations
 
@@ -117,17 +107,33 @@ def _bgp_conf(
     iface_ips: list[tuple[str, str]],
     neighbors: list[tuple[str, int]],
     networks: list[str],
+    route_maps: tuple[str, ...] = (),
+    neighbor_route_maps: tuple[tuple[str, str, str], ...] = (),
+    network_route_maps: dict[str, str] | None = None,
 ) -> str:
+    """``route_maps`` are raw ``route-map ...``/``set ...`` lines emitted
+    before the ``router bgp`` block; ``neighbor_route_maps`` are
+    ``(peer_ip, "in"|"out", rm_name)`` triples attached as
+    ``neighbor <peer_ip> route-map <rm_name> <in|out>``; ``network_route_maps``
+    maps a prefix to a route-map attaching attributes at origination
+    (``network <prefix> route-map <rm_name>``). All three are only used by
+    the local-pref/origin/MED oracle cases below -- the AS-path and
+    eBGP-vs-iBGP cases need none of them."""
     lines = ["frr version 10.7", "frr defaults traditional", f"hostname {hostname}", "!"]
     for iface, ip in iface_ips:
         lines += [f"interface {iface}", f" ip address {ip}/29", "!"]
+    lines.extend(route_maps)
     lines.append(f"router bgp {asn}")
     lines.append(f" bgp router-id {router_id}")
     lines.append(_BESTPATH_KNOBS.rstrip("\n"))
     for peer_ip, remote_asn in neighbors:
         lines.append(f" neighbor {peer_ip} remote-as {remote_asn}")
+    for peer_ip, direction, rm_name in neighbor_route_maps:
+        lines.append(f" neighbor {peer_ip} route-map {rm_name} {direction}")
+    network_route_maps = network_route_maps or {}
     for net_ in networks:
-        lines.append(f" network {net_}")
+        rm_name = network_route_maps.get(net_)
+        lines.append(f" network {net_} route-map {rm_name}" if rm_name else f" network {net_}")
     lines += ["!", "line vty", "!"]
     return "\n".join(lines) + "\n"
 
@@ -152,6 +158,12 @@ def bgp_cluster():
             "oracle-bgp-ebgp-hub-r2",
             "oracle-bgp-ebgp-hub-up1",
             "oracle-bgp-ebgp-r2-up2",
+            "oracle-bgp-lp-hub-up1",
+            "oracle-bgp-lp-hub-up2",
+            "oracle-bgp-origin-hub-up1",
+            "oracle-bgp-origin-hub-up2",
+            "oracle-bgp-med-hub-upa",
+            "oracle-bgp-med-hub-upb",
         ):
             subprocess.run(
                 ["podman", "network", "rm", "-f", f"netgeo-link-{link_id}"],
@@ -160,6 +172,9 @@ def bgp_cluster():
         for node_id in (
             "oracle-bgp-hub", "oracle-bgp-up1", "oracle-bgp-up2", "oracle-bgp-up3",
             "oracle-bgp-r2",
+            "oracle-bgp-lp-hub", "oracle-bgp-lp-up1", "oracle-bgp-lp-up2",
+            "oracle-bgp-origin-hub", "oracle-bgp-origin-up1", "oracle-bgp-origin-up2",
+            "oracle-bgp-med-hub", "oracle-bgp-med-upa", "oracle-bgp-med-upb",
         ):
             subprocess.run(
                 ["podman", "rm", "-f", f"{CONTAINER_PREFIX}{node_id}"],
@@ -204,8 +219,14 @@ def _push_bgp_conf(
     iface_ips: list[tuple[str, str]],
     neighbors: list[tuple[str, int]],
     networks: list[str],
+    route_maps: tuple[str, ...] = (),
+    neighbor_route_maps: tuple[tuple[str, str, str], ...] = (),
+    network_route_maps: dict[str, str] | None = None,
 ) -> None:
-    conf = _bgp_conf(hostname, asn, router_id, iface_ips, neighbors, networks)
+    conf = _bgp_conf(
+        hostname, asn, router_id, iface_ips, neighbors, networks,
+        route_maps, neighbor_route_maps, network_route_maps,
+    )
     _put_text(container, "/etc/frr", "frr.conf", conf)
     container.exec_run(["chown", "frr:frr", "/etc/frr/frr.conf"])
     container.exec_run(["chmod", "640", "/etc/frr/frr.conf"])
@@ -422,3 +443,244 @@ def _sim_ebgp_over_ibgp_topology() -> tuple[Network, str]:
     net.start()
     net.run(until=20.0)
     return net, "10.0.2.1"
+
+
+# ---------------------------------------------------------------------------
+# Oracle case 3: higher local-pref wins, all else tied (RFC 4271 §9.1.2.2 (a)).
+#
+#   hub (65000) --- up1 (65001, originates PFX)   local-pref 100 (default)
+#   hub (65000) --- up2 (65002, originates PFX)   local-pref 200 (route-map in)
+#
+# Both routes are direct eBGP, AS-path len 1, origin igp, MED N/A (different
+# neighboring ASes) -- only local-pref differs. hub must pick up2's route.
+# ---------------------------------------------------------------------------
+
+@skip_no_podman
+async def test_oracle_bgp_prefers_higher_local_pref(bgp_cluster):
+    a, client = bgp_cluster
+    asns = {
+        "oracle-bgp-lp-hub": 65000, "oracle-bgp-lp-up1": 65001, "oracle-bgp-lp-up2": 65002,
+    }
+    links = [
+        ("oracle-bgp-lp-hub-up1", "oracle-bgp-lp-hub", "oracle-bgp-lp-up1"),
+        ("oracle-bgp-lp-hub-up2", "oracle-bgp-lp-hub", "oracle-bgp-lp-up2"),
+    ]
+    containers, link_ips = await _spawn_and_wire_bgp(a, client, asns, links)
+    ip_hub_up1, ip_up1 = link_ips["oracle-bgp-lp-hub-up1"]
+    ip_hub_up2, ip_up2 = link_ips["oracle-bgp-lp-hub-up2"]
+
+    iface_hub_up1 = _iface_for_ip(containers["oracle-bgp-lp-hub"], ip_hub_up1)
+    iface_hub_up2 = _iface_for_ip(containers["oracle-bgp-lp-hub"], ip_hub_up2)
+    iface_up1 = _iface_for_ip(containers["oracle-bgp-lp-up1"], ip_up1)
+    iface_up2 = _iface_for_ip(containers["oracle-bgp-lp-up2"], ip_up2)
+
+    _push_bgp_conf(
+        containers["oracle-bgp-lp-hub"], "hub", 65000, "9.9.9.9",
+        [(iface_hub_up1, ip_hub_up1), (iface_hub_up2, ip_hub_up2)],
+        [(ip_up1, 65001), (ip_up2, 65002)], [],
+        route_maps=("route-map SET-LP permit 10", " set local-preference 200", "!"),
+        neighbor_route_maps=((ip_up2, "in", "SET-LP"),),
+    )
+    _push_bgp_conf(
+        containers["oracle-bgp-lp-up1"], "up1", 65001, "1.1.1.1",
+        [(iface_up1, ip_up1)], [(ip_hub_up1, 65000)], [PFX],
+    )
+    _push_bgp_conf(
+        containers["oracle-bgp-lp-up2"], "up2", 65002, "2.2.2.2",
+        [(iface_up2, ip_up2)], [(ip_hub_up2, 65000)], [PFX],
+    )
+
+    frr_best = _frr_bgp_best_nexthop(containers["oracle-bgp-lp-hub"], PFX)
+    assert frr_best == ip_up2, (
+        f"FRR picked next-hop {frr_best!r}, expected the higher-local-pref "
+        f"route via up2 ({ip_up2!r}) — real RFC 4271 §9.1.2.2(a) "
+        "non-conformance if this ever legitimately disagrees"
+    )
+
+    net, up2_ip = _sim_localpref_topology()
+    _attrs, sim_nh = net.devices["hub"].processes[0].best_paths()[IPv4Network(PFX)]
+    assert str(sim_nh) == up2_ip, f"sim picked {sim_nh}, expected up2 {up2_ip}"
+
+
+def _sim_localpref_topology() -> tuple[Network, str]:
+    net = Network(seed=41)
+    hub = net.add_device(Router("hub"))
+    up1 = net.add_device(Router("up1"))
+    up2 = net.add_device(Router("up2"))
+    _link(net, hub, "eth0", "10.0.1.2/30", up1, "eth0", "10.0.1.1/30")
+    _link(net, hub, "eth1", "10.0.2.2/30", up2, "eth0", "10.0.2.1/30")
+    phub = BgpProcess(hub, asn=65000, router_id="9.9.9.9", keepalive_interval=1.0)
+    phub.add_neighbor("10.0.1.1", 65001)
+    phub.add_neighbor("10.0.2.1", 65002, local_pref_in=200)
+    p1 = BgpProcess(up1, asn=65001, router_id="1.1.1.1", keepalive_interval=1.0)
+    p1.add_neighbor("10.0.1.2", 65000)
+    p1.advertise_network(PFX)
+    p2 = BgpProcess(up2, asn=65002, router_id="2.2.2.2", keepalive_interval=1.0)
+    p2.add_neighbor("10.0.2.2", 65000)
+    p2.advertise_network(PFX)
+    net.start()
+    net.run(until=20.0)
+    return net, "10.0.2.1"
+
+
+# ---------------------------------------------------------------------------
+# Oracle case 4: lowest origin type wins, AS-path tied (RFC 4271 §9.1.2.2 (c)).
+#
+#   hub (65000) --- up1 (65001, originates PFX, origin INCOMPLETE)
+#   hub (65000) --- up2 (65002, originates PFX, origin IGP, the default)
+#
+# Both routes are direct eBGP, AS-path len 1, local-pref 100 (no override),
+# MED N/A (different neighboring ASes) -- only origin differs. IGP < EGP <
+# Incomplete, so hub must pick up2's route.
+# ---------------------------------------------------------------------------
+
+@skip_no_podman
+async def test_oracle_bgp_prefers_igp_origin_over_incomplete(bgp_cluster):
+    a, client = bgp_cluster
+    asns = {
+        "oracle-bgp-origin-hub": 65000, "oracle-bgp-origin-up1": 65001,
+        "oracle-bgp-origin-up2": 65002,
+    }
+    links = [
+        ("oracle-bgp-origin-hub-up1", "oracle-bgp-origin-hub", "oracle-bgp-origin-up1"),
+        ("oracle-bgp-origin-hub-up2", "oracle-bgp-origin-hub", "oracle-bgp-origin-up2"),
+    ]
+    containers, link_ips = await _spawn_and_wire_bgp(a, client, asns, links)
+    ip_hub_up1, ip_up1 = link_ips["oracle-bgp-origin-hub-up1"]
+    ip_hub_up2, ip_up2 = link_ips["oracle-bgp-origin-hub-up2"]
+
+    iface_hub_up1 = _iface_for_ip(containers["oracle-bgp-origin-hub"], ip_hub_up1)
+    iface_hub_up2 = _iface_for_ip(containers["oracle-bgp-origin-hub"], ip_hub_up2)
+    iface_up1 = _iface_for_ip(containers["oracle-bgp-origin-up1"], ip_up1)
+    iface_up2 = _iface_for_ip(containers["oracle-bgp-origin-up2"], ip_up2)
+
+    _push_bgp_conf(
+        containers["oracle-bgp-origin-hub"], "hub", 65000, "9.9.9.9",
+        [(iface_hub_up1, ip_hub_up1), (iface_hub_up2, ip_hub_up2)],
+        [(ip_up1, 65001), (ip_up2, 65002)], [],
+    )
+    _push_bgp_conf(
+        containers["oracle-bgp-origin-up1"], "up1", 65001, "1.1.1.1",
+        [(iface_up1, ip_up1)], [(ip_hub_up1, 65000)], [PFX],
+        route_maps=("route-map SET-INCOMPLETE permit 10", " set origin incomplete", "!"),
+        network_route_maps={PFX: "SET-INCOMPLETE"},
+    )
+    _push_bgp_conf(
+        containers["oracle-bgp-origin-up2"], "up2", 65002, "2.2.2.2",
+        [(iface_up2, ip_up2)], [(ip_hub_up2, 65000)], [PFX],
+    )
+
+    frr_best = _frr_bgp_best_nexthop(containers["oracle-bgp-origin-hub"], PFX)
+    assert frr_best == ip_up2, (
+        f"FRR picked next-hop {frr_best!r}, expected the IGP-origin route "
+        f"via up2 ({ip_up2!r}) over up1's INCOMPLETE-origin route — real "
+        "RFC 4271 §9.1.2.2(c) non-conformance if this ever legitimately "
+        "disagrees"
+    )
+
+    net, up2_ip = _sim_origin_topology()
+    _attrs, sim_nh = net.devices["hub"].processes[0].best_paths()[IPv4Network(PFX)]
+    assert str(sim_nh) == up2_ip, f"sim picked {sim_nh}, expected up2 {up2_ip}"
+
+
+def _sim_origin_topology() -> tuple[Network, str]:
+    net = Network(seed=41)
+    hub = net.add_device(Router("hub"))
+    up1 = net.add_device(Router("up1"))
+    up2 = net.add_device(Router("up2"))
+    _link(net, hub, "eth0", "10.0.1.2/30", up1, "eth0", "10.0.1.1/30")
+    _link(net, hub, "eth1", "10.0.2.2/30", up2, "eth0", "10.0.2.1/30")
+    phub = BgpProcess(hub, asn=65000, router_id="9.9.9.9", keepalive_interval=1.0)
+    phub.add_neighbor("10.0.1.1", 65001)
+    phub.add_neighbor("10.0.2.1", 65002)
+    p1 = BgpProcess(up1, asn=65001, router_id="1.1.1.1", keepalive_interval=1.0)
+    p1.add_neighbor("10.0.1.2", 65000)
+    p1.advertise_network(PFX, origin="incomplete")
+    p2 = BgpProcess(up2, asn=65002, router_id="2.2.2.2", keepalive_interval=1.0)
+    p2.add_neighbor("10.0.2.2", 65000)
+    p2.advertise_network(PFX)
+    net.start()
+    net.run(until=20.0)
+    return net, "10.0.2.1"
+
+
+# ---------------------------------------------------------------------------
+# Oracle case 5: lowest MED wins, same neighboring AS (RFC 4271 §9.1.2.2 (d)).
+#
+#   hub (65000) --- upa (65001, originates PFX, MED 10 toward hub)
+#   hub (65000) --- upb (65001, originates PFX, MED 20 toward hub)
+#
+# upa and upb are two distinct routers in the SAME AS (65001), so their
+# leftmost AS_PATH hop matches and MED is directly comparable per (d) even
+# with ``always-compare-med`` off. AS-path len 1 for both, origin igp for
+# both, local-pref 100 for both -- only MED differs. hub must pick upa.
+# ---------------------------------------------------------------------------
+
+@skip_no_podman
+async def test_oracle_bgp_prefers_lower_med_same_as(bgp_cluster):
+    a, client = bgp_cluster
+    asns = {
+        "oracle-bgp-med-hub": 65000, "oracle-bgp-med-upa": 65001, "oracle-bgp-med-upb": 65001,
+    }
+    links = [
+        ("oracle-bgp-med-hub-upa", "oracle-bgp-med-hub", "oracle-bgp-med-upa"),
+        ("oracle-bgp-med-hub-upb", "oracle-bgp-med-hub", "oracle-bgp-med-upb"),
+    ]
+    containers, link_ips = await _spawn_and_wire_bgp(a, client, asns, links)
+    ip_hub_upa, ip_upa = link_ips["oracle-bgp-med-hub-upa"]
+    ip_hub_upb, ip_upb = link_ips["oracle-bgp-med-hub-upb"]
+
+    iface_hub_upa = _iface_for_ip(containers["oracle-bgp-med-hub"], ip_hub_upa)
+    iface_hub_upb = _iface_for_ip(containers["oracle-bgp-med-hub"], ip_hub_upb)
+    iface_upa = _iface_for_ip(containers["oracle-bgp-med-upa"], ip_upa)
+    iface_upb = _iface_for_ip(containers["oracle-bgp-med-upb"], ip_upb)
+
+    _push_bgp_conf(
+        containers["oracle-bgp-med-hub"], "hub", 65000, "9.9.9.9",
+        [(iface_hub_upa, ip_hub_upa), (iface_hub_upb, ip_hub_upb)],
+        [(ip_upa, 65001), (ip_upb, 65001)], [],
+    )
+    _push_bgp_conf(
+        containers["oracle-bgp-med-upa"], "upa", 65001, "1.1.1.1",
+        [(iface_upa, ip_upa)], [(ip_hub_upa, 65000)], [PFX],
+        route_maps=("route-map SET-MED-10 permit 10", " set metric 10", "!"),
+        neighbor_route_maps=((ip_hub_upa, "out", "SET-MED-10"),),
+    )
+    _push_bgp_conf(
+        containers["oracle-bgp-med-upb"], "upb", 65001, "1.1.1.2",
+        [(iface_upb, ip_upb)], [(ip_hub_upb, 65000)], [PFX],
+        route_maps=("route-map SET-MED-20 permit 10", " set metric 20", "!"),
+        neighbor_route_maps=((ip_hub_upb, "out", "SET-MED-20"),),
+    )
+
+    frr_best = _frr_bgp_best_nexthop(containers["oracle-bgp-med-hub"], PFX)
+    assert frr_best == ip_upa, (
+        f"FRR picked next-hop {frr_best!r}, expected the lower-MED route "
+        f"via upa ({ip_upa!r}) over upb's higher-MED route — real RFC 4271 "
+        "§9.1.2.2(d) non-conformance if this ever legitimately disagrees"
+    )
+
+    net, upa_ip = _sim_med_topology()
+    _attrs, sim_nh = net.devices["hub"].processes[0].best_paths()[IPv4Network(PFX)]
+    assert str(sim_nh) == upa_ip, f"sim picked {sim_nh}, expected upa {upa_ip}"
+
+
+def _sim_med_topology() -> tuple[Network, str]:
+    net = Network(seed=41)
+    hub = net.add_device(Router("hub"))
+    upa = net.add_device(Router("upa"))
+    upb = net.add_device(Router("upb"))
+    _link(net, hub, "eth0", "10.0.1.2/30", upa, "eth0", "10.0.1.1/30")
+    _link(net, hub, "eth1", "10.0.2.2/30", upb, "eth0", "10.0.2.1/30")
+    phub = BgpProcess(hub, asn=65000, router_id="9.9.9.9", keepalive_interval=1.0)
+    phub.add_neighbor("10.0.1.1", 65001)
+    phub.add_neighbor("10.0.2.1", 65001)
+    pa = BgpProcess(upa, asn=65001, router_id="1.1.1.1", keepalive_interval=1.0)
+    pa.add_neighbor("10.0.1.2", 65000, med_out=10)
+    pa.advertise_network(PFX)
+    pb = BgpProcess(upb, asn=65001, router_id="1.1.1.2", keepalive_interval=1.0)
+    pb.add_neighbor("10.0.2.2", 65000, med_out=20)
+    pb.advertise_network(PFX)
+    net.start()
+    net.run(until=20.0)
+    return net, "10.0.1.1"
