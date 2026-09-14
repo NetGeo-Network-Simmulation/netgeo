@@ -169,6 +169,15 @@ def test_try_webview_succeeds_when_backend_available(monkeypatch):
     # title bar) — keep this sharp, not just "didn't throw".
     assert calls["frameless"] is True
     assert calls["transparent"] is True
+    # BUG 4 (Surya QA, 2026-09-14): pywebview's 800x600 default left the
+    # topology UI broken (rail over the filter row, search field and
+    # toolbar buttons clipped). Measured live with Playwright against the
+    # built frontend.dist: intact at 1040x700, broken at 1000x720 and at
+    # 1040x650 — min_size must sit above that measured floor on both axes.
+    assert calls["width"] >= 1100
+    assert calls["height"] >= 720
+    assert calls["min_size"][0] >= 1100
+    assert calls["min_size"][1] >= 720
 
 
 def test_try_webview_subscribes_maximize_restore_for_corner_rounding(monkeypatch):
@@ -257,10 +266,37 @@ def test_button_layout_falls_back_on_nonzero_exit_and_malformed_value(monkeypatc
 
 def _make_qt_bridge():
     bridge = launcher._WindowBridge()
-    fake_native = type("FakeNative", (), {"__module__": "PySide6.QtWidgets"})()
-    fake_window = type("FakeWindow", (), {"native": fake_native})()
+    # Realistic shape: pywebview's own `BrowserView(QMainWindow)` is defined
+    # *inside* webview/platforms/qt.py, so its __module__ is always
+    # "webview.platforms.qt" — never "PySide6.*" — no matter which backend
+    # is active (a prior fake here used "PySide6.QtWidgets", which is not
+    # what pywebview 6.x actually produces and masked the BUG 1 regression
+    # below). `.gui` is the platform module pywebview's own
+    # Window._initialize() records (webview/window.py) — what _is_qt() reads.
+    fake_native = type("FakeNative", (), {"__module__": "webview.platforms.qt"})()
+    fake_gui = type(sys)("webview.platforms.qt")
+    fake_window = type("FakeWindow", (), {"native": fake_native, "gui": fake_gui})()
     bridge.bind(fake_window)
     return bridge
+
+
+def test_is_qt_reads_window_gui_not_native_class_module():
+    """BUG 1 regression (Surya QA, 2026-09-14 on the installed 1.2.125.1
+    package): dragging raised `ModuleNotFoundError: No module named 'gi'`
+    from inside begin_move. Root cause was `_is_qt()` checking
+    `type(native).__module__`, which for pywebview's real BrowserView is
+    "webview.platforms.qt" (pywebview's own package) — never "PySide6" — so
+    the check was always False and every op fell through to the GTK branch.
+    This fake reproduces that exact real shape; it fails against the old
+    `type(native).__module__.split(".")[0] in ("PySide6", ...)` check and
+    passes against the fixed `.gui`-based one."""
+    bridge = _make_qt_bridge()
+    assert bridge._is_qt() is True
+
+    gtk_bridge = launcher._WindowBridge()
+    fake_gui = type(sys)("webview.platforms.gtk")
+    gtk_bridge.bind(type("FakeWindow", (), {"gui": fake_gui})())
+    assert gtk_bridge._is_qt() is False
 
 
 def test_run_on_gui_thread_uses_qtimer_singleshot_not_invokemethod(monkeypatch):
