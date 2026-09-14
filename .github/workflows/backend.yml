@@ -30,7 +30,7 @@ jobs:
           else
             files=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo backend/)
           fi
-          if echo "$files" | grep -qE '^(backend/|infra/db/|\.github/workflows/backend\.yml)'; then
+          if echo "$files" | grep -qE '^(backend/|infra/db/|packaging/|\.github/workflows/backend\.yml)'; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
