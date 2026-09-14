@@ -132,9 +132,43 @@ class _WindowBridge:
     method with zero thread dispatch of their own, so those two were
     exactly as off-thread-unsafe as the broken toggle_maximize, just not
     yet the one Surya happened to click first). Still NOT verified against
-    a real running Qt/PySide6 process — no working Qt install exists on
-    this dev machine (only the GTK backend was available) — exercise a real
-    maximize/minimize/close for real before shipping the next package.
+    a real running Qt/PySide6 process at the time this was written — that
+    gap is now closed (2026-09-14, same day): a scratch venv with the exact
+    PySide6 6.11.2 + pywebview 6.2.1 pinned by packaging/requirements.txt
+    (verified identical to what's PyInstaller-bundled at
+    /opt/netgeo/_internal/PySide6, itself confirmed via `rpm -ql netgeo`)
+    ran this exact `_try_webview()` unmodified, on this machine's real
+    GNOME Wayland session, driving the real built frontend end-to-end.
+    maximize/minimize/close/begin_move/begin_resize all confirmed working
+    (QTimer.singleShot marshal fires, no SIGABRT, no off-thread Qt calls).
+
+    Surya separately reported a persistent dark decoration bar (app icon +
+    "NetGeo" text + a single unlabeled close button, no minimize/maximize,
+    unresponsive to drag) on top of the INSTALLED v1.2.125.1 package — and
+    proved with `QT_WAYLAND_DECORATION=bradient` that changing its
+    appearance is possible, meaning *some* QtWaylandClient client-side-
+    decoration plugin is genuinely being invoked on that build, not just a
+    look-alike in our own page. That could not be reproduced here: polling
+    `native.frameGeometry()` vs `native.geometry()` every 1-2s for 8s
+    straight, through this exact unmodified `_try_webview()` (this fix
+    included) against the real backend, the two stayed pixel-identical the
+    entire time — Qt's own accounting of zero extra decoration pixels —
+    and `native.grab()` shows NativeTitleBar rendering correctly (real
+    `_button_layout()` result too: left side, close/minimize/maximize,
+    matching Surya's actual `close,minimize,maximize:appmenu` gsetting).
+    Same result driving raw PySide6 directly (no pywebview wrapper) and
+    with a real QWebEngineView loaded with the real heavy app, ruling out
+    "WebEngine itself breaks frameless" as well. So the Python-level
+    flag-setting in this file (`frameless=True` -> `Qt.FramelessWindowHint`
+    in webview/platforms/qt.py, unmodified pywebview code) is proven
+    sufficient and correct in a clean environment with identical library
+    versions — the open question is something specific to the PyInstaller-
+    frozen runtime at /opt/netgeo (plugin resolution, a stale prior
+    install's cached Wayland state, or something not yet identified) that
+    a venv reproduction of the same source + same library versions does
+    not exhibit. Not guess-fixed here for that reason: re-test against a
+    freshly built package with this fix before assuming anything else is
+    wrong at the Python level.
     """
 
     def __init__(self) -> None:
