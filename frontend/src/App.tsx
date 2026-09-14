@@ -24,10 +24,14 @@ import { useTopologyStore } from '@/store/topologyStore';
 import { useAuthStore } from '@/store/authStore';
 import { useTopologyChannel } from '@/hooks/useTopologyChannel';
 import { useCollaboration } from '@/hooks/useCollaboration';
+import { useIsNativeShell, useIsMaximized } from '@/hooks/useNativeShell';
 import { applyTheme } from '@/theme/tokens';
+import { cn } from '@/lib/cn';
 
 export default function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isNative = useIsNativeShell();
+  const [isMaximized] = useIsMaximized();
   const theme = useUiStore((s) => s.theme);
   const projectId = useUiStore((s) => s.projectId);
   const setProject = useUiStore((s) => s.setProject);
@@ -39,6 +43,15 @@ export default function App() {
 
   // Apply persisted theme on mount.
   useEffect(() => applyTheme(theme), [theme]);
+
+  // Gates the rounded-corner native window frame (theme/globals.css
+  // `.native-shell`) — browser tabs (#4/#5) never get this class, so they
+  // keep body's plain square fill untouched. `<html>`/`<body>` live outside
+  // React's tree, so this is the one native-only side effect that has to
+  // reach them directly instead of via className.
+  useEffect(() => {
+    document.documentElement.classList.toggle('native-shell', isNative);
+  }, [isNative]);
 
   // Bootstrap: pick the first project and select it as the active workspace.
   const { data: projects } = useQuery({
@@ -93,7 +106,13 @@ export default function App() {
     projects?.find((p) => p.id === projectId)?.name ?? 'Untitled Project';
 
   return (
-    <div className="relative flex h-screen w-screen flex-col overflow-hidden">
+    <div
+      className={cn(
+        'relative flex h-screen w-screen flex-col overflow-hidden',
+        isNative && 'ng-native-frame',
+        isNative && isMaximized && 'ng-native-frame--maximized',
+      )}
+    >
       <NativeTitleBar />
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {isAuthenticated ? <AppShell projectName={projectName} conn={conn} /> : <LoginPage />}

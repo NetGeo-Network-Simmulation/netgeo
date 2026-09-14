@@ -16,8 +16,15 @@
 import { useEffect, useState } from 'react';
 import { Minus, Square, X } from 'lucide-react';
 import { cn } from '@/lib/cn';
+import { useIsNativeShell, useIsMaximized } from '@/hooks/useNativeShell';
 
 type ResizeEdge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+type ButtonKind = 'close' | 'minimize' | 'maximize';
+interface ButtonLayout {
+  side: 'left' | 'right';
+  order: ButtonKind[];
+}
+const DEFAULT_BUTTON_LAYOUT: ButtonLayout = { side: 'right', order: ['minimize', 'maximize', 'close'] };
 
 interface NetGeoWindowApi {
   minimize(): void;
@@ -25,27 +32,13 @@ interface NetGeoWindowApi {
   close(): void;
   begin_move(): void;
   begin_resize(edge: ResizeEdge): void;
+  button_layout(): Promise<ButtonLayout>;
 }
 
 declare global {
   interface Window {
     pywebview?: { api: NetGeoWindowApi; platform: string; token: string };
   }
-}
-
-/** True only inside the pywebview native window — never in a plain browser
- * tab. pywebview injects `window.pywebview` before page scripts run, but a
- * `pywebviewready` listener covers the (documented) case where it lands
- * slightly later than React's first paint. */
-function useIsNativeShell(): boolean {
-  const [isNative, setIsNative] = useState(() => typeof window !== 'undefined' && 'pywebview' in window);
-  useEffect(() => {
-    if (isNative) return;
-    const onReady = () => setIsNative(true);
-    window.addEventListener('pywebviewready', onReady);
-    return () => window.removeEventListener('pywebviewready', onReady);
-  }, [isNative]);
-  return isNative;
 }
 
 /** 24×24 "mirrored node" mark — brand set 8a, `netgeo-icon.svg` — inlined so
@@ -85,7 +78,20 @@ export const NATIVE_TITLE_BAR_HEIGHT = 36;
 
 export function NativeTitleBar() {
   const isNative = useIsNativeShell();
-  const [isMaximized, setIsMaximized] = useState(false);
+  const [isMaximized, setIsMaximized] = useIsMaximized();
+  // Fetched once from packaging/launcher.py's button_layout() bridge method
+  // (reads GNOME's button-layout gsetting) — starts at the same right-side
+  // default the buttons always had, so there's no flash for non-GNOME
+  // desktops or before the async call resolves.
+  const [layout, setLayout] = useState<ButtonLayout>(DEFAULT_BUTTON_LAYOUT);
+
+  useEffect(() => {
+    if (!isNative || !window.pywebview) return;
+    window.pywebview.api
+      .button_layout()
+      .then(setLayout)
+      .catch(() => {}); // ponytail: keep the default on any failure
+  }, [isNative]);
 
   if (!isNative || !window.pywebview) return null;
   const api = window.pywebview.api;
@@ -99,6 +105,46 @@ export function NativeTitleBar() {
     setIsMaximized((v) => !v);
   };
 
+  const buttonProps: Record<ButtonKind, { label: string; icon: React.ReactNode; onClick: () => void; className: string }> = {
+    minimize: {
+      label: 'Minimize',
+      icon: <Minus size={14} />,
+      onClick: () => api.minimize(),
+      className: 'hover:bg-fg/10',
+    },
+    maximize: {
+      label: isMaximized ? 'Restore' : 'Maximize',
+      icon: <Square size={11} />,
+      onClick: toggleMaximize,
+      className: 'hover:bg-fg/10',
+    },
+    close: {
+      label: 'Close',
+      icon: <X size={14} />,
+      onClick: () => api.close(),
+      className: 'hover:bg-danger/15 hover:text-danger',
+    },
+  };
+
+  const buttons = (
+    <div className="flex h-full items-stretch" onMouseDown={(e) => e.stopPropagation()}>
+      {layout.order.map((kind) => {
+        const b = buttonProps[kind];
+        return (
+          <button
+            key={kind}
+            type="button"
+            aria-label={b.label}
+            onClick={b.onClick}
+            className={cn('flex w-11 items-center justify-center', b.className)}
+          >
+            {b.icon}
+          </button>
+        );
+      })}
+    </div>
+  );
+
   return (
     <>
       <ResizeHandles api={api} />
@@ -108,37 +154,13 @@ export function NativeTitleBar() {
         onMouseDown={onMove}
         onDoubleClick={toggleMaximize}
       >
+        {layout.side === 'left' && buttons}
         <div className="flex items-center gap-1.5 pl-3 text-xs font-medium text-fg-subtle">
           <BrandGlyph />
           <span>NetGeo</span>
         </div>
         <div className="flex-1" />
-        <div className="flex h-full items-stretch" onMouseDown={(e) => e.stopPropagation()}>
-          <button
-            type="button"
-            aria-label="Minimize"
-            onClick={() => api.minimize()}
-            className="flex w-11 items-center justify-center hover:bg-fg/10"
-          >
-            <Minus size={14} />
-          </button>
-          <button
-            type="button"
-            aria-label={isMaximized ? 'Restore' : 'Maximize'}
-            onClick={toggleMaximize}
-            className="flex w-11 items-center justify-center hover:bg-fg/10"
-          >
-            <Square size={11} />
-          </button>
-          <button
-            type="button"
-            aria-label="Close"
-            onClick={() => api.close()}
-            className="flex w-11 items-center justify-center hover:bg-danger/15 hover:text-danger"
-          >
-            <X size={14} />
-          </button>
-        </div>
+        {layout.side === 'right' && buttons}
       </div>
     </>
   );

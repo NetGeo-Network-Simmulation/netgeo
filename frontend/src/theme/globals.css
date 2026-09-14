@@ -30,6 +30,54 @@ body {
   overflow: hidden;
 }
 
+/* ---- Native window frame (pywebview only) ---------------------------------
+   packaging/launcher.py opens the desktop window `frameless=True,
+   transparent=True` so real rounded corners can show through — but that
+   only works if nothing paints an opaque, square-cornered layer behind the
+   rounded shape. `body`'s own gradient fill above is exactly that: it has
+   no radius and would square off every corner regardless of what App.tsx
+   draws on top of it. So in the native shell (App.tsx toggles the
+   `native-shell` class on <html> via useIsNativeShell()) that fill moves
+   off `html`/`body` onto `.ng-native-frame` below — App.tsx's own root div
+   — which carries the identical gradient PLUS the radius PLUS
+   overflow-hidden to clip every descendant to that rounded shape,
+   including the bottom corners (the StatusBar/AppShell fill the rest of
+   that flex column, so they inherit the same clip — no separate rule
+   needed for "the bottom is a different component").
+   Browser tabs (distribution variants #4/#5) never get `native-shell` on
+   <html>, so they're untouched: body keeps its plain square fill exactly
+   as before this existed. */
+html.native-shell,
+html.native-shell body {
+  background: transparent;
+}
+.ng-native-frame {
+  background: radial-gradient(
+      130% 130% at 10% 0%,
+      var(--ng-bg-1, #141413) 0%,
+      var(--ng-bg-0, #0f0f0e) 62%
+    )
+    fixed;
+  border-radius: 10px;
+  /* `overflow: hidden` alone does not clip `position: fixed` descendants
+     (modals, toasts, the command palette) to this rounded shape — a fixed
+     element's containing block is the viewport unless an ancestor
+     establishes one, and `position: relative` (above) does not. `contain:
+     layout` does, with no visual side effect, so a full-viewport fixed
+     overlay gets clipped to the same rounded corners instead of its own
+     square ones peeking out past the radius. */
+  contain: layout;
+}
+/* GNOME/Windows/macOS all square a window's corners once it fills the
+   screen edge-to-edge — matching that convention instead of a floating
+   rounded rect with nothing behind the cut corners. Driven by
+   packaging/launcher.py's window.events.maximized/restored via
+   useIsMaximized(), not just our own title-bar button, so a WM keybinding
+   or drag-to-edge snap squares it off too. */
+.ng-native-frame.ng-native-frame--maximized {
+  border-radius: 0;
+}
+
 /* ---- Reusable surfaces ---------------------------------------------------- */
 @layer components {
   .glass {
