@@ -108,11 +108,36 @@ class _WindowBridge:
     the GTK/Qt GUI thread (see webview/util.py js_bridge_call). Confirmed
     live that touching GTK off-thread silently no-ops/races (is_maximized()
     read stale after an off-thread maximize()); wrapping in GLib.idle_add
-    fixed it. The Qt half mirrors this with QMetaObject.invokeMethod, per
-    Qt's own cross-thread-call contract, but is NOT verified on this
-    machine — no PySide6/Qt install exists here to test against (only the
-    GTK backend was available), so exercise it for real before shipping
-    the packaged (Qt-only) build.
+    fixed it.
+
+    The Qt half used to marshal via `QMetaObject.invokeMethod(receiver, fn,
+    QueuedConnection)` — WRONG (Surya QA, 2026-09-14 on 1.2.125.1: pressing
+    maximize killed the whole native window and fell back to the browser).
+    Verified against the bundled PySide6 6.11.2 binary (`strings` on the
+    packaged QtCore.abi3.so, no Qt/PySide6 install exists on this dev
+    machine to import and check directly): the ONLY `QMetaObject::
+    invokeMethod` symbol compiled in is the classic overload taking a
+    `const char*` method NAME, no functor overload exists at all. Passing a
+    Python callable as the 2nd arg therefore matches no overload, raises,
+    and used to be swallowed by a bare `except Exception: pass` that then
+    ran `fn()` synchronously right there on the js_api thread — calling a
+    Qt GUI method (showMaximized(), minimize(), destroy()) off the GUI
+    thread is undefined behavior in Qt, which is what aborted the child
+    process. Fixed with `QTimer.singleShot(0, context, fn)` instead: its
+    C++ impl (`QTimer::singleShotImpl(..., QSlotObjectBase*)`, confirmed
+    present in the same binary) runs `fn` on `context`'s thread via a
+    queued connection — no method-name string, no functor overload needed.
+    The direct `fn()` fallback is gone entirely: if scheduling itself fails,
+    the operation is skipped, never run off-thread. minimize()/close() now
+    route through this too (they used to call pywebview's Window.minimize()/
+    destroy() directly, unmarshaled — verified in webview/platforms/qt.py:
+    its module-level minimize(uid)/destroy_window(uid) call the Qt widget
+    method with zero thread dispatch of their own, so those two were
+    exactly as off-thread-unsafe as the broken toggle_maximize, just not
+    yet the one Surya happened to click first). Still NOT verified against
+    a real running Qt/PySide6 process — no working Qt install exists on
+    this dev machine (only the GTK backend was available) — exercise a real
+    maximize/minimize/close for real before shipping the next package.
     """
 
     def __init__(self) -> None:
@@ -131,25 +156,28 @@ class _WindowBridge:
         native = self._native()
         if self._is_qt(native):
             try:
-                from PySide6.QtCore import QMetaObject
-                from PySide6.QtCore import Qt as QtNS
+                from PySide6.QtCore import QTimer
                 from PySide6.QtWidgets import QApplication
 
-                QMetaObject.invokeMethod(QApplication.instance(), fn, QtNS.ConnectionType.QueuedConnection)
-                return
+                QTimer.singleShot(0, QApplication.instance(), fn)
             except Exception:
-                pass  # ponytail: best-effort marshal; direct call beats crashing
-            fn()
+                pass  # ponytail: marshal failed to schedule — skip the op,
+                # never run it off-thread (see class docstring: that
+                # fallback is what used to abort the process)
         else:
             from gi.repository import GLib
 
             GLib.idle_add(fn)
 
+    def button_layout(self) -> dict:
+        """Called once by NativeTitleBar.tsx on mount — see _button_layout()."""
+        return _button_layout()
+
     def minimize(self) -> None:
-        self._window.minimize()
+        self._run_on_gui_thread(lambda: self._window.minimize())
 
     def close(self) -> None:
-        self._window.destroy()
+        self._run_on_gui_thread(lambda: self._window.destroy())
 
     def toggle_maximize(self) -> None:
         def _do() -> None:
@@ -221,6 +249,55 @@ class _WindowBridge:
         self._run_on_gui_thread(_do)
 
 
+def _button_layout() -> dict:
+    """Read GNOME's `button-layout` gsetting (org.gnome.desktop.wm.
+    preferences) so NativeTitleBar.tsx places its own minimize/maximize/
+    close buttons on the side/order the user's actual desktop theme uses
+    (Surya 2026-09-14: "harus bisa menyesuaikan posisinya dengan tema yang
+    ada" — his MacTahoe-Dark theme puts them on the LEFT).
+
+    Format is "LEFT:RIGHT", each side a comma list, e.g.
+    'close,minimize,maximize:appmenu' -> left side, order close/minimize/
+    maximize; ':minimize,maximize,close' -> right side, same order as our
+    hardcoded default. Unknown tokens (appmenu, spacer, icon, ...) are
+    dropped; we only care about the three real buttons.
+
+    Falls back to the universal default (right side, minimize/maximize/
+    close — same as NativeTitleBar's old hardcoded layout, so nothing
+    regresses) when gsettings is missing (non-GNOME desktop, container) or
+    the key is unset/malformed. Never raises — a cosmetic read must not
+    block window creation.
+    """
+    default = {"side": "right", "order": ["minimize", "maximize", "close"]}
+    try:
+        result = subprocess.run(
+            ["gsettings", "get", "org.gnome.desktop.wm.preferences", "button-layout"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return default
+    if result.returncode != 0:
+        return default
+    value = result.stdout.strip().strip("'\"")
+    if ":" not in value:
+        return default
+    known = {"close", "minimize", "maximize"}
+    left_raw, right_raw = value.split(":", 1)
+    left = [t for t in left_raw.split(",") if t in known]
+    right = [t for t in right_raw.split(",") if t in known]
+    if left and not right:
+        return {"side": "left", "order": left}
+    if right and not left:
+        return {"side": "right", "order": right}
+    if left and right:
+        # Rare (both sides configured) — take whichever side has more
+        # buttons; a tie keeps the right (matches the universal default).
+        return {"side": "left", "order": left} if len(left) > len(right) else {"side": "right", "order": right}
+    return default
+
+
 def _try_webview(url: str) -> bool:
     """Open `url` in a native window (pywebview/WebKitGTK). Blocks on this
     (main) thread until the window closes; returns True if it ran that way.
@@ -277,6 +354,21 @@ def _try_webview(url: str) -> bool:
         background_color="#0F0F0E",  # theme/tokens.ts --ng-bg-0 — avoids a white flash before CSS paints
     )
     bridge.bind(window)
+    try:
+        # Corners must square off when maximized (GNOME/Windows/macOS
+        # convention — CSS side, theme/globals.css `.ng-native-frame--
+        # maximized`). These two events fire for ANY state change — our own
+        # toggle button, a WM keybinding, drag-to-edge snap — not just
+        # clicks inside NativeTitleBar, so they're the authoritative signal
+        # (verified in webview/platforms/qt.py changeEvent + gtk.py
+        # window-state-event: both call events.maximized/restored.set()
+        # from the native window's own state-change callback, which is
+        # already running on the GUI thread — no _run_on_gui_thread
+        # marshaling needed for the evaluate_js() call itself).
+        window.events.maximized += lambda: window.evaluate_js("window.dispatchEvent(new Event('netgeo:maximize'))")
+        window.events.restored += lambda: window.evaluate_js("window.dispatchEvent(new Event('netgeo:restore'))")
+    except Exception:
+        pass  # ponytail: best-effort corner-rounding sync only, never fatal
     try:
         webview.start(icon=str(icon_path) if icon_path.is_file() else None)
     except Exception as exc:  # webview.errors.WebViewException when GTK/Qt missing
