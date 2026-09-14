@@ -127,10 +127,15 @@ def test_try_webview_succeeds_when_backend_available(monkeypatch):
     """Sanity check the happy path too: start() returning normally -> True."""
     fake_webview = type(sys)("webview")
     calls = {}
-    fake_webview.create_window = lambda title, url: calls.update(title=title, url=url)
+    fake_webview.create_window = lambda title, url, **kwargs: calls.update(title=title, url=url, **kwargs)
     fake_webview.start = lambda **k: None
     monkeypatch.setitem(sys.modules, "webview", fake_webview)
 
     ok = launcher._try_webview("http://127.0.0.1:1")
     assert ok is True
-    assert calls == {"title": "NetGeo", "url": "http://127.0.0.1:1"}
+    assert calls["title"] == "NetGeo"
+    assert calls["url"] == "http://127.0.0.1:1"
+    # frameless + transparent are the 2026-09-14 decision (custom rounded
+    # title bar) — keep this sharp, not just "didn't throw".
+    assert calls["frameless"] is True
+    assert calls["transparent"] is True
