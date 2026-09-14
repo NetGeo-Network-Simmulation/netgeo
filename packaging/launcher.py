@@ -38,9 +38,8 @@ else:
     ICONS_DIR = REPO_ROOT / "packaging" / "icons"
 
 import uvicorn  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
-
 from app.main import app  # noqa: E402
+from fastapi.staticfiles import StaticFiles  # noqa: E402
 
 # Distro-specific WebKitGTK prerequisites (see docs/qa/2026-08-30-shell-dan-
 # desktop.md §6 / 2026-08-30-format-installer-linux.md §D — package names
@@ -79,6 +78,147 @@ def _webview_unavailable(exc: Exception | None) -> str:
         "membuka browser sistem sebagai gantinya.\n"
         "  Untuk jendela aplikasi asli, pasang WebKitGTK dulu:\n" + _WEBKIT_INSTALL_HINT
     )
+
+
+_QT_MODULES = ("PySide6", "PyQt6", "PyQt5")
+
+
+class _WindowBridge:
+    """js_api bridge for the frameless window's own title bar (frontend
+    NativeTitleBar.tsx, called as window.pywebview.api.*).
+
+    Frameless removes 100% of OS-drawn chrome, so drag/resize/minimize/
+    maximize/close all have to be reimplemented here — and pywebview 6.2.1
+    itself has real gaps doing that on Wayland (verified against the
+    installed library, not assumed):
+      - No edge-resize for a frameless window on either backend at all
+        (grep platforms/gtk.py and platforms/qt.py: only `easy_drag`'s
+        whole-window move exists; no begin_resize_drag/startSystemResize
+        call anywhere in the library) — reimplemented below via GDK/Qt
+        native calls.
+      - Window.move()/gtk_window_move() is a documented Wayland no-op
+        (absolute positioning isn't part of xdg-shell) — confirmed live
+        2026-09-14: window.move() after a frameless open left the window
+        at its original position. So dragging is reimplemented the same
+        way, via begin_move_drag/startSystemMove, instead of the CSS
+        `pywebview-drag-region` class the pywebview docs suggest (that
+        mechanism is built on the broken move()).
+
+    Every method here is invoked by pywebview on a throwaway Thread, not
+    the GTK/Qt GUI thread (see webview/util.py js_bridge_call). Confirmed
+    live that touching GTK off-thread silently no-ops/races (is_maximized()
+    read stale after an off-thread maximize()); wrapping in GLib.idle_add
+    fixed it. The Qt half mirrors this with QMetaObject.invokeMethod, per
+    Qt's own cross-thread-call contract, but is NOT verified on this
+    machine — no PySide6/Qt install exists here to test against (only the
+    GTK backend was available), so exercise it for real before shipping
+    the packaged (Qt-only) build.
+    """
+
+    def __init__(self) -> None:
+        self._window = None  # bound to the webview.Window via bind() once created
+
+    def bind(self, window: object) -> None:
+        self._window = window
+
+    def _native(self):
+        return self._window.native
+
+    def _is_qt(self, native: object) -> bool:
+        return type(native).__module__.split(".")[0] in _QT_MODULES
+
+    def _run_on_gui_thread(self, fn) -> None:
+        native = self._native()
+        if self._is_qt(native):
+            try:
+                from PySide6.QtCore import QMetaObject
+                from PySide6.QtCore import Qt as QtNS
+                from PySide6.QtWidgets import QApplication
+
+                QMetaObject.invokeMethod(QApplication.instance(), fn, QtNS.ConnectionType.QueuedConnection)
+                return
+            except Exception:
+                pass  # ponytail: best-effort marshal; direct call beats crashing
+            fn()
+        else:
+            from gi.repository import GLib
+
+            GLib.idle_add(fn)
+
+    def minimize(self) -> None:
+        self._window.minimize()
+
+    def close(self) -> None:
+        self._window.destroy()
+
+    def toggle_maximize(self) -> None:
+        def _do() -> None:
+            native = self._native()
+            if self._is_qt(native):
+                native.showNormal() if native.isMaximized() else native.showMaximized()
+            else:
+                native.unmaximize() if native.is_maximized() else native.maximize()
+
+        self._run_on_gui_thread(_do)
+
+    def begin_move(self) -> None:
+        def _do() -> None:
+            native = self._native()
+            if self._is_qt(native):
+                handle = native.windowHandle()
+                if handle is not None:
+                    handle.startSystemMove()
+            else:
+                from gi.repository import Gdk
+
+                seat = Gdk.Display.get_default().get_default_seat()
+                _, x, y = seat.get_pointer().get_position()
+                native.get_window().begin_move_drag(1, x, y, Gdk.CURRENT_TIME)
+
+        self._run_on_gui_thread(_do)
+
+    def begin_resize(self, edge: str) -> None:
+        """`edge` is one of n/s/e/w/ne/nw/se/sw — from the title bar's
+        invisible edge/corner hit-zones (NativeTitleBar.tsx)."""
+
+        def _do() -> None:
+            native = self._native()
+            if self._is_qt(native):
+                from PySide6.QtCore import Qt as QtNS
+
+                edges = {
+                    "n": QtNS.Edge.TopEdge,
+                    "s": QtNS.Edge.BottomEdge,
+                    "e": QtNS.Edge.RightEdge,
+                    "w": QtNS.Edge.LeftEdge,
+                    "ne": QtNS.Edge.TopEdge | QtNS.Edge.RightEdge,
+                    "nw": QtNS.Edge.TopEdge | QtNS.Edge.LeftEdge,
+                    "se": QtNS.Edge.BottomEdge | QtNS.Edge.RightEdge,
+                    "sw": QtNS.Edge.BottomEdge | QtNS.Edge.LeftEdge,
+                }
+                handle = native.windowHandle()
+                if handle is not None and edge in edges:
+                    handle.startSystemResize(edges[edge])
+            else:
+                from gi.repository import Gdk
+
+                edges = {
+                    "n": Gdk.WindowEdge.NORTH,
+                    "s": Gdk.WindowEdge.SOUTH,
+                    "e": Gdk.WindowEdge.EAST,
+                    "w": Gdk.WindowEdge.WEST,
+                    "ne": Gdk.WindowEdge.NORTH_EAST,
+                    "nw": Gdk.WindowEdge.NORTH_WEST,
+                    "se": Gdk.WindowEdge.SOUTH_EAST,
+                    "sw": Gdk.WindowEdge.SOUTH_WEST,
+                }
+                if edge not in edges:
+                    return
+                seat = Gdk.Display.get_default().get_default_seat()
+                _, x, y = seat.get_pointer().get_position()
+                native.get_window().begin_resize_drag(edges[edge], 1, x, y, Gdk.CURRENT_TIME)
+
+        self._run_on_gui_thread(_do)
 
 
 def _try_webview(url: str) -> bool:
@@ -122,7 +262,21 @@ def _try_webview(url: str) -> bool:
         pass  # ponytail: cosmetic only (taskbar grouping) — never fatal
 
     icon_path = ICONS_DIR / "netgeo-256.png"
-    webview.create_window("NetGeo", url)
+    bridge = _WindowBridge()
+    window = webview.create_window(
+        "NetGeo",
+        url,
+        js_api=bridge,
+        # Frameless + our own title bar (Surya 2026-09-14: "tetap frameless+
+        # title bar sendiri biar bisa full rounded") — see _WindowBridge for
+        # why drag/resize/maximize are reimplemented instead of left to
+        # pywebview's own (Wayland-broken) defaults.
+        frameless=True,
+        easy_drag=False,  # would else make the WHOLE window draggable, breaking map/canvas clicks
+        transparent=True,  # required for the CSS border-radius rounded corners to actually show
+        background_color="#0F0F0E",  # theme/tokens.ts --ng-bg-0 — avoids a white flash before CSS paints
+    )
+    bridge.bind(window)
     try:
         webview.start(icon=str(icon_path) if icon_path.is_file() else None)
     except Exception as exc:  # webview.errors.WebViewException when GTK/Qt missing

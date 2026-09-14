@@ -16,6 +16,7 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
+import { NativeTitleBar } from '@/components/shell/NativeTitleBar';
 import { LoginPage } from '@/components/LoginPage';
 import { projectsApi } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
@@ -91,14 +92,12 @@ export default function App() {
   const projectName =
     projects?.find((p) => p.id === projectId)?.name ?? 'Untitled Project';
 
-  // Show login page if not authenticated.
-  if (!isAuthenticated) {
-    return <LoginPage />;
-  }
-
   return (
-    <div className="relative h-screen w-screen overflow-hidden">
-      <AppShell projectName={projectName} conn={conn} />
+    <div className="relative flex h-screen w-screen flex-col overflow-hidden">
+      <NativeTitleBar />
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        {isAuthenticated ? <AppShell projectName={projectName} conn={conn} /> : <LoginPage />}
+      </div>
     </div>
   );
 }
