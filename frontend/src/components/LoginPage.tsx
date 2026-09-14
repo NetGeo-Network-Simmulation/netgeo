@@ -8,12 +8,23 @@
  *   - login: normal username + password sign-in
  */
 import { useEffect, useState, useRef } from 'react';
-import { Eye, EyeOff, Lock, LogIn, Network, ShieldCheck, User } from 'lucide-react';
+import { Eye, EyeOff, Lock, LogIn, ShieldCheck, User } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { applyTheme } from '@/theme/tokens';
 import { cn } from '@/lib/cn';
 
 const MIN_PASSWORD_LENGTH = 8;
+
+/** 24×24 "mirrored node" mark — brand set 8a, `netgeo-icon.svg` — inlined so
+ * it inherits `currentColor` instead of shipping a second asset request
+ * (same approach as `NativeTitleBar`'s `BrandGlyph`). */
+function BrandMark({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor" fillRule="evenodd" className={className} aria-hidden>
+      <path d="M8.8 8.2 A3.2 3.2 0 1 0 15.2 8.2 A3.2 3.2 0 1 0 8.8 8.2 Z M10.8 8.2 A1.2 1.2 0 1 0 13.2 8.2 A1.2 1.2 0 1 0 10.8 8.2 Z M4.6 3.4 A1.8 1.8 0 1 0 8.2 3.4 A1.8 1.8 0 1 0 4.6 3.4 Z M15.8 3.4 A1.8 1.8 0 1 0 19.4 3.4 A1.8 1.8 0 1 0 15.8 3.4 Z M10.221 5.357 L8.418 3.812 L7.116 5.332 L8.919 6.877 Z M13.779 5.357 L15.582 3.812 L16.884 5.332 L15.081 6.877 Z M3.5 10.9 H7.5 V13.1 H3.5 Z M16.5 10.9 H20.5 V13.1 H16.5 Z M8.8 15.8 A3.2 3.2 0 1 0 15.2 15.8 A3.2 3.2 0 1 0 8.8 15.8 Z M10.8 15.8 A1.2 1.2 0 1 0 13.2 15.8 A1.2 1.2 0 1 0 10.8 15.8 Z M4.6 20.6 A1.8 1.8 0 1 0 8.2 20.6 A1.8 1.8 0 1 0 4.6 20.6 Z M15.8 20.6 A1.8 1.8 0 1 0 19.4 20.6 A1.8 1.8 0 1 0 15.8 20.6 Z M10.221 18.643 L8.418 20.188 L7.116 18.668 L8.919 17.123 Z M13.779 18.643 L15.582 20.188 L16.884 18.668 L15.081 17.123 Z" />
+    </svg>
+  );
+}
 
 export function LoginPage() {
   const login = useAuthStore((s) => s.login);
@@ -96,7 +107,7 @@ export function LoginPage() {
               {isSetup ? (
                 <ShieldCheck className="h-7 w-7 text-accent-fg" />
               ) : (
-                <Network className="h-7 w-7 text-accent-fg" />
+                <BrandMark className="h-7 w-7 text-accent-fg" />
               )}
             </div>
             <h1 className="text-xl font-semibold text-fg">NetGeo</h1>
