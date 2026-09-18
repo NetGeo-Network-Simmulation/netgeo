@@ -206,16 +206,25 @@ def test_try_webview_succeeds_when_backend_available(monkeypatch):
     assert calls["frameless"] is True
     assert calls["transparent"] is True
     # BUG 4 (Surya QA, 2026-09-14): pywebview's 800x600 default left the
-    # topology UI broken. Re-measured 2026-09-18 (supersedes the original
-    # 1100x720): TopBar.tsx's HScrollToolbar removed the width floor's old
-    # driver, so this floor is now the nav rail (88px) + inspector panel
-    # (360px) needing to coexist without overlapping (content-width floor
-    # 460px, live Playwright rect comparison) and the rail's own fixed
-    # vertical content (content-height floor 558px) — plus
+    # topology UI broken. Re-measured 2026-09-18 a SECOND time (supersedes
+    # 680x640 from earlier the same day): a leader review of that 680x640
+    # screenshot found the floating nav rail overlapping the topology chips
+    # row/search field/bottom dock/minimap — the 680x640 floor only measured
+    # the rail's own content height against the window, never against the
+    # OTHER floating chrome sharing its space. NavigationRail.tsx now
+    # confines itself to a fixed band instead (RAIL_TOP_CLEAR/
+    # RAIL_BOTTOM_CLEAR, theme/shell.ts) and degrades its own content rather
+    # than overlap anything, so the rail no longer drives either floor.
+    # Re-measured what's left the same way (Playwright, every pairwise
+    # combination of rail/chips/search/dock/minimap/inspector asserted
+    # non-intersecting, across Topology AND Physical Plant): width floor is
+    # 949px (topology top-left panel / bottom dock / minimap all needing to
+    # coexist with the 360px inspector without touching), height floor is
+    # unchanged at 604px (already clear with room to spare). Plus
     # NATIVE_TITLE_BAR_HEIGHT (36px) on top of the height floor, since
     # min_size is the *whole* frameless window and the browser-based
     # Playwright measurement never renders a native title bar at all.
-    assert calls["min_size"][0] >= 680
+    assert calls["min_size"][0] >= 980
     assert calls["min_size"][1] >= 640
     # initial size stays a comfortable margin above the floor, not just
     # equal to it

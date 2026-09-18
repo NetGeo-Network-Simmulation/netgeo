@@ -512,33 +512,53 @@ def _try_webview(url: str) -> bool:
         background_color="#0F0F0E",  # theme/tokens.ts --ng-bg-0 — avoids a white flash before CSS paints
         # Surya QA, 2026-09-14: default pywebview size (800x600) left the
         # topology UI "berantakan". min_size below is re-measured 2026-09-18
-        # (superseding the original 1100x720 from that date): TopBar.tsx now
-        # scrolls (HScrollToolbar, WPS-ribbon pattern) instead of clipping,
-        # which removed the width floor's main driver, so this floor is
-        # width-driven only by the fixed 88px nav rail + a 360px inspector
-        # panel (ContextInspector.tsx, `max-w-[85vw]`) needing to coexist
-        # without overlapping — measured live (Playwright, this same built
-        # frontend/dist, real login+device+inspector-open) via element rect
-        # comparison, not guessed: rail and inspector touch (0px canvas gap)
-        # at 460px content width, overlap below it. Height floor is the left
-        # rail's own fixed vertical content (icon stack + NETGEO/NG-5X
-        # label) — intact down to 558px content height, clipping below it.
-        # min_size adds a margin over both measured floors (680, 604) for a
-        # sliver of breathing room, THEN +36 on height for
+        # a SECOND time (supersedes 680x640 from earlier the same day): a
+        # leader review of that 680x640 QA screenshot
+        # (docs/qa/shots/native-controls-2026-09-18/03) found the floating
+        # nav rail actually OVERLAPPING the topology chips row, search field,
+        # bottom tool dock and minimap at that size — the 680x640 floor only
+        # ever measured the rail's OWN content height (558px, itself
+        # inflated — a live remeasure got 526.5px) against the window,
+        # never against the OTHER floating chrome sharing its screen space.
+        # NavigationRail.tsx no longer trusts "vertically centered means
+        # clear of the edges" for that reason: it now confines itself to a
+        # fixed band (RAIL_TOP_CLEAR/RAIL_BOTTOM_CLEAR, theme/shell.ts) sized
+        # from real measurements across Topology AND Physical Plant (whose
+        # own toolbar is taller), degrading its own content (drop decoration,
+        # then scroll the icon list) rather than overlap anything if that
+        # band is shorter than its content — so the rail itself no longer
+        # drives either floor below. What's left, re-measured the same way
+        # (Playwright, this same built frontend/dist, real login+device+
+        # inspector-open, element-rect comparison, every pairwise
+        # combination asserted non-intersecting, not just eyeballed):
+        #   - width floor is now the topology top-left panel (chips+search,
+        #     374px wide) and the bottom tool dock both needing to coexist
+        #     with the 360px inspector panel without touching it OR the
+        #     minimap (which shifts left by the inspector's width when one
+        #     is open) — overlap-free from 949px content width, whichever of
+        #     those three pairs clears last.
+        #   - height floor is no longer the rail (it degrades instead of
+        #     overlapping); 604px content height already has every pairwise
+        #     combination clear with room to spare, so this file just keeps
+        #     that same number rather than shaving it further.
+        # min_size adds a margin over the measured width floor (949 -> 980)
+        # for a sliver of breathing room, THEN +36 on height for
         # NativeTitleBar.NATIVE_TITLE_BAR_HEIGHT: the Playwright measurement
         # is a plain browser tab (no native title bar rendered at all —
         # `useIsNativeShell()` is false without `window.pywebview`), but
         # here `height` is the *whole* frameless window, title bar included
         # (App.tsx: `h-screen` flex-col with NativeTitleBar as a shrink-0
-        # sibling of AppShell, not overlaid on top of it) — the previous
-        # 1100x720 never accounted for this gap. Confirmed enforced on the
+        # sibling of AppShell, not overlaid on top of it). On a common
+        # 1366x768 laptop screen with a GNOME top bar (~700px usable height),
+        # 980x640 leaves comfortable slack on both axes — a real fit, not
+        # just a floor that happens to survive. Confirmed enforced on the
         # real Qt/Wayland window: pywebview's Qt backend calls
         # `self.setMinimumSize(*min_size)` on the QMainWindow itself
         # (webview/platforms/qt.py) — a native Qt constraint, not something
         # this file has to re-implement or verify by hand.
         width=1440,
         height=900,
-        min_size=(680, 640),
+        min_size=(980, 640),
     )
     bridge.bind(window)
     try:
