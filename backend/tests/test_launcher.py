@@ -287,6 +287,58 @@ def test_button_layout_falls_back_on_nonzero_exit_and_malformed_value(monkeypatc
     assert launcher._button_layout() == {"side": "right", "order": ["minimize", "maximize", "close"]}
 
 
+# ---- _system_subprocess_env() -----------------------------------------------
+# BUG (2026-09-18, Surya QA on the installed rpm): minimize/maximize buttons
+# missing from the native title bar. Root cause confirmed by hand — pointing
+# LD_LIBRARY_PATH at the frozen bundle's _internal/ dir (what PyInstaller's
+# bootloader does for the whole process) makes the *system* `gsettings`
+# binary load the bundle's own libglib-2.0/libgio-2.0 instead of the host's,
+# so it can't reach the real dconf backend and silently returns a bogus
+# default ('appmenu:close') instead of erroring — _button_layout()'s parser
+# then sees only "close" as a known token. These tests operate on real
+# os.environ dict semantics (no stand-in object pretending to be something
+# it isn't), and the second one proves the fix is actually wired into the
+# gsettings call site, not just present as an unused helper.
+
+
+def test_system_subprocess_env_is_noop_outside_frozen_bundle(monkeypatch):
+    monkeypatch.setattr(launcher, "FROZEN", False)
+    assert launcher._system_subprocess_env() is None
+
+
+def test_system_subprocess_env_restores_ld_library_path_from_orig(monkeypatch):
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/netgeo/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/lib64:/lib64")
+    env = launcher._system_subprocess_env()
+    assert env["LD_LIBRARY_PATH"] == "/usr/lib64:/lib64"
+
+
+def test_system_subprocess_env_drops_ld_library_path_when_orig_was_empty(monkeypatch):
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/netgeo/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "")
+    env = launcher._system_subprocess_env()
+    assert "LD_LIBRARY_PATH" not in env
+
+
+def test_button_layout_passes_sanitized_env_to_gsettings(monkeypatch):
+    """The fix must be wired into the actual subprocess.run() call, not just
+    exist as an unused helper — this is the part a careless fix forgets."""
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/netgeo/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/lib64")
+    seen = {}
+
+    def _capture(*a, **k):
+        seen.update(k)
+        return _FakeCompletedProcess(0, "'close,minimize,maximize:appmenu'\n")
+
+    monkeypatch.setattr(launcher.subprocess, "run", _capture)
+    launcher._button_layout()
+    assert seen["env"]["LD_LIBRARY_PATH"] == "/usr/lib64"
+
+
 # ---- _WindowBridge thread marshaling ----------------------------------------
 # Surya QA, 2026-09-14 on 1.2.125.1: pressing maximize killed the native
 # window entirely (fell back to the browser). Root cause: QMetaObject.

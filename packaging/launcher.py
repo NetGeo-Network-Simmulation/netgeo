@@ -368,6 +368,37 @@ class _WindowBridge:
         self._run_on_gui_thread(_do)
 
 
+def _system_subprocess_env() -> dict | None:
+    """Env for spawning a *system* binary (gsettings, not another copy of
+    ourselves) from inside the frozen bundle.
+
+    BUG (2026-09-18, reported by Surya): installed rpm build — minimize/
+    maximize buttons missing from the native title bar, only close showed.
+    Root cause: PyInstaller's bootloader points LD_LIBRARY_PATH at the
+    bundle's _internal/ dir (which ships its own libglib-2.0/libgio-2.0) so
+    that our own re-exec'd `netgeo --window-child` finds its bundled Qt libs.
+    `gsettings`, a system binary, inherits that same LD_LIBRARY_PATH and
+    loads the bundled glib instead of the system one, which can't reach the
+    real dconf backend — it silently returns a bogus default ('appmenu:close')
+    instead of raising. `_button_layout()`'s parser then sees only "close" as
+    a known token and renders just the close button.
+    Confirmed by hand: `LD_LIBRARY_PATH=<bundle>/_internal gsettings get
+    org.gnome.desktop.wm.preferences button-layout` -> 'appmenu:close' vs the
+    real 'close,minimize,maximize:appmenu' with a clean env.
+    Fix: restore LD_LIBRARY_PATH_ORIG (PyInstaller always sets this, even to
+    "", alongside LD_LIBRARY_PATH) before spawning a system binary.
+    """
+    if not FROZEN or "LD_LIBRARY_PATH_ORIG" not in os.environ:
+        return None
+    env = dict(os.environ)
+    orig = env.pop("LD_LIBRARY_PATH_ORIG")
+    if orig:
+        env["LD_LIBRARY_PATH"] = orig
+    else:
+        env.pop("LD_LIBRARY_PATH", None)
+    return env
+
+
 def _button_layout() -> dict:
     """Read GNOME's `button-layout` gsetting (org.gnome.desktop.wm.
     preferences) so NativeTitleBar.tsx places its own minimize/maximize/
@@ -394,6 +425,7 @@ def _button_layout() -> dict:
             capture_output=True,
             text=True,
             timeout=2,
+            env=_system_subprocess_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return default
