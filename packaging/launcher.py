@@ -511,21 +511,34 @@ def _try_webview(url: str) -> bool:
         transparent=True,  # required for the CSS border-radius rounded corners to actually show
         background_color="#0F0F0E",  # theme/tokens.ts --ng-bg-0 — avoids a white flash before CSS paints
         # Surya QA, 2026-09-14: default pywebview size (800x600) left the
-        # topology UI "berantakan" — rail overlapping the filter chips/
-        # search field, top-toolbar buttons pushed off-screen. Measured
-        # live with Playwright against this same built frontend.dist (not
-        # guessed): layout is intact at 1040x700, and breaks (search field
-        # clipped to "…ce or IP…", OSPF chip clipped off, rail overlapping
-        # the filter row) at both 1000x720 (width-driven) and 1040x650
-        # (height-driven — the left rail's fixed content height no longer
-        # fits). min_size below adds a small margin over that measured
-        # floor; initial size is a comfortable common laptop resolution
-        # well above it, not a fix for the clipping itself (still real at
-        # the floor — see class docstring / packaging/README.md for that
-        # open item).
+        # topology UI "berantakan". min_size below is re-measured 2026-09-18
+        # (superseding the original 1100x720 from that date): TopBar.tsx now
+        # scrolls (HScrollToolbar, WPS-ribbon pattern) instead of clipping,
+        # which removed the width floor's main driver, so this floor is
+        # width-driven only by the fixed 88px nav rail + a 360px inspector
+        # panel (ContextInspector.tsx, `max-w-[85vw]`) needing to coexist
+        # without overlapping — measured live (Playwright, this same built
+        # frontend/dist, real login+device+inspector-open) via element rect
+        # comparison, not guessed: rail and inspector touch (0px canvas gap)
+        # at 460px content width, overlap below it. Height floor is the left
+        # rail's own fixed vertical content (icon stack + NETGEO/NG-5X
+        # label) — intact down to 558px content height, clipping below it.
+        # min_size adds a margin over both measured floors (680, 604) for a
+        # sliver of breathing room, THEN +36 on height for
+        # NativeTitleBar.NATIVE_TITLE_BAR_HEIGHT: the Playwright measurement
+        # is a plain browser tab (no native title bar rendered at all —
+        # `useIsNativeShell()` is false without `window.pywebview`), but
+        # here `height` is the *whole* frameless window, title bar included
+        # (App.tsx: `h-screen` flex-col with NativeTitleBar as a shrink-0
+        # sibling of AppShell, not overlaid on top of it) — the previous
+        # 1100x720 never accounted for this gap. Confirmed enforced on the
+        # real Qt/Wayland window: pywebview's Qt backend calls
+        # `self.setMinimumSize(*min_size)` on the QMainWindow itself
+        # (webview/platforms/qt.py) — a native Qt constraint, not something
+        # this file has to re-implement or verify by hand.
         width=1440,
         height=900,
-        min_size=(1100, 720),
+        min_size=(680, 640),
     )
     bridge.bind(window)
     try:

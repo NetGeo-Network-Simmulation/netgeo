@@ -206,14 +206,21 @@ def test_try_webview_succeeds_when_backend_available(monkeypatch):
     assert calls["frameless"] is True
     assert calls["transparent"] is True
     # BUG 4 (Surya QA, 2026-09-14): pywebview's 800x600 default left the
-    # topology UI broken (rail over the filter row, search field and
-    # toolbar buttons clipped). Measured live with Playwright against the
-    # built frontend.dist: intact at 1040x700, broken at 1000x720 and at
-    # 1040x650 — min_size must sit above that measured floor on both axes.
-    assert calls["width"] >= 1100
-    assert calls["height"] >= 720
-    assert calls["min_size"][0] >= 1100
-    assert calls["min_size"][1] >= 720
+    # topology UI broken. Re-measured 2026-09-18 (supersedes the original
+    # 1100x720): TopBar.tsx's HScrollToolbar removed the width floor's old
+    # driver, so this floor is now the nav rail (88px) + inspector panel
+    # (360px) needing to coexist without overlapping (content-width floor
+    # 460px, live Playwright rect comparison) and the rail's own fixed
+    # vertical content (content-height floor 558px) — plus
+    # NATIVE_TITLE_BAR_HEIGHT (36px) on top of the height floor, since
+    # min_size is the *whole* frameless window and the browser-based
+    # Playwright measurement never renders a native title bar at all.
+    assert calls["min_size"][0] >= 680
+    assert calls["min_size"][1] >= 640
+    # initial size stays a comfortable margin above the floor, not just
+    # equal to it
+    assert calls["width"] >= calls["min_size"][0]
+    assert calls["height"] >= calls["min_size"][1]
 
 
 def test_try_webview_subscribes_maximize_restore_for_corner_rounding(monkeypatch):
