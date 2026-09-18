@@ -8,13 +8,49 @@ so this never needs real WebKitGTK installed in CI.
 from __future__ import annotations
 
 import importlib.util
+import socket
 import sys
+import time
 from pathlib import Path
 
 LAUNCHER_PATH = Path(__file__).resolve().parents[2] / "packaging" / "launcher.py"
 _spec = importlib.util.spec_from_file_location("netgeo_launcher", LAUNCHER_PATH)
 launcher = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(launcher)
+
+
+# ---- _wait_until_ready() ---------------------------------------------------
+# 2026-09-18: replaces a blind `time.sleep(1.0)` before opening the native
+# window (docs/qa/native-lag-2026-09-18.md — /api/health measured ready at a
+# median ~0.24s, so the fixed sleep wasted ~0.76s of first-paint every launch).
+
+
+def test_wait_until_ready_true_once_port_accepts_connections():
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    alive_thread = type("T", (), {"is_alive": lambda self: True})()
+    try:
+        assert launcher._wait_until_ready(port, alive_thread, timeout=2.0, interval=0.02) is True
+    finally:
+        srv.close()
+
+
+def test_wait_until_ready_false_on_timeout_when_nothing_listens():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # port freed, nothing accepts on it
+    alive_thread = type("T", (), {"is_alive": lambda self: True})()
+    assert launcher._wait_until_ready(port, alive_thread, timeout=0.15, interval=0.05) is False
+
+
+def test_wait_until_ready_false_fast_when_server_thread_dead():
+    dead_thread = type("T", (), {"is_alive": lambda self: False})()
+    started = time.monotonic()
+    assert launcher._wait_until_ready(1, dead_thread, timeout=5.0) is False
+    assert time.monotonic() - started < 1.0  # must not wait out the full cap
 
 
 def test_webview_unavailable_message_names_distro_packages():

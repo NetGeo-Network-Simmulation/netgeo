@@ -60,6 +60,25 @@ def _free_port() -> int:
         return s.getsockname()[1]
 
 
+def _wait_until_ready(
+    port: int, server_thread: threading.Thread, timeout: float = 10.0, interval: float = 0.05
+) -> bool:
+    """Poll for uvicorn to accept TCP connections instead of a blind sleep
+    (measured median ready time ~0.24s vs the old fixed 1.0s — see
+    docs/qa/native-lag-2026-09-18.md). Returns False on timeout or if the
+    server thread died; caller proceeds either way (no new failure mode)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not server_thread.is_alive():
+            return False
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=interval):
+                return True
+        except OSError:
+            time.sleep(interval)
+    return False
+
+
 def _mount_frontend() -> None:
     if FRONTEND_DIST.is_dir():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
@@ -612,7 +631,7 @@ def main() -> None:
         daemon=True,
     )
     server_thread.start()
-    time.sleep(1.0)  # give uvicorn a moment to bind before opening the window
+    _wait_until_ready(port, server_thread)  # poll instead of a blind sleep
 
     reason = _no_window_reason(args)
     if reason:
