@@ -27,12 +27,27 @@ import {
   AttributionControl,
   Marker as MglMarker,
   Popup,
+  setWorkerUrl,
   type GeoJSONSource,
   type ImageSource,
   type MapLayerMouseEvent,
   type MapMouseEvent,
   type LngLat,
 } from 'maplibre-gl';
+// OFFLINE-MAP-4: maplibre-gl resolves its worker script relative to its OWN
+// bundled import.meta.url at runtime (`new URL('./maplibre-gl-worker.mjs',
+// import.meta.url)`) — once Vite/Rollup bundles this file's code into a
+// different chunk (dev pre-bundle or prod MapView-*.js), that URL points
+// nowhere and the worker fails silently: no thrown error, no console.error,
+// vector sources add fine but never fetch a single tile (raster tiles never
+// hit this, since image tiles decode without a worker — this was invisible
+// until this slice needed vector parsing). The `?url` import below makes
+// Vite treat the real worker file as a static asset it actually emits/serves
+// under its own correct URL in both dev and the production build, and
+// `setWorkerUrl` (maplibre-gl's own public API for exactly this bundler
+// mismatch) points the library at it before any Map is constructed.
+import maplibreWorkerUrl from 'maplibre-gl/dist/maplibre-gl-worker.mjs?url';
+setWorkerUrl(maplibreWorkerUrl);
 import {
   useMapStore,
   rainRateLabel,
@@ -60,7 +75,14 @@ import {
   type OsmTower,
   type OsmBuilding,
 } from '@/services/osmService';
-import { MAP_TILES, resolveBaseTile, OFFLINE_TILE_PREFIX, type TileLayerConfig, type MapTileKey } from '@/config/mapTiles';
+import {
+  MAP_TILES,
+  resolveBaseTile,
+  vectorBaseLayers,
+  OFFLINE_TILE_PREFIX,
+  type TileLayerConfig,
+  type MapTileKey,
+} from '@/config/mapTiles';
 import { GIS_LAYERS } from '@/config/gisLayers';
 import { MapToolbar } from './MapToolbar';
 import { MapDevicePanel } from './MapDevicePanel';
@@ -100,6 +122,25 @@ function useGlobeMap(): MapLibreMap | null {
 const BASE_SOURCE_ID = 'ng-base';
 const BASE_OVERLAY_SOURCE_ID = 'ng-base-overlay';
 const GIS_SOURCE_PREFIX = 'ng-gis-';
+// OFFLINE-MAP-4: vector basemap (format=pbf offline MBTiles) uses one
+// MapLibre 'vector' source with several style layers (config/mapTiles.ts
+// `vectorBaseLayers`) instead of BASE_SOURCE_ID's single raster layer.
+const BASE_VECTOR_SOURCE_ID = 'ng-base-vector';
+const BASE_VECTOR_LAYER_PREFIX = 'ng-base-vector-';
+
+/** True for any layer/source id this sync function owns (raster base+overlay,
+ *  vector base, or a GIS raster layer) — used both to tear them down before a
+ *  resync and to exclude them from `firstVectorLayerId`'s "floor of the real
+ *  vector overlay stack" search below. */
+function isBaseOrGisId(id: string): boolean {
+  return (
+    id === BASE_SOURCE_ID ||
+    id === BASE_OVERLAY_SOURCE_ID ||
+    id === BASE_VECTOR_SOURCE_ID ||
+    id.startsWith(GIS_SOURCE_PREFIX) ||
+    id.startsWith(BASE_VECTOR_LAYER_PREFIX)
+  );
+}
 
 /** Expand a Leaflet-style `{s}` subdomain placeholder into concrete tile URLs
  *  — MapLibre's raster source takes a flat URL array instead of a template. */
@@ -137,13 +178,7 @@ function rasterSource(cfg: {
  *  been added since their last mount. */
 function firstVectorLayerId(map: MapLibreMap): string | undefined {
   for (const layer of map.getStyle().layers ?? []) {
-    if (
-      layer.id === BASE_SOURCE_ID ||
-      layer.id === BASE_OVERLAY_SOURCE_ID ||
-      layer.id.startsWith(GIS_SOURCE_PREFIX)
-    ) {
-      continue;
-    }
+    if (isBaseOrGisId(layer.id)) continue;
     return layer.id;
   }
   return undefined;
@@ -154,17 +189,14 @@ function syncRasterLayers(
   mapLayer: MapTileKey,
   gisLayers: Record<string, GisLayerState>,
   offline: MapsStatus | null | undefined,
+  theme: 'light' | 'dark',
 ) {
   const style = map.getStyle();
   for (const layer of style.layers ?? []) {
-    if (layer.id === BASE_SOURCE_ID || layer.id === BASE_OVERLAY_SOURCE_ID || layer.id.startsWith(GIS_SOURCE_PREFIX)) {
-      map.removeLayer(layer.id);
-    }
+    if (isBaseOrGisId(layer.id)) map.removeLayer(layer.id);
   }
   for (const id of Object.keys(style.sources ?? {})) {
-    if (id === BASE_SOURCE_ID || id === BASE_OVERLAY_SOURCE_ID || id.startsWith(GIS_SOURCE_PREFIX)) {
-      map.removeSource(id);
-    }
+    if (isBaseOrGisId(id)) map.removeSource(id);
   }
 
   // Re-inserted raster layers must land below any surviving vector overlay
@@ -174,12 +206,40 @@ function syncRasterLayers(
   // layers exist, matching the original append-on-top behavior.
   const beforeId = map.getStyle().layers?.[0]?.id;
 
-  // OFFLINE-MAP-2: local MBTiles file (when installed) backs the basemap
+  // OFFLINE-MAP-2/4: local MBTiles file (when installed) backs the basemap
   // regardless of the Satellite/Street selection — a device carries one
   // region file, not two, so there's nothing for the switcher to pick
   // between while offline (config/mapTiles.ts `resolveBaseTile`). Falls
   // through to today's online `cfg` unchanged when no local file exists.
   const cfg = resolveBaseTile(mapLayer, offline);
+
+  if (cfg.vector) {
+    // OFFLINE-MAP-4: format=pbf offline MBTiles — one vector source, several
+    // OpenMapTiles-schema style layers (config/mapTiles.ts `vectorBaseLayers`)
+    // instead of a single raster layer. No overlay/GIS raster compositing
+    // below applies to this branch; the vector tiles are the whole basemap.
+    map.addSource(BASE_VECTOR_SOURCE_ID, {
+      type: 'vector',
+      tiles: [cfg.url],
+      maxzoom: cfg.maxZoom ?? 14,
+      attribution: cfg.attribution,
+    });
+    for (const layer of vectorBaseLayers(theme)) {
+      map.addLayer(
+        {
+          id: BASE_VECTOR_LAYER_PREFIX + layer.id,
+          type: layer.type,
+          source: BASE_VECTOR_SOURCE_ID,
+          'source-layer': layer.sourceLayer,
+          paint: layer.paint,
+          ...(layer.minzoom ? { minzoom: layer.minzoom } : {}),
+        } as Parameters<MapLibreMap['addLayer']>[0],
+        beforeId,
+      );
+    }
+    return;
+  }
+
   map.addSource(BASE_SOURCE_ID, rasterSource(cfg));
   map.addLayer({ id: BASE_SOURCE_ID, type: 'raster', source: BASE_SOURCE_ID }, beforeId);
 
@@ -233,6 +293,12 @@ function GlobeBasemap({
   // lets its one-time `load` handler read whatever the latest value is.
   const offlineRef = useRef(offline);
   offlineRef.current = offline;
+  // OFFLINE-MAP-4: vector basemap paint colors are theme-matched (config/
+  // mapTiles.ts `vectorBaseLayers`) — mirrored into a ref for the same
+  // one-time-mount-effect reason as offlineRef above.
+  const theme = useUiStore((s) => s.theme);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   // Sticky "initial style setup done" flag — NOT map.isStyleLoaded(). That
   // API reflects whether every current tile manager is finished loading
   // (style.loaded() walks style.tileManagers), which flickers back to false
@@ -279,7 +345,7 @@ function GlobeBasemap({
     map.once('load', () => {
       map.setProjection({ type: 'globe' });
       const s = useMapStore.getState();
-      syncRasterLayers(map, s.mapLayer, s.gisLayers, offlineRef.current);
+      syncRasterLayers(map, s.mapLayer, s.gisLayers, offlineRef.current, themeRef.current);
       readyRef.current = true;
       onMapChange(map);
     });
@@ -311,8 +377,8 @@ function GlobeBasemap({
     // Also re-runs once /api/maps/status resolves after mount, switching a
     // just-opened map from online to local tiles with no user action
     // (Surya: "otomatis berpindah") — and back, if the file goes away.
-    if (map && readyRef.current) syncRasterLayers(map, mapLayer, gisLayers, offline);
-  }, [mapLayer, gisLayers, offline]);
+    if (map && readyRef.current) syncRasterLayers(map, mapLayer, gisLayers, offline, theme);
+  }, [mapLayer, gisLayers, offline, theme]);
 
   return (
     <div

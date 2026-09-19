@@ -96,6 +96,8 @@ export interface OfflineMapStatus {
   attribution: string | null;
   min_zoom?: number | null;
   max_zoom?: number | null;
+  /** "pbf" = vector MBTiles (OFFLINE-MAP-4); anything else/absent = raster. */
+  format?: string | null;
 }
 
 /** The offline tile endpoint sits behind the same bearer-token auth as every
@@ -112,7 +114,7 @@ export const OFFLINE_TILE_PREFIX = `${API_BASE}/maps/tiles/`;
 export function resolveBaseTile(
   mapLayer: MapTileKey,
   offline: OfflineMapStatus | null | undefined,
-): TileLayerConfig & { offline: boolean } {
+): TileLayerConfig & { offline: boolean; vector: boolean } {
   const cfg: TileLayerConfig = MAP_TILES[mapLayer];
   if (offline?.available) {
     return {
@@ -120,7 +122,95 @@ export function resolveBaseTile(
       attribution: offline.attribution || 'Offline map data',
       maxZoom: offline.max_zoom ?? cfg.maxZoom,
       offline: true,
+      vector: offline.format === 'pbf',
     };
   }
-  return { url: cfg.url, subdomains: cfg.subdomains, maxZoom: cfg.maxZoom, attribution: cfg.attribution, offline: false };
+  return {
+    url: cfg.url,
+    subdomains: cfg.subdomains,
+    maxZoom: cfg.maxZoom,
+    attribution: cfg.attribution,
+    offline: false,
+    vector: false,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* OFFLINE-MAP-4 — vector basemap (format=pbf offline MBTiles, e.g. a         */
+/* Planetiler/OpenMapTiles build — see memory                                 */
+/* mbtiles-vector-spike-2026-09-19). MapView adds one MapLibre 'vector'       */
+/* source + these style layers instead of a single raster layer when         */
+/* `resolveBaseTile(...).vector` is true.                                     */
+/*                                                                            */
+/* Fill/line only — deliberately no `symbol`/text layers. MapLibre needs a    */
+/* glyph server ({fontstack}/{range}.pbf tree) to render vector-tile text,    */
+/* and a true-offline install has none bundled; calling a public glyph CDN   */
+/* would silently break the "zero external requests while offline" contract. */
+/* ponytail: offline vector maps render unlabeled until glyphs are bundled    */
+/* locally — add a local glyph set + `symbol` layers (place/transportation_   */
+/* name/poi/housenumber, per OpenMapTiles' own style) if that proves          */
+/* confusing in QA. Sprites are not needed: nothing here uses `icon-image`.   */
+/* -------------------------------------------------------------------------- */
+
+export interface VectorBaseLayer {
+  /** MapLibre layer id (prefixed by the caller) and OpenMapTiles source-layer
+   *  name (they match 1:1 here, kept separate in case that ever changes). */
+  id: string;
+  sourceLayer: string;
+  type: 'fill' | 'line';
+  paint: Record<string, unknown>;
+  minzoom?: number;
+}
+
+/** Approximate, theme-matched colors for an OpenMapTiles-schema basemap —
+ *  independent of the brand token ramp in theme/tokens.ts (that ramp is for
+ *  app chrome, not cartography), picked to read as "map" in each theme the
+ *  way the online satellite/street tiles already do. */
+const VECTOR_COLORS = {
+  dark: {
+    water: '#16232E',
+    landcover: '#1E2420',
+    landuse: '#242320',
+    park: '#20301F',
+    building: '#332F2A',
+    road: '#4A453D',
+    boundary: '#5C574E',
+  },
+  light: {
+    water: '#AAD3DF',
+    landcover: '#E4E8DA',
+    landuse: '#EFEBE0',
+    park: '#CFE3C8',
+    building: '#DCD5C6',
+    road: '#FFFFFF',
+    boundary: '#B7AE9C',
+  },
+} as const;
+
+/** OpenMapTiles layer stack, bottom to top: water < landcover < landuse <
+ *  park < building < transportation (roads) < boundary. */
+export function vectorBaseLayers(theme: 'light' | 'dark'): VectorBaseLayer[] {
+  const c = VECTOR_COLORS[theme];
+  return [
+    { id: 'water', sourceLayer: 'water', type: 'fill', paint: { 'fill-color': c.water } },
+    { id: 'landcover', sourceLayer: 'landcover', type: 'fill', paint: { 'fill-color': c.landcover, 'fill-opacity': 0.7 } },
+    { id: 'landuse', sourceLayer: 'landuse', type: 'fill', paint: { 'fill-color': c.landuse, 'fill-opacity': 0.5 } },
+    { id: 'park', sourceLayer: 'park', type: 'fill', paint: { 'fill-color': c.park, 'fill-opacity': 0.6 } },
+    { id: 'building', sourceLayer: 'building', type: 'fill', paint: { 'fill-color': c.building }, minzoom: 13 },
+    {
+      id: 'transportation',
+      sourceLayer: 'transportation',
+      type: 'line',
+      paint: {
+        'line-color': c.road,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.4, 12, 1.2, 18, 6],
+      },
+    },
+    {
+      id: 'boundary',
+      sourceLayer: 'boundary',
+      type: 'line',
+      paint: { 'line-color': c.boundary, 'line-width': 1, 'line-dasharray': [2, 1.5] },
+    },
+  ];
 }
