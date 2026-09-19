@@ -21,6 +21,7 @@ from engine.netstack.routing import Router
 from engine.netstack.switching import Switch
 
 if TYPE_CHECKING:  # pragma: no cover
+    from engine.netstack.iface import Interface
     from engine.netstack.network import Network
 
 MIKROTIK_NOS = {"routeros"}
@@ -165,6 +166,21 @@ class CliSession:
                 if words[1] == "access" and words[2] == "vlan" and len(words) == 4:
                     iface.access_vlan = int(words[3])
                     return ""
+            if words[0] == "shape" and len(words) >= 3 and words[1] == "average":
+                if iface.attachment is None:
+                    return "% Interface has no link attached\n"
+                try:
+                    bps = float(words[2])
+                    burst = int(words[3]) if len(words) > 3 else iface.attachment.qos.shaper_burst_bytes
+                except ValueError as exc:
+                    return f"% {exc}\n"
+                iface.attachment.qos.shaper_bps = bps
+                iface.attachment.qos.shaper_burst_bytes = burst
+                return ""
+            if line.lower() == "no shape average":
+                if iface.attachment is not None:
+                    iface.attachment.qos.shaper_bps = None
+                return ""
         if words[0] == "tcp" and len(words) >= 3 and words[1] == "listen":
             try:
                 dev.tcp_listen(int(words[2]))
@@ -497,7 +513,22 @@ class CliSession:
                 tx = i.counters.tx_by_class[ci]
                 dr = i.counters.drops_queue_by_class[ci]
                 rows.append(f"{i.name:<16} {state}  {cname}    {tx:<10} {dr}")
+            rows.append(f"  shaper: {self._shaper_row(i)}")
         return "\n".join(rows) + "\n"
+
+    def _shaper_row(self, i: Interface) -> str:
+        """One summary line: rate, current tokens, frames still queued, and
+        how many times this interface has had to delay a frame for tokens."""
+        qos = i.attachment.qos if i.attachment is not None else None
+        if qos is None or not qos.shaper_bps:
+            return "off"
+        tokens = i._shaper_tokens
+        tok_str = f"{int(tokens)}B" if tokens is not None else f"{qos.shaper_burst_bytes}B (full)"
+        queued = sum(len(q) for q in i._queues)
+        return (
+            f"{qos.shaper_bps:.0f}bps burst={qos.shaper_burst_bytes}B "
+            f"tokens={tok_str} queued={queued} delayed={i.counters.shaper_delays}"
+        )
 
     def _cisco_help(self) -> str:
         return (
@@ -510,7 +541,8 @@ class CliSession:
             "      ip nat translations | access-lists | dhcp binding | tcp brief\n"
             "config: enable; conf t; interface <name>; ip address <cidr>;\n"
             "        ipv6 address <cidr>; [no] shutdown; switchport mode access|trunk;\n"
-            "        switchport access vlan <n>; ip route <prefix> <next-hop>;\n"
+            "        switchport access vlan <n>; shape average <bps> [burst-bytes];\n"
+            "        ip route <prefix> <next-hop>;\n"
             "        ipv6 route <prefix> <next-hop> [iface]; ipv6 nd ra enable;\n"
             "        tcp listen <port>; end\n"
         )
