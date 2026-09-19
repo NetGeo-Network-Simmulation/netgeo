@@ -10,6 +10,7 @@ from __future__ import annotations
 from ipaddress import IPv4Address, IPv6Address, IPv6Network
 
 import pytest
+
 from app.models import Topology
 from app.services.netlab import build_network
 from engine.netstack import Network

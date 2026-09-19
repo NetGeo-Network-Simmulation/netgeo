@@ -75,6 +75,11 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 
+from fastapi.concurrency import run_in_threadpool
+
+from app.exceptions.base import SeekUnavailable
+from app.models import Topology, project_capabilities
+from app.services.events import get_bus
 from engine.netstack import Network
 from engine.netstack.cli import CliSession
 from engine.netstack.device import Device, Host, L3Device
@@ -93,11 +98,6 @@ from engine.netstack.routing import (
     Router,
 )
 from engine.netstack.switching import Switch
-from fastapi.concurrency import run_in_threadpool
-
-from app.exceptions.base import SeekUnavailable
-from app.models import Topology, project_capabilities
-from app.services.events import get_bus
 
 logger = logging.getLogger("netgeo.netlab")
 
