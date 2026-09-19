@@ -469,9 +469,10 @@ class CliSession:
                 return "% No TCP on this device\n"
             rows = ["Local Address:Port      Remote Address:Port     State"]
             for c in dev.tcp_conns.values():
+                retx = f" retx={c.retx_total}({c.retx_kind})" if c.retx_total else ""
                 rows.append(
                     f"{c.local_ip!s}:{c.local_port:<10} "
-                    f"{c.remote_ip!s}:{c.remote_port:<10} {c.state}"
+                    f"{c.remote_ip!s}:{c.remote_port:<10} {c.state}{retx}"
                 )
             return "\n".join(rows) + "\n"
         return "% Invalid show command\n"
@@ -685,9 +686,10 @@ class CliSession:
             conn = self.net.tcp_connect(self.device.name, dst, dport)
         except ValueError as exc:
             return f"% {exc}\n"
+        reason = f" ({conn.close_reason})" if conn.close_reason else ""
         return (
             f"Trying {dst}:{dport} ...\n"
-            f"  state={conn.state} seq={conn.iss} ack={conn.irs}\n"
+            f"  state={conn.state}{reason} seq={conn.iss} ack={conn.irs}\n"
         )
 
     def _do_tcp_close(self, target: str, port: str | None) -> str:

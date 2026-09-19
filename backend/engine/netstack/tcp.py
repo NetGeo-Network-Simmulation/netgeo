@@ -18,10 +18,14 @@ by this slice) — this module only claims traffic that isn't port 179 (see
 routing.py/device.py dispatch).
 
 A2-1 shipped the 3-way handshake + RST (CLOSED, LISTEN, SYN_SENT,
-SYN_RECEIVED, ESTABLISHED). This slice (A2-2) adds graceful teardown
-(active/passive/simultaneous close, RFC 9293 §3.6) and simultaneous open
-(§3.5 Figure 8) — all 11 states from §3.3.2 are now reachable. Loss-driven
-retransmission (RTO backoff) is still deferred to A2-3.
+SYN_RECEIVED, ESTABLISHED). A2-2 added graceful teardown (active/passive/
+simultaneous close, RFC 9293 §3.6) and simultaneous open (§3.5 Figure 8) —
+all 11 states from §3.3.2 reachable. This slice (A2-3) adds loss-driven
+retransmission for SYN/SYN-ACK/FIN (RTO backoff, RFC 6298) plus the
+duplicate-segment handling that makes those retransmits harmless. Data
+transfer / sliding window / congestion control remain out of scope — this
+sim has no data path, so there is nothing to Karn-sample RTT from; RTO is a
+fixed initial value with pure exponential backoff, never adaptive.
 """
 from __future__ import annotations
 
@@ -60,6 +64,19 @@ _MOD32 = 1 << 32
 MSL = 1.0
 TIME_WAIT_DURATION = 2 * MSL
 
+# RTO backoff for unacked SYN/SYN-ACK/FIN (RFC 6298 §2.1 initial value, §5.5
+# doubling, §2.5 ceiling). This sim never samples RTT (no data path, no
+# SRTT/RTTVAR) so there is no Karn's-algorithm adaptive estimate to protect —
+# RTO is just this fixed initial value with pure exponential backoff.
+RTO_INITIAL = 1.0
+RTO_MAX = 60.0
+# ponytail: Linux tcp_syn_retries defaults to 6; reused here as the give-up
+# ceiling for SYN-ACK and FIN retransmits too. A real stack has separate
+# knobs (tcp_syn_retries / tcp_retries2 / tcp_orphan_retries) for each
+# segment kind — not worth three constants when this sim has no data path
+# to make them behave differently.
+MAX_RETRIES = 6
+
 
 def isn(local_ip: str, local_port: int, remote_ip: str, remote_port: int, attempt: int) -> int:
     """Deterministic ISN (RFC 9293 §3.4.1): sha256 of the 4-tuple plus a
@@ -83,7 +100,12 @@ class TcpConn:
     snd_nxt: int = 0        # next seq we will send
     rcv_nxt: int = 0        # next seq we expect from the peer
     transitions: list = field(default_factory=list)
-    timer_seq: int = 0      # sequence guard for the TIME_WAIT 2xMSL timer
+    timer_seq: int = 0      # sequence guard, shared by every timer this conn owns
+    rto: float = RTO_INITIAL
+    retx_count: int = 0     # attempts so far for the current pending segment
+    retx_kind: str | None = None   # "SYN" | "SYN-ACK" | "FIN" | None
+    retx_total: int = 0     # cumulative, for `show tcp brief`
+    close_reason: str | None = None  # None (graceful) | "rst" | "timeout"
 
     @property
     def label(self) -> str:
@@ -146,6 +168,7 @@ class TcpEndpoint:
         self._tcp_log(net, conn)
         self._tcp_send(net, local_ip, local_port, remote_ip, remote_port,
                         seq=iss, ack=0, flags="SYN")
+        self._tcp_start_retx(net, key, conn, "SYN")
         return conn
 
     # ----- ingress ------------------------------------------------------------
@@ -178,7 +201,7 @@ class TcpEndpoint:
         # needed for a teaching sim with no window-limited flow control.
         if "RST" in flags:
             if seg.seq == conn.rcv_nxt:
-                self._tcp_close(net, key, conn)
+                self._tcp_close(net, key, conn, reason="rst")
             return
 
         if conn.state == ESTABLISHED:
@@ -191,9 +214,10 @@ class TcpEndpoint:
             self._tcp_in_closing(net, conn, key, seg, flags)
         elif conn.state == LAST_ACK:
             self._tcp_in_last_ack(net, conn, key, seg, flags)
+        elif conn.state == TIME_WAIT:
+            self._tcp_in_time_wait(net, conn, key, seg, flags)
         # CLOSE_WAIT: nothing to react to here — waiting on the local app to
-        # call tcp_close(). TIME_WAIT: RFC 9293 says re-ACK a retransmitted
-        # FIN; not reachable without retransmission, deferred to A2-3.
+        # call tcp_close().
 
     def _tcp_no_conn(self, net, seg, flags, local_ip, local_port, remote_ip, remote_port, key):
         if "SYN" in flags and "ACK" not in flags and local_port in self.tcp_listen_ports:
@@ -226,12 +250,13 @@ class TcpEndpoint:
         self._tcp_log(net, conn)
         self._tcp_send(net, local_ip, local_port, remote_ip, remote_port,
                         seq=iss, ack=conn.rcv_nxt, flags="SYN-ACK")
+        self._tcp_start_retx(net, key, conn, "SYN-ACK")
 
     def _tcp_in_syn_sent(self, net, conn, key, seg, flags, local_ip, local_port,
                           remote_ip, remote_port):
         if "RST" in flags:
             if seg.ack == conn.snd_nxt:  # acceptable ACK (RFC 9293 §3.5.3)
-                self._tcp_close(net, key, conn)
+                self._tcp_close(net, key, conn, reason="rst")
             return
         if flags == {"SYN"}:
             # Simultaneous open (RFC 9293 §3.5 Figure 8): the peer's SYN
@@ -244,6 +269,10 @@ class TcpEndpoint:
             self._tcp_log(net, conn)
             self._tcp_send(net, local_ip, local_port, remote_ip, remote_port,
                             seq=conn.iss, ack=conn.rcv_nxt, flags="SYN-ACK")
+            # Our own still-pending SYN retx (kind="SYN") self-cancels once
+            # it next fires (state check fails, SYN_SENT is behind us) — this
+            # arms the fresh SYN-ACK phase's timer.
+            self._tcp_start_retx(net, key, conn, "SYN-ACK")
             return
         if flags == {"SYN", "ACK"} and seg.ack == conn.snd_nxt:
             conn.irs = seg.seq
@@ -255,7 +284,16 @@ class TcpEndpoint:
 
     def _tcp_in_syn_received(self, net, conn, key, seg, flags):
         if "RST" in flags:
-            self._tcp_close(net, key, conn)
+            self._tcp_close(net, key, conn, reason="rst")
+            return
+        if flags == {"SYN"}:
+            # Duplicate SYN (the peer's own SYN retx because our SYN-ACK
+            # hasn't reached it yet) — harmless, just resend our SYN-ACK.
+            # Does not touch the retx backoff/counter: this is a courtesy
+            # reply to the peer's timer, not our own RTO firing.
+            self._tcp_send(net, conn.local_ip, conn.local_port,
+                            conn.remote_ip, conn.remote_port,
+                            seq=conn.iss, ack=conn.rcv_nxt, flags="SYN-ACK")
             return
         # Plain ACK completes a normal/passive handshake; a SYN-ACK here is
         # the peer's half of a simultaneous open (it already carries the ACK
@@ -267,6 +305,12 @@ class TcpEndpoint:
 
     # ----- teardown (RFC 9293 §3.6) ------------------------------------------
     def _tcp_in_established(self, net, conn, key, seg, flags) -> None:
+        if flags == {"SYN", "ACK"}:
+            # Duplicate SYN-ACK: our ACK of it never reached the peer, so it
+            # retransmitted. Re-ACK, nothing else changes.
+            self._tcp_send(net, conn.local_ip, conn.local_port, conn.remote_ip, conn.remote_port,
+                            seq=conn.snd_nxt, ack=conn.rcv_nxt, flags="ACK")
+            return
         if "FIN" not in flags:
             return  # no data path modeled — nothing else to react to here
         # Passive close (§3.5.4): peer starts teardown; FIN consumes one seq.
@@ -316,6 +360,17 @@ class TcpEndpoint:
         if "ACK" in flags and seg.ack == conn.snd_nxt:
             self._tcp_close(net, key, conn)  # no TIME_WAIT for the passive closer
 
+    def _tcp_in_time_wait(self, net, conn, key, seg, flags) -> None:
+        """RFC 9293 §3.6: our ACK of the peer's FIN was lost, so the peer's
+        own FIN retx fired and it resent — re-ACK and restart 2xMSL (the
+        peer's LAST_ACK timer keeps backing off independently until either
+        this ACK lands or it gives up on its own)."""
+        if "FIN" not in flags:
+            return
+        self._tcp_send(net, conn.local_ip, conn.local_port, conn.remote_ip, conn.remote_port,
+                        seq=conn.snd_nxt, ack=conn.rcv_nxt, flags="ACK")
+        self._tcp_arm_time_wait(net, key, conn)
+
     def tcp_close(
         self, net: Network, remote_ip: IPv4Address, remote_port: int | None = None,
     ) -> int:
@@ -338,6 +393,7 @@ class TcpEndpoint:
             self._tcp_send(net, conn.local_ip, conn.local_port, conn.remote_ip, conn.remote_port,
                             seq=conn.snd_nxt, ack=conn.rcv_nxt, flags="FIN")
             conn.snd_nxt = (conn.snd_nxt + 1) % _MOD32  # FIN consumes one seq
+            self._tcp_start_retx(net, key, conn, "FIN")
             closed += 1
         return closed
 
@@ -359,8 +415,69 @@ class TcpEndpoint:
             return
         self._tcp_close(net, key, conn)
 
-    def _tcp_close(self, net: Network, key: tuple, conn: TcpConn) -> None:
+    # ----- RTO retransmit timer (RFC 6298), same sequence-guard idiom as the
+    # TIME_WAIT timer above — a stale/superseded timer's captured ``seq``
+    # just stops matching ``conn.timer_seq`` and the fire is a no-op. -------
+    def _tcp_start_retx(self, net: Network, key: tuple, conn: TcpConn, kind: str) -> None:
+        """Begin a fresh retransmit phase for ``kind`` ("SYN"/"SYN-ACK"/
+        "FIN"): reset the backoff and arm the first timer. Call once, right
+        after the segment's first send."""
+        conn.rto = RTO_INITIAL
+        conn.retx_count = 0
+        conn.retx_kind = kind
+        self._tcp_arm_retx(net, key, conn, kind)
+
+    def _tcp_arm_retx(self, net: Network, key: tuple, conn: TcpConn, kind: str) -> None:
+        conn.timer_seq += 1
+        seq = conn.timer_seq
+        net.scheduler.schedule_after(
+            conn.rto,
+            SimEvent(
+                time=0.0, type=EventType.TIMER,
+                handler=lambda _c, _e: self._tcp_retx_fired(net, key, conn, seq, kind),
+                node_id=self.node_id,
+            ),
+        )
+
+    @staticmethod
+    def _tcp_retx_pending(conn: TcpConn, kind: str) -> bool:
+        """Is ``kind`` still unacked — i.e. is this timer fire still live and
+        not superseded by a state transition that already resolved it?"""
+        if kind == "SYN":
+            return conn.state == SYN_SENT
+        if kind == "SYN-ACK":
+            return conn.state == SYN_RECEIVED
+        if kind == "FIN":
+            return conn.state in (FIN_WAIT1, CLOSING, LAST_ACK)
+        return False
+
+    def _tcp_retx_fired(self, net: Network, key: tuple, conn: TcpConn, seq: int, kind: str) -> None:
+        if seq != conn.timer_seq or not self._tcp_retx_pending(conn, kind):
+            return
+        if conn.retx_count >= MAX_RETRIES:
+            self._tcp_close(net, key, conn, reason="timeout")
+            return
+        conn.retx_count += 1
+        conn.retx_total += 1
+        self._tcp_resend(net, conn, kind)
+        conn.rto = min(conn.rto * 2, RTO_MAX)
+        self._tcp_arm_retx(net, key, conn, kind)
+
+    def _tcp_resend(self, net: Network, conn: TcpConn, kind: str) -> None:
+        if kind == "SYN":
+            self._tcp_send(net, conn.local_ip, conn.local_port, conn.remote_ip, conn.remote_port,
+                            seq=conn.iss, ack=0, flags="SYN")
+        elif kind == "SYN-ACK":
+            self._tcp_send(net, conn.local_ip, conn.local_port, conn.remote_ip, conn.remote_port,
+                            seq=conn.iss, ack=conn.rcv_nxt, flags="SYN-ACK")
+        elif kind == "FIN":
+            fin_seq = (conn.snd_nxt - 1) % _MOD32  # snd_nxt already moved past the FIN
+            self._tcp_send(net, conn.local_ip, conn.local_port, conn.remote_ip, conn.remote_port,
+                            seq=fin_seq, ack=conn.rcv_nxt, flags="FIN")
+
+    def _tcp_close(self, net: Network, key: tuple, conn: TcpConn, reason: str | None = None) -> None:
         conn.state = CLOSED
+        conn.close_reason = reason
         self._tcp_log(net, conn)
         self.tcp_conns.pop(key, None)
 

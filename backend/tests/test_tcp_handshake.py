@@ -61,7 +61,7 @@ def test_syn_to_closed_port_gets_rst_with_correct_seq_ack_and_client_closes():
     assert tcp["ack"] == (conn.iss + 1) % (1 << 32)
 
 
-def test_syn_to_unreachable_host_stays_syn_sent_no_retransmit():
+def test_syn_to_unreachable_host_stays_syn_sent_same_iss_across_retransmits():
     net = Network(seed=1)
     client = net.add_device(Host("client"))
     gw = net.add_device(Router("gw"))
@@ -80,8 +80,10 @@ def test_syn_to_unreachable_host_stays_syn_sent_no_retransmit():
         r for r in net.capture.records(link_id="lan", limit=50)
         if r.layers.get("tcp", {}).get("flags") == "SYN"
     ]
-    # tx + rx capture of the single SYN, never a retransmit (that's A2-3).
+    # tcp_connect's default 5s settle now covers 3 RTO retransmits (A2-3:
+    # RTO 1/2/4s) — every one of them resends the same ISN, never a new one.
     assert len({r.layers["tcp"]["seq"] for r in syns}) == 1
+    assert len(syns) > 2, "expected retransmits within the 5s settle window"
 
 
 def test_determinism_same_scenario_rebuilt_twice_is_byte_identical():
