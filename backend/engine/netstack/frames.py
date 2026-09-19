@@ -159,13 +159,18 @@ class UdpSegment:
 
 @dataclass(slots=True)
 class TcpSegment:
-    """Minimal TCP model: flags + ports, enough for session-style protocols
-    (BGP) and stateful firewall rules. No sequence-number machinery — the DES
-    delivers segments reliably in order; loss is modelled at the link layer."""
+    """TCP segment: flags + ports + real seq/ack numbers (RFC 9293 §3.1).
+    BGP/L3VPN/EVPN still frame their own segments directly over port 179
+    with seq/ack left at 0 (a pre-existing shortcut, untouched by A2-1) —
+    the :mod:`engine.netstack.protocols.tcp` state machine is the only
+    producer of non-zero seq/ack, for connections it originates or accepts."""
 
     src_port: int = 0
     dst_port: int = 0
-    flags: str = "PSH"          # SYN | SYN-ACK | ACK | PSH | FIN | RST
+    flags: str = "PSH"          # SYN | SYN-ACK | ACK | PSH | FIN | RST | RST-ACK
+    seq: int = 0
+    ack: int = 0
+    window: int = 65535
     payload: Any = None
     payload_len: int = 0
 
@@ -783,6 +788,8 @@ class EthernetFrame:
             elif isinstance(l4, (UdpSegment, TcpSegment)):
                 key = "udp" if isinstance(l4, UdpSegment) else "tcp"
                 out[key] = {"src_port": l4.src_port, "dst_port": l4.dst_port}
+                if isinstance(l4, TcpSegment):
+                    out[key].update(flags=l4.flags, seq=l4.seq, ack=l4.ack)
         elif isinstance(p, Ipv4Packet):
             out["ipv4"] = {
                 "src": str(p.src),
@@ -800,6 +807,8 @@ class EthernetFrame:
             elif isinstance(l4, (UdpSegment, TcpSegment)):
                 key = "udp" if isinstance(l4, UdpSegment) else "tcp"
                 out[key] = {"src_port": l4.src_port, "dst_port": l4.dst_port}
+                if isinstance(l4, TcpSegment):
+                    out[key].update(flags=l4.flags, seq=l4.seq, ack=l4.ack)
                 app = l4.payload
                 if isinstance(app, DhcpMessage):
                     out["dhcp"] = {"op": app.op, "your_ip": app.your_ip}

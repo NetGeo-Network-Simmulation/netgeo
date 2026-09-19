@@ -116,6 +116,8 @@ class CliSession:
             return self._do_ping(words[1], count=int(words[2]) if len(words) > 2 else 4)
         if words[0] in ("traceroute", "tracert") and len(words) >= 2:
             return self._do_traceroute(words[1])
+        if words[0] == "tcp" and len(words) >= 4 and words[1] == "connect":
+            return self._do_tcp_connect(words[2], words[3])
         return f"% Invalid input: {line}\n"
 
     def _cisco_config(self, line: str, words: list[str]) -> str:
@@ -161,6 +163,12 @@ class CliSession:
                 if words[1] == "access" and words[2] == "vlan" and len(words) == 4:
                     iface.access_vlan = int(words[3])
                     return ""
+        if words[0] == "tcp" and len(words) >= 3 and words[1] == "listen":
+            try:
+                dev.tcp_listen(int(words[2]))
+            except ValueError as exc:
+                return f"% {exc}\n"
+            return ""
         if words[0] == "ip" and len(words) >= 4 and words[1] == "route":
             if not isinstance(dev, Router):
                 return "% This device does not route\n"
@@ -480,7 +488,8 @@ class CliSession:
 
     def _cisco_help(self) -> str:
         return (
-            "exec: enable | ping <ip|ipv6> [count] | traceroute <ip|ipv6>\n"
+            "exec: enable | ping <ip|ipv6> [count] | traceroute <ip|ipv6> |\n"
+            "      tcp connect <ip> <port>\n"
             "show: version | ip interface brief | interfaces | ip route | arp |\n"
             "      ipv6 route | ipv6 neighbors | ipv6 interface brief |\n"
             "      mac address-table | vlan | spanning-tree | ip ospf neighbor |\n"
@@ -489,7 +498,8 @@ class CliSession:
             "config: enable; conf t; interface <name>; ip address <cidr>;\n"
             "        ipv6 address <cidr>; [no] shutdown; switchport mode access|trunk;\n"
             "        switchport access vlan <n>; ip route <prefix> <next-hop>;\n"
-            "        ipv6 route <prefix> <next-hop> [iface]; ipv6 nd ra enable; end\n"
+            "        ipv6 route <prefix> <next-hop> [iface]; ipv6 nd ra enable;\n"
+            "        tcp listen <port>; end\n"
         )
 
     # =========================== MikroTik-like ==================================
@@ -652,6 +662,21 @@ class CliSession:
             lines.append(f"  {hop['hop']:<3} {addr:<16} {rtt}")
         lines.append("Trace complete." if tr.reached else "Destination not reached.")
         return "\n".join(lines) + "\n"
+
+    def _do_tcp_connect(self, target: str, port: str) -> str:
+        try:
+            dst = ip_address(target)
+            dport = int(port)
+        except ValueError:
+            return f"% cannot resolve {target}:{port}\n"
+        try:
+            conn = self.net.tcp_connect(self.device.name, dst, dport)
+        except ValueError as exc:
+            return f"% {exc}\n"
+        return (
+            f"Trying {dst}:{dport} ...\n"
+            f"  state={conn.state} seq={conn.iss} ack={conn.irs}\n"
+        )
 
     # ----- helpers -----------------------------------------------------------------
     def _proc(self, proto: str):

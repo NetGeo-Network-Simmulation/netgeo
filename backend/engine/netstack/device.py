@@ -35,6 +35,7 @@ from engine.netstack.frames import (
     ETH_IPV6,
     PROTO_ICMP,
     PROTO_ICMPV6,
+    PROTO_TCP,
     PROTO_UDP,
     ArpPacket,
     DhcpMessage,
@@ -44,9 +45,11 @@ from engine.netstack.frames import (
     Icmpv6Message,
     Ipv4Packet,
     Ipv6Packet,
+    TcpSegment,
     UdpSegment,
 )
 from engine.netstack.iface import Interface
+from engine.netstack.tcp import TcpEndpoint
 
 if TYPE_CHECKING:  # pragma: no cover
     from engine.netstack.network import Network
@@ -152,13 +155,14 @@ class Device:
         }
 
 
-class L3Device(Device):
-    """Shared ARP + ICMP-echo machinery for anything with an IP stack."""
+class L3Device(Device, TcpEndpoint):
+    """Shared ARP + ICMP-echo + TCP machinery for anything with an IP stack."""
 
     def __init__(
         self, name: str, node_id: str | None = None, nos: str = "forgeos", mode: str = "sim"
     ) -> None:
         super().__init__(name, node_id, nos, mode)
+        self._tcp_init()
         # ip -> (mac, iface_name)
         self.arp_table: dict[IPv4Address, tuple[MacAddr, str]] = {}
         # next-hop ip -> queued IP packets awaiting resolution
@@ -705,6 +709,10 @@ class Host(L3Device):
                 net.on_icmp(self, pkt, icmp)
                 return
             self._handle_icmp_to_self(net, pkt)
+            return
+
+        if pkt.proto == PROTO_TCP and isinstance(pkt.payload, TcpSegment):
+            self._handle_tcp(net, iface, pkt)
             return
 
         if pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):

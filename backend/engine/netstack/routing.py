@@ -1066,6 +1066,8 @@ class Router(L3Device):
                     if getattr(proc, "proto", "") in ("bgp", "l3vpn", "vxlan"):
                         proc.on_packet(net, iface, pkt)
                 return
+            self._handle_tcp(net, iface, pkt)
+            return
         if pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):
             udp = pkt.payload
             app = udp.payload

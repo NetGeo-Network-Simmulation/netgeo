@@ -350,6 +350,29 @@ class Network:
             self.run_for(count * interval + 5.0)
         return self.pings[ident]
 
+    def tcp_connect(
+        self,
+        src_ref: str,
+        dst_ip: str | IPv4Address,
+        dst_port: int,
+        run_after: bool = True,
+        settle: float = 0.0,
+    ):
+        """Convenience: open a TCP connection from a device and (optionally)
+        run the sim until the handshake resolves. Mirrors :meth:`ping`;
+        inspect the returned connection's ``.state`` for the result
+        (ESTABLISHED, CLOSED after RST, or still SYN_SENT if unreachable)."""
+        dev = self.find_device(src_ref)
+        if dev is None or not isinstance(dev, (Host, Router)):
+            raise ValueError(f"unknown or non-IP device: {src_ref}")
+        self.start()
+        if settle > 0:
+            self.run_for(settle)
+        conn = dev.tcp_connect(self, IPv4Address(dst_ip), dst_port)
+        if run_after and self.auto_run:
+            self.run_for(5.0)
+        return conn
+
     def traceroute(
         self,
         src_ref: str,

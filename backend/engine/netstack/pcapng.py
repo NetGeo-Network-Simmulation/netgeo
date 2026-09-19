@@ -233,9 +233,10 @@ def _tcp_bytes(seg: TcpSegment, pseudo: bytes) -> bytes:
     else:
         payload = _l4_payload_bytes(seg.payload)
     flag_bits = {"SYN": 0x02, "SYN-ACK": 0x12, "ACK": 0x10, "PSH": 0x18,
-                 "FIN": 0x11, "RST": 0x04}.get(seg.flags, 0x18)
-    head = struct.pack("!HHIIBBHHH", seg.src_port, seg.dst_port, 0, 0,
-                       5 << 4, flag_bits, 65535, 0, 0)
+                 "FIN": 0x11, "RST": 0x04, "RST-ACK": 0x14}.get(seg.flags, 0x18)
+    head = struct.pack("!HHIIBBHHH", seg.src_port, seg.dst_port,
+                       seg.seq & 0xFFFFFFFF, seg.ack & 0xFFFFFFFF,
+                       5 << 4, flag_bits, seg.window, 0, 0)
     total = head + payload
     ck = _cksum(pseudo + struct.pack("!H", len(total)) + total)
     return total[:16] + struct.pack("!H", ck) + total[18:]
