@@ -118,6 +118,8 @@ class CliSession:
             return self._do_traceroute(words[1])
         if words[0] == "tcp" and len(words) >= 4 and words[1] == "connect":
             return self._do_tcp_connect(words[2], words[3])
+        if words[0] == "tcp" and len(words) >= 3 and words[1] == "close":
+            return self._do_tcp_close(words[2], words[3] if len(words) >= 4 else None)
         return f"% Invalid input: {line}\n"
 
     def _cisco_config(self, line: str, words: list[str]) -> str:
@@ -462,6 +464,16 @@ class CliSession:
             return "\n".join(rows) + "\n"
         if low.startswith("show qos interface"):
             return self._show_qos_iface(low.split())
+        if low.startswith("show tcp brief") or low == "show tcp":
+            if not isinstance(dev, (Host, Router)):
+                return "% No TCP on this device\n"
+            rows = ["Local Address:Port      Remote Address:Port     State"]
+            for c in dev.tcp_conns.values():
+                rows.append(
+                    f"{c.local_ip!s}:{c.local_port:<10} "
+                    f"{c.remote_ip!s}:{c.remote_port:<10} {c.state}"
+                )
+            return "\n".join(rows) + "\n"
         return "% Invalid show command\n"
 
     def _show_qos_iface(self, words: list[str]) -> str:
@@ -489,12 +501,12 @@ class CliSession:
     def _cisco_help(self) -> str:
         return (
             "exec: enable | ping <ip|ipv6> [count] | traceroute <ip|ipv6> |\n"
-            "      tcp connect <ip> <port>\n"
+            "      tcp connect <ip> <port> | tcp close <ip> [port]\n"
             "show: version | ip interface brief | interfaces | ip route | arp |\n"
             "      ipv6 route | ipv6 neighbors | ipv6 interface brief |\n"
             "      mac address-table | vlan | spanning-tree | ip ospf neighbor |\n"
             "      isis neighbors | isis database | ip bgp summary |\n"
-            "      ip nat translations | access-lists | dhcp binding\n"
+            "      ip nat translations | access-lists | dhcp binding | tcp brief\n"
             "config: enable; conf t; interface <name>; ip address <cidr>;\n"
             "        ipv6 address <cidr>; [no] shutdown; switchport mode access|trunk;\n"
             "        switchport access vlan <n>; ip route <prefix> <next-hop>;\n"
@@ -677,6 +689,18 @@ class CliSession:
             f"Trying {dst}:{dport} ...\n"
             f"  state={conn.state} seq={conn.iss} ack={conn.irs}\n"
         )
+
+    def _do_tcp_close(self, target: str, port: str | None) -> str:
+        try:
+            dst = ip_address(target)
+        except ValueError:
+            return f"% cannot resolve {target}\n"
+        try:
+            n = self.net.tcp_close(self.device.name, dst, int(port) if port else None)
+        except ValueError as exc:
+            return f"% {exc}\n"
+        suffix = f":{port}" if port else ""
+        return f"Closed {n} connection(s) to {dst}{suffix}\n"
 
     # ----- helpers -----------------------------------------------------------------
     def _proc(self, proto: str):
