@@ -115,6 +115,8 @@ class CliSession:
             return self._cisco_show(low)
         if words[0] == "ping" and len(words) >= 2:
             return self._do_ping(words[1], count=int(words[2]) if len(words) > 2 else 4)
+        if words[0] == "nslookup" and len(words) >= 2:
+            return self._do_nslookup(words[1], words[2] if len(words) > 2 else "A")
         if words[0] in ("traceroute", "tracert") and len(words) >= 2:
             return self._do_traceroute(words[1])
         if words[0] == "tcp" and len(words) >= 4 and words[1] == "connect":
@@ -480,6 +482,12 @@ class CliSession:
             return "\n".join(rows) + "\n"
         if low.startswith("show qos interface"):
             return self._show_qos_iface(low.split())
+        if low.startswith(("show dns64", "show ip dns64")):
+            if not isinstance(dev, Router):
+                return "% Not a router\n"
+            if dev.dns64_prefix is None:
+                return "DNS64: disabled\n"
+            return f"DNS64: enabled, prefix {dev.dns64_prefix}\n"
         if low.startswith("show tcp brief") or low == "show tcp":
             if not isinstance(dev, (Host, Router)):
                 return "% No TCP on this device\n"
@@ -690,6 +698,23 @@ class CliSession:
             )
         )
         return "\n".join(lines) + "\n"
+
+    def _do_nslookup(self, qname: str, qtype: str = "A") -> str:
+        qtype = qtype.upper()
+        if qtype not in ("A", "AAAA"):
+            return f"% unsupported query type {qtype}\n"
+        if not isinstance(self.device, Host):
+            return "% nslookup requires a host\n"
+        if self.device.dns_server is None and self.device.dns_server6 is None:
+            return "% no DNS server configured\n"
+        result: list = [None]
+        self.net.start()
+        self.device.resolve(self.net, qname, qtype=qtype, callback=result.append)
+        self.net.run_for(5.0)
+        answer = result[-1]
+        if answer is None:
+            return f"** server can't find {qname}: NXDOMAIN\n"
+        return f"Name:    {qname}\nAddress: {answer}\n"
 
     def _do_traceroute(self, target: str) -> str:
         try:

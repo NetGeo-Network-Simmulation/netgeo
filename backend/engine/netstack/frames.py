@@ -209,21 +209,30 @@ class DhcpMessage:
 
 @dataclass(slots=True)
 class DnsMessage:
-    """DNS over UDP 53."""
+    """DNS over UDP 53 (RFC 1035). ``qtype``: "A" (RFC 1035 §3.2.2, default —
+    back-compat with callers built before A vs AAAA existed) or "AAAA"
+    (RFC 3596). ``rcode`` (response only): "noerror" — NODATA when
+    ``answer`` is also empty (RFC 2308 §2.2), i.e. the name exists but has
+    no record of this type — or "nxdomain" — the name doesn't exist at all
+    (RFC 1035 §4.1.1)."""
 
     op: str = "query"           # query | response
     qname: str = ""
-    answer: str | None = None   # A record (IPv4 string) or None = NXDOMAIN
+    qtype: str = "A"            # A | AAAA
+    answer: str | None = None   # A/AAAA record (IPv4/IPv6 string) or None
+    rcode: str = "noerror"      # noerror | nxdomain (response only)
     xid: int = 0
 
     @property
     def wire_size(self) -> int:
-        return 12 + len(self.qname) + (16 if self.answer else 0)
+        return 12 + len(self.qname) + ((28 if self.qtype == "AAAA" else 16) if self.answer else 0)
 
     def summary(self) -> str:
         if self.op == "query":
-            return f"DNS query {self.qname}"
-        return f"DNS response {self.qname} -> {self.answer or 'NXDOMAIN'}"
+            return f"DNS query {self.qname} {self.qtype}"
+        if self.answer:
+            return f"DNS response {self.qname} -> {self.answer}"
+        return f"DNS response {self.qname} -> {self.rcode.upper()}"
 
 
 # ---------------------------------------------------------------------------
@@ -790,6 +799,14 @@ class EthernetFrame:
                 out[key] = {"src_port": l4.src_port, "dst_port": l4.dst_port}
                 if isinstance(l4, TcpSegment):
                     out[key].update(flags=l4.flags, seq=l4.seq, ack=l4.ack)
+                app = l4.payload
+                if isinstance(app, DnsMessage):
+                    out["dns"] = {
+                        "op": app.op, "qname": app.qname, "qtype": app.qtype,
+                        "answer": app.answer, "rcode": app.rcode,
+                    }
+                elif app is not None and hasattr(app, "summary"):
+                    out["app"] = {"info": app.summary()}
         elif isinstance(p, Ipv4Packet):
             out["ipv4"] = {
                 "src": str(p.src),
@@ -813,7 +830,10 @@ class EthernetFrame:
                 if isinstance(app, DhcpMessage):
                     out["dhcp"] = {"op": app.op, "your_ip": app.your_ip}
                 elif isinstance(app, DnsMessage):
-                    out["dns"] = {"op": app.op, "qname": app.qname, "answer": app.answer}
+                    out["dns"] = {
+                        "op": app.op, "qname": app.qname, "qtype": app.qtype,
+                        "answer": app.answer, "rcode": app.rcode,
+                    }
                 elif app is not None and hasattr(app, "summary"):
                     out["app"] = {"info": app.summary()}
             elif l4 is not None and hasattr(l4, "summary"):

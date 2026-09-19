@@ -173,16 +173,21 @@ def _bgp_bytes(seg: TcpSegment) -> bytes:
 
 
 def _dns_bytes(m: DnsMessage) -> bytes:
-    flags = 0x0100 if m.op == "query" else 0x8180
+    qtype_num = 28 if m.qtype == "AAAA" else 1  # RFC 1035 A=1, RFC 3596 AAAA=28
+    if m.op == "query":
+        flags = 0x0100
+    else:
+        flags = 0x8180 | (3 if m.rcode == "nxdomain" else 0)  # RFC 1035 §4.1.1 RCODE
     out = struct.pack("!HHHHHH", m.xid & 0xFFFF, flags, 1,
                       1 if (m.op != "query" and m.answer) else 0, 0, 0)
     qname = b"".join(
         bytes([len(part)]) + part.encode() for part in m.qname.split(".") if part
     ) + b"\x00"
-    out += qname + struct.pack("!HH", 1, 1)  # QTYPE A, QCLASS IN
+    out += qname + struct.pack("!HH", qtype_num, 1)
     if m.op != "query" and m.answer:
-        out += b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 300, 4)
-        out += IPv4Address(m.answer).packed
+        rdata = IPv6Address(m.answer).packed if m.qtype == "AAAA" else IPv4Address(m.answer).packed
+        out += b"\xc0\x0c" + struct.pack("!HHIH", qtype_num, 1, 300, len(rdata))
+        out += rdata
     return out
 
 

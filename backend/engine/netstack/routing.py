@@ -610,6 +610,8 @@ class Router(L3Device):
         # Services
         self.dhcp_pools: list[DhcpPool] = []
         self.dns_zone: dict[str, IPv4Address] = {}
+        self.dns_zone6: dict[str, IPv6Address] = {}     # AAAA records (optional)
+        self.dns64_prefix: IPv6Network | None = None    # DNS64 (RFC 6147); None = disabled
         # Dynamic routing processes (duck-typed: .on_packet(net, iface, pkt),
         # .start(net), .on_iface_change(net))
         self.processes: list = []
@@ -1190,6 +1192,11 @@ class Router(L3Device):
         ):
             if pkt.proto == PROTO_ICMPV6 and isinstance(pkt.payload, Icmpv6Message):
                 self._handle_icmpv6(net, iface, pkt, pkt.payload)
+            elif pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):
+                udp = pkt.payload
+                app = udp.payload
+                if isinstance(app, DnsMessage) and udp.dst_port == 53 and app.op == "query":
+                    self._dns_serve6(net, iface, pkt, udp, app)
             return
         if pkt.dst.is_multicast or pkt.dst.is_link_local:
             return  # never forwarded off-link
@@ -1529,6 +1536,22 @@ class Router(L3Device):
         self.nat64_inside = set(inside)
         self.nat64_outside = outside
 
+    def enable_dns64(self, prefix: IPv6Network = NAT64_WELLKNOWN_PREFIX) -> None:
+        """DNS64 resolver role (RFC 6147): an AAAA query with no real AAAA
+        but a real A gets a synthesized AAAA back, the A embedded in
+        ``prefix`` the same way :func:`_nat64_embed` does for NAT64 traffic.
+        Only the well-known /96 validates — this engine's NAT64 hop
+        (``_forward6``) only ever recognizes ``NAT64_WELLKNOWN_PREFIX``, so
+        a synthesized address outside it could never actually reach the
+        translator.
+        ponytail: a configurable Network-Specific Prefix (RFC 6052 §3.1,
+        32/40/48/56/64-bit lengths) needs NAT64 itself to accept one first —
+        add DNS64 support for those lengths alongside it.
+        """
+        if prefix != NAT64_WELLKNOWN_PREFIX:
+            raise ValueError("DNS64 here only supports the well-known /96 prefix")
+        self.dns64_prefix = prefix
+
     def _nat64_l4_out(
         self, l4: Icmpv6Message | UdpSegment | TcpSegment | Any
     ) -> tuple[str, int, IcmpMessage | UdpSegment | TcpSegment] | None:
@@ -1758,7 +1781,34 @@ class Router(L3Device):
             ),
         )
 
-    # ----- DNS server -----------------------------------------------------------------------
+    # ----- DNS server (+ DNS64, RFC 6147) -----------------------------------------------------
+    # RFC 6147 §5.1.4: a "real" AAAA in this range must be treated as though
+    # it were absent (fall through to synthesis if possible) — the mandatory
+    # default of the SHOULD-exclude list. The rest of §5.1.4 (site
+    # Pref64::/n, loopback/multicast, an operator-configured exclude list)
+    # needs config surface this slice doesn't add.
+    # ponytail: add the rest of §5.1.4 if a lab scenario needs it.
+    _DNS64_EXCLUDED_V6 = IPv6Network("::ffff:0:0/96")
+
+    def _dns_answer(self, qname: str, qtype: str) -> tuple[str | None, str]:
+        """Local-zone lookup (+ DNS64 synthesis for AAAA). Returns
+        ``(answer, rcode)``; ``rcode`` is "nxdomain" only when ``qname`` has
+        no record of *any* type — a name that exists but lacks this type is
+        NODATA: ``rcode="noerror"`` with ``answer=None`` (RFC 2308 §2.2)."""
+        qname = qname.lower()
+        rcode = "noerror" if (qname in self.dns_zone or qname in self.dns_zone6) else "nxdomain"
+        if qtype != "AAAA":
+            answer = self.dns_zone.get(qname)
+            return (str(answer) if answer else None), rcode
+        real6 = self.dns_zone6.get(qname)
+        if real6 is not None and real6 not in self._DNS64_EXCLUDED_V6:
+            return str(real6), rcode
+        if self.dns64_prefix is not None:
+            v4 = self.dns_zone.get(qname)
+            if v4 is not None:
+                return str(_nat64_embed(v4)), "noerror"
+        return None, rcode
+
     def _dns_serve(
         self,
         net: Network,
@@ -1767,7 +1817,7 @@ class Router(L3Device):
         udp: UdpSegment,
         query: DnsMessage,
     ) -> None:
-        answer = self.dns_zone.get(query.qname.lower())
+        answer, rcode = self._dns_answer(query.qname, query.qtype)
         self.send_ip(
             net,
             Ipv4Packet(
@@ -1781,7 +1831,40 @@ class Router(L3Device):
                     payload=DnsMessage(
                         op="response",
                         qname=query.qname,
-                        answer=str(answer) if answer else None,
+                        qtype=query.qtype,
+                        answer=answer,
+                        rcode=rcode,
+                        xid=query.xid,
+                    ),
+                ),
+            ),
+        )
+
+    def _dns_serve6(
+        self,
+        net: Network,
+        iface: Interface,
+        pkt: Ipv6Packet,
+        udp: UdpSegment,
+        query: DnsMessage,
+    ) -> None:
+        answer, rcode = self._dns_answer(query.qname, query.qtype)
+        self.send_ip6(
+            net,
+            Ipv6Packet(
+                src=pkt.dst,
+                dst=pkt.src,
+                proto=PROTO_UDP,
+                hop_limit=64,
+                payload=UdpSegment(
+                    src_port=53,
+                    dst_port=udp.src_port,
+                    payload=DnsMessage(
+                        op="response",
+                        qname=query.qname,
+                        qtype=query.qtype,
+                        answer=answer,
+                        rcode=rcode,
                         xid=query.xid,
                     ),
                 ),

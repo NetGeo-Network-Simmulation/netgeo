@@ -11,7 +11,9 @@ Node ``intent`` fields understood by the builder (all optional):
     gateway: "192.168.1.1"                 # hosts: default gateway
     gateway6: "2001:db8::1"                # hosts: IPv6 default gateway
     slaac: true                            # hosts: autoconfigure v6 from RA
-    dns: "192.168.1.1"                     # hosts: resolver address
+    dns: "192.168.1.1"                     # hosts: resolver address (IPv4 transport)
+    dns6: "2001:db8::1"                    # hosts: resolver address (IPv6 transport);
+                                            # tried instead of "dns" when both are set
     vlans: {"<iface-name>": {"mode": "access"|"trunk", "vlan": 10,
                               "allowed": [10, 20], "native": 99}}
     arp: {"ttl": 1200}                     # ARP cache entry lifetime, seconds
@@ -45,6 +47,10 @@ Node ``intent`` fields understood by the builder (all optional):
     dhcp_server: {"pools": [{"network": "192.168.88.0/24", "gateway": "192.168.88.1",
                              "dns": "...", "lease_s": 86400}]}
     dns_zone: {"nas.lab": "192.168.1.40"}
+    dns_zone6: {"nas.lab": "2001:db8::40"}   # AAAA records (optional, same zone)
+    dns64: {"enabled": true}                 # RFC 6147 resolver role on this router;
+            # synthesizes AAAA from dns_zone's A via the well-known 64:ff9b::/96
+            # (matches nat64's prefix below) when no real AAAA exists
     nat: {"inside": ["eth0"], "outside": "eth1"}
     nptv6: {"internal": "fd01:203:405::/48", "external": "2001:db8:1::/48",
             "inside": ["eth0"], "outside": "eth1"}   # RFC 6296, stateless 1:1
@@ -69,11 +75,6 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 
-from fastapi.concurrency import run_in_threadpool
-
-from app.exceptions.base import SeekUnavailable
-from app.models import Topology, project_capabilities
-from app.services.events import get_bus
 from engine.netstack import Network
 from engine.netstack.cli import CliSession
 from engine.netstack.device import Device, Host, L3Device
@@ -84,8 +85,19 @@ from engine.netstack.protocols.ospf import OspfProcess
 from engine.netstack.protocols.vrrp import VrrpProcess
 from engine.netstack.protocols.vxlan import VxlanProcess
 from engine.netstack.qos import QosConfig
-from engine.netstack.routing import AclRule, DhcpPool, Firewall, Router
+from engine.netstack.routing import (
+    NAT64_WELLKNOWN_PREFIX,
+    AclRule,
+    DhcpPool,
+    Firewall,
+    Router,
+)
 from engine.netstack.switching import Switch
+from fastapi.concurrency import run_in_threadpool
+
+from app.exceptions.base import SeekUnavailable
+from app.models import Topology, project_capabilities
+from app.services.events import get_bus
 
 logger = logging.getLogger("netgeo.netlab")
 
@@ -216,6 +228,9 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
         dns = intent.get("dns")
         if dns:
             dev.dns_server = IPv4Address(dns)
+        dns6 = intent.get("dns6")
+        if dns6:
+            dev.dns_server6 = IPv6Address(dns6)
         return
 
     if not isinstance(dev, Router):
@@ -371,6 +386,20 @@ def _apply_intent(net: Network, dev: Device, intent: dict) -> None:
             dev.dns_zone[str(qname).lower()] = IPv4Address(addr)
         except ValueError:
             pass
+
+    for qname, addr in (intent.get("dns_zone6") or {}).items():
+        try:
+            dev.dns_zone6[str(qname).lower()] = IPv6Address(addr)
+        except ValueError:
+            pass
+
+    dns64_cfg = intent.get("dns64") or {}
+    if dns64_cfg.get("enabled"):
+        try:
+            prefix = dns64_cfg.get("prefix")
+            dev.enable_dns64(IPv6Network(prefix) if prefix else NAT64_WELLKNOWN_PREFIX)
+        except ValueError as exc:
+            logger.warning("%s: bad dns64 config %r: %s", dev.name, dns64_cfg, exc)
 
     nat_cfg = intent.get("nat") or {}
     if nat_cfg.get("outside"):

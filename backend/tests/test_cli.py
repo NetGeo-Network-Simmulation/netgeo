@@ -66,6 +66,32 @@ def test_cli_ping_runs_the_simulator():
     assert "rtt min/avg/max" in out
 
 
+def test_cli_nslookup_resolves_a_and_reports_nxdomain():
+    net = build_lab()
+    r1 = net.devices["r1"]
+    h1 = net.devices["h1"]
+    assert isinstance(r1, Router)
+    r1.dns_zone["files.lab"] = IPv4Address("192.168.1.1")
+    h1.dns_server = IPv4Address("192.168.1.1")
+    s = CliSession(net, h1)
+    out = s.execute("nslookup files.lab")
+    assert "192.168.1.1" in out
+    out = s.execute("nslookup missing.lab")
+    assert "NXDOMAIN" in out
+
+
+def test_cli_show_dns64_reports_disabled_then_enabled():
+    net = build_lab()
+    r1 = net.devices["r1"]
+    assert isinstance(r1, Router)
+    s = CliSession(net, r1)
+    s.execute("enable")
+    assert "disabled" in s.execute("show dns64")
+    r1.enable_dns64()
+    assert "enabled" in s.execute("show dns64")
+    assert "64:ff9b::/96" in s.execute("show dns64")
+
+
 def test_cli_traceroute_lists_hops():
     net = build_lab()
     s = CliSession(net, net.devices["h1"])
