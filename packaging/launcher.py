@@ -489,6 +489,18 @@ class _WindowBridge:
         self._run_on_gui_thread(_do)
 
 
+_BUNDLE_LOADER_VARS = (
+    "GIO_MODULE_DIR",
+    "GSETTINGS_SCHEMA_DIR",
+    "GI_TYPELIB_PATH",
+    "GDK_PIXBUF_MODULE_FILE",
+    "FONTCONFIG_FILE",
+    "FONTCONFIG_PATH",
+    "PYTHONHOME",
+    "QT_PLUGIN_PATH",
+)
+
+
 def _system_subprocess_env() -> dict | None:
     """Env for spawning a *system* binary (gsettings, not another copy of
     ourselves) from inside the frozen bundle.
@@ -506,17 +518,43 @@ def _system_subprocess_env() -> dict | None:
     Confirmed by hand: `LD_LIBRARY_PATH=<bundle>/_internal gsettings get
     org.gnome.desktop.wm.preferences button-layout` -> 'appmenu:close' vs the
     real 'close,minimize,maximize:appmenu' with a clean env.
-    Fix: restore LD_LIBRARY_PATH_ORIG (PyInstaller always sets this, even to
-    "", alongside LD_LIBRARY_PATH) before spawning a system binary.
+
+    STILL BROKEN (2026-09-20, this round): the first fix relied on
+    LD_LIBRARY_PATH_ORIG, which PyInstaller's bootloader only sets when the
+    *parent* process already had LD_LIBRARY_PATH — a normal GNOME desktop
+    launch (app grid / dock icon) doesn't, so ORIG was absent and this
+    function returned None, i.e. "no change", leaving the bundle path in
+    place. Confirmed on the installed netgeo-1.2.125.1 rpm: launching
+    `/opt/netgeo/netgeo` from a clean env (no LD_LIBRARY_PATH, matching a
+    real desktop launch) and reading /proc/<pid>/environ shows
+    LD_LIBRARY_PATH=/opt/netgeo/_internal with **no** LD_LIBRARY_PATH_ORIG
+    key at all.
+    Fix: don't depend on `*_ORIG` existing. Strip the bundle's own dir out
+    of LD_LIBRARY_PATH directly (sys._MEIPASS — the exact path the
+    bootloader injects), keeping any unrelated entries the user had. Still
+    prefer LD_LIBRARY_PATH_ORIG when it *is* present (covers the case where
+    the user already had a custom LD_LIBRARY_PATH). Also drops other
+    bundle-injected loader vars (_BUNDLE_LOADER_VARS) that break system
+    binaries the same way if set.
     """
-    if not FROZEN or "LD_LIBRARY_PATH_ORIG" not in os.environ:
+    if not FROZEN:
         return None
     env = dict(os.environ)
-    orig = env.pop("LD_LIBRARY_PATH_ORIG")
-    if orig:
-        env["LD_LIBRARY_PATH"] = orig
+    orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
+    if orig is not None:
+        if orig:
+            env["LD_LIBRARY_PATH"] = orig
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
     else:
-        env.pop("LD_LIBRARY_PATH", None)
+        bundle_dir = str(getattr(sys, "_MEIPASS", ""))
+        kept = [p for p in env.get("LD_LIBRARY_PATH", "").split(":") if p and p != bundle_dir]
+        if kept:
+            env["LD_LIBRARY_PATH"] = ":".join(kept)
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    for var in _BUNDLE_LOADER_VARS:
+        env.pop(var, None)
     return env
 
 

@@ -314,8 +314,17 @@ def test_button_layout_falls_back_on_nonzero_exit_and_malformed_value(monkeypatc
 # default ('appmenu:close') instead of erroring — _button_layout()'s parser
 # then sees only "close" as a known token. These tests operate on real
 # os.environ dict semantics (no stand-in object pretending to be something
-# it isn't), and the second one proves the fix is actually wired into the
-# gsettings call site, not just present as an unused helper.
+# it isn't), and one proves the fix is actually wired into the gsettings
+# call site, not just present as an unused helper.
+#
+# ROUND 2 (2026-09-20): the first fix (restore from LD_LIBRARY_PATH_ORIG)
+# still shipped broken — confirmed live on the installed netgeo-1.2.125.1
+# rpm: launching `/opt/netgeo/netgeo` from a clean parent env (no
+# LD_LIBRARY_PATH — a real desktop launch) and reading /proc/<pid>/environ
+# shows LD_LIBRARY_PATH=/opt/netgeo/_internal with **no**
+# LD_LIBRARY_PATH_ORIG key at all, so the old code's early-return left the
+# bundle path in place. The new code strips sys._MEIPASS out of
+# LD_LIBRARY_PATH directly instead of depending on `*_ORIG` existing.
 
 
 def test_system_subprocess_env_is_noop_outside_frozen_bundle(monkeypatch):
@@ -337,6 +346,42 @@ def test_system_subprocess_env_drops_ld_library_path_when_orig_was_empty(monkeyp
     monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "")
     env = launcher._system_subprocess_env()
     assert "LD_LIBRARY_PATH" not in env
+
+
+def test_system_subprocess_env_strips_bundle_path_when_orig_absent(monkeypatch):
+    """The real-world case (2026-09-20 fix): a normal desktop launch has no
+    LD_LIBRARY_PATH at all before the bootloader sets one, so ORIG is never
+    written. Must still clean the bundle dir out, not no-op."""
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", "/opt/netgeo/_internal", raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/netgeo/_internal")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    env = launcher._system_subprocess_env()
+    assert "LD_LIBRARY_PATH" not in env
+
+
+def test_system_subprocess_env_keeps_unrelated_paths_when_orig_absent(monkeypatch):
+    """Only the bundle's own dir is stripped — an unrelated entry the user
+    already had ahead of it in LD_LIBRARY_PATH must survive."""
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", "/opt/netgeo/_internal", raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/home/user/mylibs:/opt/netgeo/_internal")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    env = launcher._system_subprocess_env()
+    assert env["LD_LIBRARY_PATH"] == "/home/user/mylibs"
+
+
+def test_system_subprocess_env_drops_bundle_loader_vars(monkeypatch):
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", "/opt/netgeo/_internal", raising=False)
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    monkeypatch.setenv("GIO_MODULE_DIR", "/opt/netgeo/_internal/gio/modules")
+    monkeypatch.setenv("GI_TYPELIB_PATH", "/opt/netgeo/_internal/girepository-1.0")
+    monkeypatch.setenv("PYTHONHOME", "/opt/netgeo/_internal")
+    env = launcher._system_subprocess_env()
+    for var in ("GIO_MODULE_DIR", "GI_TYPELIB_PATH", "PYTHONHOME"):
+        assert var not in env
 
 
 def test_button_layout_passes_sanitized_env_to_gsettings(monkeypatch):
