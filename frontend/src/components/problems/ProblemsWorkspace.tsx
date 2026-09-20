@@ -291,58 +291,60 @@ export function ProblemsWorkspace() {
         {/* Header — no page title: the Problems tab in TopBar's sub-nav
             already carries this page's identity, so an in-page h1 was a
             duplicate (root gets aria-label="Problem Center" above instead). */}
-        <div className="flex flex-wrap items-center gap-3 border-b border-fg/10 bg-panel pt-4 pr-6 pb-4 pl-[116px]">
-          {/* One toolbar row: chips hug the corner, search + acknowledge hug
-              the trailing edge via ml-auto — a single flex line instead of
-              two stacked rows, so there's no dead gap between a short chip
-              row and a right-aligned search/ack row (Surya QA 2026-09-20).
-              flex-wrap lets it fold to two lines at the 980px floor instead
-              of clipping or forcing horizontal scroll. */}
-          <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
-            <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
-            <FilterChip
-              active={filter === 'critical'}
-              onClick={() => setFilter('critical')}
-              label="Critical"
-              count={counts.critical}
-              icon={CircleAlert}
-              tone="text-danger"
-            />
-            <FilterChip
-              active={filter === 'warning'}
-              onClick={() => setFilter('warning')}
-              label="Warning"
-              count={counts.warning}
-              icon={AlertTriangle}
-              tone="text-warning"
-            />
-            <FilterChip
-              active={filter === 'info'}
-              onClick={() => setFilter('info')}
-              label="Info"
-              count={counts.info}
-              icon={Info}
-              tone="text-accent"
-            />
-          </div>
-          <div className="ml-auto flex items-center gap-3">
-            <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
-              <Search className="h-4 w-4 text-fg/40" aria-hidden />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search nodes, problems…"
-                aria-label="Search problems"
-                className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
+        <div className="border-b border-fg/10 bg-panel pt-4 pr-6 pb-4 pl-[116px]">
+          {/* Same mx-auto max-w-5xl box the table below uses (leader review
+              2026-09-20): the strip's background still bleeds full-width,
+              but the toolbar's own content shares the table's left/right
+              edges instead of the chips hugging the rail-inset corner while
+              the table centers narrower — one visually coherent block, not
+              two different widths. */}
+          <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
+              <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
+              <FilterChip
+                active={filter === 'critical'}
+                onClick={() => setFilter('critical')}
+                label="Critical"
+                count={counts.critical}
+                icon={CircleAlert}
+                tone="text-danger"
               />
-            </label>
-            <button
-              onClick={ackAll}
-              disabled={counts.all === 0}
-              className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-            >
-              Acknowledge all
-            </button>
+              <FilterChip
+                active={filter === 'warning'}
+                onClick={() => setFilter('warning')}
+                label="Warning"
+                count={counts.warning}
+                icon={AlertTriangle}
+                tone="text-warning"
+              />
+              <FilterChip
+                active={filter === 'info'}
+                onClick={() => setFilter('info')}
+                label="Info"
+                count={counts.info}
+                icon={Info}
+                tone="text-accent"
+              />
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
+                <Search className="h-4 w-4 text-fg/40" aria-hidden />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search nodes, problems…"
+                  aria-label="Search problems"
+                  className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
+                />
+              </label>
+              <button
+                onClick={ackAll}
+                disabled={counts.all === 0}
+                className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              >
+                Acknowledge all
+              </button>
+            </div>
           </div>
         </div>
 
