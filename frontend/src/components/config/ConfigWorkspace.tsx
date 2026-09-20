@@ -28,6 +28,7 @@ import type { NodeModel, Nos, NodeKind } from '@/api/types';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { Select } from '@/components/ui/Select';
+import { HScrollToolbar } from '@/components/shell/HScrollToolbar';
 import { cn } from '@/lib/cn';
 
 type Tab = 'running' | 'diff' | 'export';
@@ -178,8 +179,8 @@ export function ConfigWorkspace() {
       {/* Main */}
       <main className="flex min-w-0 flex-1 flex-col">
         {/* Toolbar + tabs */}
-        <div className="flex h-14 shrink-0 items-center justify-between gap-4 border-b border-fg/10 bg-panel px-6">
-          <div className="flex h-full gap-6 font-mono text-[12px]" role="tablist" aria-label="Config views">
+        <div className="flex h-14 shrink-0 items-center gap-4 border-b border-fg/10 bg-panel px-6">
+          <div className="flex h-full shrink-0 gap-6 font-mono text-[12px]" role="tablist" aria-label="Config views">
             {(['running', 'diff', 'export'] as const).map((t) => (
               <button
                 key={t}
@@ -198,37 +199,43 @@ export function ConfigWorkspace() {
             ))}
           </div>
 
-          <div className="flex items-center gap-3">
+          {/* Select's own dropdown is `absolute` (ui/Select.tsx) -- kept
+              outside HScrollToolbar below, same reasoning as TopBar's
+              UpdatesButton/user-menu (an overflow-x-auto ancestor clips a
+              popover vertically too, CSS2.1 11.1.1). Copy/Export never open
+              a popover, so they're safe inside the scroll. */}
+          {tab === 'export' && (
+            <Select
+              value={vendor}
+              onChange={setVendor}
+              aria-label="Export target vendor"
+              options={EXPORT_VENDORS.map((v) => ({ value: v.id, label: v.label }))}
+              className="w-48 shrink-0"
+            />
+          )}
+
+          <HScrollToolbar className="flex-1 gap-3">
             {tab === 'diff' && (
-              <span className="rounded border border-fg/10 bg-recess/30 px-3 py-1.5 font-mono text-[12px] text-fg/60">
+              <span className="shrink-0 rounded border border-fg/10 bg-recess/30 px-3 py-1.5 font-mono text-[12px] text-fg/60">
                 Compare: intent vs running
               </span>
-            )}
-            {tab === 'export' && (
-              <Select
-                value={vendor}
-                onChange={setVendor}
-                aria-label="Export target vendor"
-                options={EXPORT_VENDORS.map((v) => ({ value: v.id, label: v.label }))}
-                className="w-48"
-              />
             )}
             <button
               onClick={copy}
               disabled={!copyText}
-              className="flex items-center gap-2 rounded border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              className="flex shrink-0 items-center gap-2 rounded border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
             >
               {copied ? <Check className="h-4 w-4 text-success" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
               Copy
             </button>
             <button
               onClick={() => configsApi.downloadProjectConfigs(projectId, vendor || undefined)}
-              className="flex items-center gap-2 rounded bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-soft"
+              className="flex shrink-0 items-center gap-2 rounded bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-soft"
             >
               <Download className="h-4 w-4" aria-hidden />
               Export vendor config
             </button>
-          </div>
+          </HScrollToolbar>
         </div>
 
         {/* Body */}

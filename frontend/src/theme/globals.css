@@ -153,6 +153,17 @@ html.native-shell body {
   .ng-scroll::-webkit-scrollbar-thumb:hover {
     background: var(--ng-fg-muted, rgba(148, 163, 184, 0.6));
   }
+
+  /* Scrollable but scrollbar-invisible — HScrollToolbar (WPS-ribbon-style
+     header row, Surya 2026-09-18): chevrons + edge fade are the only
+     affordance, a visible scrollbar would double up on that. */
+  .ng-scroll-hidden {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .ng-scroll-hidden::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 /* Visible keyboard focus everywhere (accessibility, WCAG 2.4.7).
