@@ -13,8 +13,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-import networkx as nx
-
 
 @dataclass(slots=True)
 class InterfaceModel:
@@ -87,6 +85,14 @@ class NetworkModel:
     """
 
     def __init__(self) -> None:
+        # ponytail: networkx costs ~80ms to import (measured via `python -X
+        # importtime`) and was previously a top-level import, paid on every
+        # backend process start even for requests that never touch a
+        # NetworkModel. Deferred to first construction instead — see
+        # docs/qa/native-lag-2026-09-18.md for the startup-time budget this
+        # is trimming.
+        import networkx as nx
+
         self.graph = nx.Graph()
         self.nodes: dict[str, NodeModel] = {}
         self.links: dict[str, LinkModel] = {}
@@ -142,6 +148,8 @@ class NetworkModel:
         failures (and is dropped only when no healthy path remains) — otherwise
         downing a link had no routing effect.
         """
+        import networkx as nx
+
         def _edge_up(u: str, v: str) -> bool:
             link = self.links.get(self.graph[u][v].get("link_id"))
             return link is None or link.up
