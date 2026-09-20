@@ -21,7 +21,13 @@ import { UpdatesButton } from '@/components/shell/UpdatesButton';
 import { PresenceBar } from '@/components/shell/PresenceBar';
 import { HScrollToolbar } from '@/components/shell/HScrollToolbar';
 import { GROUPS, isGroupActive, activateMember, type RailMember } from '@/components/shell/NavigationRail';
+import { useWindowChrome, WindowButtons } from '@/components/shell/NativeTitleBar';
 import { cn } from '@/lib/cn';
+
+/** Stops a mousedown from bubbling to the header's native-chrome drag
+ * handler — the "no-drag on interactive elements" half of the drag contract
+ * (see NativeTitleBar.tsx file header). No-op outside the native shell. */
+const noDrag = (e: React.MouseEvent) => e.stopPropagation();
 
 interface TopBarProps {
   projectName: string;
@@ -98,6 +104,7 @@ function SubNavStrip() {
 }
 
 export function TopBar({ projectName, conn }: TopBarProps) {
+  const chrome = useWindowChrome();
   const theme = useUiStore((s) => s.theme);
   const toggleTheme = useUiStore((s) => s.toggleTheme);
   const openModal = useUiStore((s) => s.openModal);
@@ -130,10 +137,30 @@ export function TopBar({ projectName, conn }: TopBarProps) {
   const online = conn === 'open';
 
   return (
-    <header className="glass-strong flex h-14 shrink-0 items-center gap-3 border-b border-fg/10 px-3 text-[13px] text-fg/85">
+    <header
+      // In the native shell this row IS the window's top edge (Surya QA
+      // 2026-09-20: window buttons used to live in their own 36px strip
+      // ABOVE this header — a visible seam). onMouseDown/onDoubleClick make
+      // the header itself a drag/double-click-to-maximize surface; the two
+      // content blocks below opt out via `noDrag` (stopPropagation) so
+      // clicking any real control never starts a window move, same
+      // convention NativeTitleBar's own buttons always used.
+      className={cn(
+        'glass-strong flex h-14 shrink-0 items-center gap-3 border-b border-fg/10 px-3 text-[13px] text-fg/85',
+        chrome.isNative && 'select-none',
+      )}
+      onMouseDown={chrome.isNative ? chrome.onMove : undefined}
+      onDoubleClick={chrome.isNative ? chrome.toggleMaximize : undefined}
+    >
+      {chrome.isNative && chrome.layout.side === 'left' && (
+        <WindowButtons api={chrome.api} layout={chrome.layout} isMaximized={chrome.isMaximized} toggleMaximize={chrome.toggleMaximize} />
+      )}
+
       {/* Brand — the one thing that stays pinned even when the rest of the
           bar scrolls (HScrollToolbar below); everything else is either
-          per-project or a control, this is the app's own identity. */}
+          per-project or a control, this is the app's own identity. Left
+          undecorated by `noDrag`: it's the header's main empty-space drag
+          handle in the native shell. */}
       <div className="flex shrink-0 items-center gap-2 font-semibold">
         <NetGeoMark />
         <span className="hidden font-display text-sm tracking-tight sm:inline">NetGeo</span>
@@ -143,7 +170,7 @@ export function TopBar({ projectName, conn }: TopBarProps) {
           ribbon pattern). At comfortable widths this never visibly scrolls;
           below it, it scrolls instead of the controls disappearing off the
           right edge. */}
-      <HScrollToolbar className="flex-1 gap-3">
+      <HScrollToolbar className="flex-1 gap-3" onMouseDown={chrome.isNative ? noDrag : undefined}>
         <span className="shrink-0 text-fg/25">/</span>
         <span className="max-w-[160px] shrink-0 truncate text-fg/70">{projectName}</span>
         <span
@@ -215,7 +242,7 @@ export function TopBar({ projectName, conn }: TopBarProps) {
           vertically too (an overflow-x other than visible forces the
           computed overflow-y to auto as well — CSS2.1 §11.1.1) — same
           reason the brand stays pinned on the other end. */}
-      <div className="flex shrink-0 items-center gap-1.5">
+      <div className="flex shrink-0 items-center gap-1.5" onMouseDown={chrome.isNative ? noDrag : undefined}>
         <UpdatesButton />
 
         <div className="relative" ref={userMenuRef}>
@@ -246,6 +273,10 @@ export function TopBar({ projectName, conn }: TopBarProps) {
           )}
         </div>
       </div>
+
+      {chrome.isNative && chrome.layout.side === 'right' && (
+        <WindowButtons api={chrome.api} layout={chrome.layout} isMaximized={chrome.isMaximized} toggleMaximize={chrome.toggleMaximize} />
+      )}
     </header>
   );
 }

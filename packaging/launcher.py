@@ -738,23 +738,25 @@ def _try_webview(url: str) -> bool:
         #     combination clear with room to spare, so this file just keeps
         #     that same number rather than shaving it further.
         # min_size adds a margin over the measured width floor (949 -> 980)
-        # for a sliver of breathing room, THEN +36 on height for
-        # NativeTitleBar.NATIVE_TITLE_BAR_HEIGHT: the Playwright measurement
-        # is a plain browser tab (no native title bar rendered at all —
-        # `useIsNativeShell()` is false without `window.pywebview`), but
-        # here `height` is the *whole* frameless window, title bar included
-        # (App.tsx: `h-screen` flex-col with NativeTitleBar as a shrink-0
-        # sibling of AppShell, not overlaid on top of it). On a common
-        # 1366x768 laptop screen with a GNOME top bar (~700px usable height),
-        # 980x640 leaves comfortable slack on both axes — a real fit, not
-        # just a floor that happens to survive. Confirmed enforced on the
-        # real Qt/Wayland window: pywebview's Qt backend calls
-        # `self.setMinimumSize(*min_size)` on the QMainWindow itself
-        # (webview/platforms/qt.py) — a native Qt constraint, not something
-        # this file has to re-implement or verify by hand.
+        # for a sliver of breathing room. Height used to add +36 here for
+        # NativeTitleBar.NATIVE_TITLE_BAR_HEIGHT (a standalone strip that sat
+        # above AppShell, eating 36px of the frameless window before content
+        # got any of it) — that strip is gone as of 2026-09-20 (Surya QA: it
+        # read as an orphan bar above the app's real header, so the window
+        # buttons now live inline in TopBar's own row instead, see
+        # NativeTitleBar.tsx). The Playwright-measured 604px content floor is
+        # therefore the *whole* window height floor now too, no title-bar
+        # margin to add on top. On a common 1366x768 laptop screen with a
+        # GNOME top bar (~700px usable height), 980x604 leaves comfortable
+        # slack on both axes — a real fit, not just a floor that happens to
+        # survive. Confirmed enforced on the real Qt/Wayland window:
+        # pywebview's Qt backend calls `self.setMinimumSize(*min_size)` on
+        # the QMainWindow itself (webview/platforms/qt.py) — a native Qt
+        # constraint, not something this file has to re-implement or verify
+        # by hand.
         width=1440,
         height=900,
-        min_size=(980, 640),
+        min_size=(980, 604),
     )
     bridge.bind(window)
     try:
