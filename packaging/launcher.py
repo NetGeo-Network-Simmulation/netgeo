@@ -480,6 +480,31 @@ def _try_webview(url: str) -> bool:
         driver_path = _dri_driver_path()
         if driver_path:
             os.environ["LIBGL_DRIVERS_PATH"] = driver_path
+    # WebGL fix (2026-09-20, this round): "renders normally" above is true
+    # for 2D compositing only. Verified live against the INSTALLED
+    # netgeo-1.2.125.1 rpm (isolated config dir, CDP probe on the real
+    # QtWebEngine renderer, not a browser guess): when EGL/GBM init fails
+    # (same host defect as above — stderr shows the identical "EGL: Failed
+    # to initialize GBM device"), Chromium falls back to
+    # --disable-gpu-compositing on its own for 2D, but a bare
+    # `canvas.getContext('webgl')` still returns null — modern Chromium
+    # (the version QtWebEngine 6.11 bundles) requires an explicit opt-in to
+    # use its bundled SwiftShader software renderer for WebGL, it does not
+    # fall back to it silently. This is the actual cause of Physical
+    # Plant's "3D view unavailable — WebGL" and (confirmed by canvas probe)
+    # a MapLibre canvas with zero GL context on the Map view too, on any
+    # host where hardware GL can't be reached.
+    # Confirmed by A/B on the same rpm: raw WebGL probe is
+    # {ok:false,"reason":"no context"} without this var, and
+    # {ok:true,"renderer":"ANGLE (...)"} with it — Map tiles go from a
+    # blank canvas to actually rendering. `--enable-unsafe-swiftshader`
+    # alone (no --use-gl/--use-angle) was tested and is NOT sufficient by
+    # itself; the three flags together are what CDP-verified working.
+    # setdefault: never override a user's own QTWEBENGINE_CHROMIUM_FLAGS.
+    os.environ.setdefault(
+        "QTWEBENGINE_CHROMIUM_FLAGS",
+        "--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader-webgl",
+    )
     try:
         import webview
     except ImportError as exc:
