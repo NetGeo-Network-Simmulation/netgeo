@@ -8,6 +8,7 @@ so this never needs real WebKitGTK installed in CI.
 from __future__ import annotations
 
 import importlib.util
+import os
 import socket
 import sys
 import time
@@ -436,6 +437,248 @@ def test_run_on_gui_thread_skips_op_when_marshal_fails(monkeypatch):
     ran = []
     bridge._run_on_gui_thread(lambda: ran.append(True))
     assert ran == []
+
+
+# ---- _decide_gl_mode() / _hardware_gl_available() ---------------------------
+# Leader review (2026-09-20, same day as cbb2ac4): the SwiftShader
+# QTWEBENGINE_CHROMIUM_FLAGS were being forced UNCONDITIONALLY, so a host with
+# working hardware GL was silently downgraded to CPU rendering for the rack 3D
+# view and the MapLibre map. _decide_gl_mode() gates that behind a real EGL
+# probe (or an explicit NETGEO_GL override).
+
+
+def test_decide_gl_mode_hw_when_probe_succeeds(monkeypatch):
+    monkeypatch.delenv("NETGEO_GL", raising=False)
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: True)
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "hw"
+    assert "probe" in reason
+
+
+def test_decide_gl_mode_sw_when_probe_fails(monkeypatch):
+    monkeypatch.delenv("NETGEO_GL", raising=False)
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: False)
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "sw"
+    assert "probe" in reason
+
+
+def test_decide_gl_mode_env_override_sw_skips_probe(monkeypatch):
+    """NETGEO_GL=sw must win even when the probe would say hardware GL is
+    fine — and must not even call the probe (an explicit override is a
+    promise, not a hint)."""
+    monkeypatch.setenv("NETGEO_GL", "sw")
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: (_ for _ in ()).throw(
+        AssertionError("probe must not run when NETGEO_GL overrides")
+    ))
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "sw"
+    assert reason == "NETGEO_GL=sw"
+
+
+def test_decide_gl_mode_env_override_hw_skips_probe(monkeypatch):
+    monkeypatch.setenv("NETGEO_GL", "hw")
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: (_ for _ in ()).throw(
+        AssertionError("probe must not run when NETGEO_GL overrides")
+    ))
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "hw"
+    assert reason == "NETGEO_GL=hw"
+
+
+def test_decide_gl_mode_ignores_unknown_env_value_and_probes(monkeypatch):
+    """A typo'd NETGEO_GL value falls through to auto-probe rather than
+    silently picking a side — same "unknown token dropped" spirit as
+    _button_layout()."""
+    monkeypatch.setenv("NETGEO_GL", "bogus")
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: True)
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "hw"
+    assert "probe" in reason
+
+
+class _FakeGbmLib:
+    """Stands in for `ctypes.CDLL(libgbm)`. Only gbm_create_device is used
+    by _hardware_gl_available(). Real ctypes function pointers accept
+    arbitrary attribute assignment (`.restype`/`.argtypes`), which a bound
+    *method* does NOT support (`AttributeError: 'method' object has no
+    __dict__` — caught while writing this test, the exact "fake-looking
+    stub hides a real bug" trap). Plain function objects assigned directly
+    into the instance `__dict__` DO support it, same as the real thing."""
+
+    def __init__(self, device_handle):
+        def gbm_create_device(_fd):
+            return device_handle
+
+        self.gbm_create_device = gbm_create_device
+
+
+class _FakeEglLib:
+    """Stands in for `ctypes.CDLL(libEGL)`. eglGetProcAddress's return
+    value here is a plain sentinel int, never dereferenced as a real
+    function pointer in tests — the real code always wraps it through
+    `ctypes.CFUNCTYPE(...)(addr)`, which `_stub_gbm_probe` fakes out
+    separately (calling a real CFUNCTYPE on a fake address would
+    segfault, the same trap _FakeGbmLib's docstring names)."""
+
+    def __init__(self, proc_addr=1, init_result=1):
+        def eglGetProcAddress(_name):
+            return proc_addr
+
+        def eglInitialize(_display, _major, _minor):
+            return init_result
+
+        self.eglGetProcAddress = eglGetProcAddress
+        self.eglInitialize = eglInitialize
+
+
+def _stub_gbm_probe(
+    monkeypatch,
+    *,
+    render_node="/dev/null",
+    gbm_device=0x5,
+    proc_addr=1,
+    display_handle=0x1234,
+    init_result=1,
+):
+    """Wires every seam `_hardware_gl_available()` touches (the two CDLL
+    loads, the EGL extension-function bind) to fakes, so an individual
+    test only has to override the one value it's exercising.
+
+    `render_node` defaults to /dev/null rather than a fake path: os.open/
+    os.close are left as the REAL functions (not monkeypatched) — os.open
+    is used internally by unrelated stdlib code that also runs during
+    these tests (ctypes.util.find_library shells out via tempfile, which
+    calls os.open itself), so globally replacing it broke tempfile with a
+    wrong-arity TypeError the first time this was written. /dev/null is
+    always present and O_RDWR-openable by any user, so the real os.open
+    call in _hardware_gl_available() just works."""
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: render_node)
+
+    def fake_cdll(name):
+        return _FakeGbmLib(gbm_device) if "gbm" in name else _FakeEglLib(proc_addr, init_result)
+
+    monkeypatch.setattr(launcher.ctypes, "CDLL", fake_cdll)
+
+    def fake_cfunctype(*_types, **_kw):
+        def _bind(_address):
+            return lambda _platform, _device, _attribs: display_handle
+
+        return _bind
+
+    monkeypatch.setattr(launcher.ctypes, "CFUNCTYPE", fake_cfunctype)
+
+
+def test_hardware_gl_available_true_when_gbm_initializes(monkeypatch):
+    """The full happy path: render node found, gbm device created, EGL
+    platform display bound and initialized."""
+    _stub_gbm_probe(monkeypatch)
+    assert launcher._hardware_gl_available() is True
+
+
+def test_hardware_gl_available_false_when_no_render_node(monkeypatch):
+    """No /dev/dri render node at all (headless box, container, or this
+    user isn't in the `render` group) — must short-circuit before ever
+    touching ctypes."""
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: None)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("must not dlopen without a render node")
+
+    monkeypatch.setattr(launcher.ctypes, "CDLL", _boom)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_gbm_create_device_fails(monkeypatch):
+    """gbm_create_device() returns NULL — the exact failure confirmed by
+    hand against the real bundled _internal/libgbm.so.1 from the installed
+    netgeo-1.2.125.1 rpm (see _hardware_gl_available()'s docstring):
+    "MESA-LOADER: failed to open iris: ... wrong ELF class" /
+    "did not find extension DRI_Mesa version 1", gbm_create_device fails."""
+    _stub_gbm_probe(monkeypatch, gbm_device=0)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_no_platform_display_ext(monkeypatch):
+    """eglGetProcAddress("eglGetPlatformDisplayEXT") itself returns NULL —
+    no attempt to bind/call it should follow."""
+    _stub_gbm_probe(monkeypatch, proc_addr=0)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_platform_display_is_null(monkeypatch):
+    _stub_gbm_probe(monkeypatch, display_handle=0)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_eglinitialize_fails(monkeypatch):
+    _stub_gbm_probe(monkeypatch, init_result=0)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_libgbm_missing(monkeypatch):
+    """No libgbm/libEGL on the system at all (e.g. a bare container image)
+    — ctypes.CDLL raising OSError must not propagate."""
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: "/dev/dri/renderD128")
+
+    def _raise(name):
+        raise OSError(f"cannot open shared object file: {name}")
+
+    monkeypatch.setattr(launcher.ctypes, "CDLL", _raise)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_closes_fd_even_on_failure(monkeypatch):
+    """fd leak guard: os.close() must run through the `finally` even when
+    gbm_create_device fails partway through. Wraps the REAL os.close (not
+    a replacement — see _stub_gbm_probe's docstring on why globally
+    replacing os.open/close breaks unrelated stdlib code) so the fd is
+    still actually released."""
+    closed = []
+    real_close = launcher.os.close
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: "/dev/null")
+    monkeypatch.setattr(launcher.os, "close", lambda fd: (closed.append(fd), real_close(fd)))
+    monkeypatch.setattr(launcher.ctypes, "CDLL", lambda name: _FakeGbmLib(0) if "gbm" in name else _FakeEglLib())
+    assert launcher._hardware_gl_available() is False
+    # ctypes.util.find_library (unmocked, runs for real above) also opens/
+    # closes its own fds internally — assert ours is in there, not that
+    # it's the only one.
+    assert closed
+
+
+def test_try_webview_sets_swiftshader_flags_when_gl_mode_sw(monkeypatch):
+    monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    monkeypatch.setattr(launcher, "_decide_gl_mode", lambda: ("sw", "test forced sw"))
+    fake_webview = type(sys)("webview")
+    fake_window = _FakeWindow()
+    fake_webview.create_window = lambda title, url, **kwargs: fake_window
+    fake_webview.start = lambda **k: None
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+
+    launcher._try_webview("http://127.0.0.1:1")
+    assert "--enable-unsafe-swiftshader" in os.environ["QTWEBENGINE_CHROMIUM_FLAGS"]
+
+
+def test_try_webview_leaves_flags_unset_when_gl_mode_hw(monkeypatch):
+    """The regression this whole slice fixes: a host with working hardware
+    GL must NOT get the SwiftShader flags forced on it."""
+    monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    monkeypatch.setattr(launcher, "_decide_gl_mode", lambda: ("hw", "test forced hw"))
+    fake_webview = type(sys)("webview")
+    fake_window = _FakeWindow()
+    fake_webview.create_window = lambda title, url, **kwargs: fake_window
+    fake_webview.start = lambda **k: None
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+
+    launcher._try_webview("http://127.0.0.1:1")
+    assert "QTWEBENGINE_CHROMIUM_FLAGS" not in os.environ
+
+
+def test_help_flag_documents_netgeo_gl(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--help"])
+    launcher.main()
+    out = capsys.readouterr().out
+    assert "NETGEO_GL" in out
 
 
 def test_minimize_and_close_are_marshaled_not_called_directly():

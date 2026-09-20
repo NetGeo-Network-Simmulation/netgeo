@@ -14,6 +14,8 @@ Smoke:  curl http://127.0.0.1:<port>/api/health
 """
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import os
 import signal
 import socket
@@ -131,6 +133,125 @@ def _dri_driver_path() -> str | None:
             if header[:4] == b"\x7fELF" and header[4] == 2:  # ELFCLASS64
                 return candidate
     return None
+
+
+_EGL_PLATFORM_GBM_KHR = 0x31D7
+
+
+def _dri_render_node() -> str | None:
+    """First DRM render node (/dev/dri/renderD*), or None — no render node
+    at all (headless box, no /dev/dri, or this user isn't in the `render`
+    group so the open below would fail anyway) means no GBM device is
+    possible either way. Split out from _hardware_gl_available() as its
+    own function purely so tests can stub it directly instead of faking
+    pathlib.Path.
+    """
+    dri_dir = Path("/dev/dri")
+    if not dri_dir.is_dir():
+        return None
+    nodes = sorted(dri_dir.glob("renderD*"))
+    return str(nodes[0]) if nodes else None
+
+
+def _hardware_gl_available() -> bool:
+    """Cheap, dependency-free probe: can Chromium's GPU process actually
+    build a hardware EGL surface on this host?
+
+    MUST go through the GBM platform specifically, not plain
+    eglGetDisplay(EGL_DEFAULT_DISPLAY) — measured by hand while building
+    this probe (2026-09-20): eglGetDisplay(EGL_DEFAULT_DISPLAY) +
+    eglInitialize() returns True unconditionally on this machine, because
+    libEGL's default-platform auto-detect picks X11/Wayland (DISPLAY /
+    WAYLAND_DISPLAY are set) and that path never touches libgbm at all. It
+    does NOT reproduce the actual bug (confirmed: same call sequence still
+    returns True even with LD_LIBRARY_PATH forced at the installed rpm's
+    bundled _internal/, which is where the broken libgbm.so.1 lives).
+    Chromium's own GPU process, for the headless/off-screen surface this
+    launcher needs, initializes EGL through the GBM platform — its
+    documented failure is literally "EGL: Failed to initialize GBM
+    device" (see _dri_driver_path()) — so the probe has to open a DRM
+    render node and drive libgbm the same way: gbm_create_device() then
+    eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM_KHR, ...) then
+    eglInitialize(). Verified by hand against the exact bundled
+    _internal/libgbm.so.1 from the installed netgeo-1.2.125.1 rpm (LD_
+    LIBRARY_PATH pointed at it): gbm_create_device() fails outright with
+    the same "MESA-LOADER: failed to open iris: ... wrong ELF class"/
+    "did not find extension DRI_Mesa version 1" lines this file already
+    documents — even with LIBGL_DRIVERS_PATH correctly set first (that
+    fix only rescues the 2D/X11-EGL compositing path in _dri_driver_path,
+    not the bundled libgbm's own GBM init) — while the real system
+    libgbm.so.1 succeeds. That is the actual hw/sw fork this launcher
+    needs to detect.
+
+    Runs in-process, no subprocess/--window-child wrapper of its own
+    needed: this function only ever executes inside _try_webview(), which
+    itself only ever runs inside the `--window-child` re-exec (see
+    main()) — already isolated by _run_webview_in_subprocess()'s existing
+    SIGABRT handling, so a hard crash here degrades exactly like a Qt/EGL
+    abort already does today (this process dies, the parent launcher
+    falls back to the system browser).
+
+    Must run AFTER LIBGL_DRIVERS_PATH is set in _try_webview() below, so
+    this probe sees the exact driver search path the real Chromium/Qt
+    process will use.
+
+    Measured cost (this machine, Fedora 44, real system + bundled
+    libgbm/libEGL, single call — the real call site runs it exactly once):
+    8-23ms, dominated by the two dlopen calls and the DRM ioctl inside
+    gbm_create_device. Never raises: any OSError (no render node, no
+    libgbm/libEGL at all, no permission on the node) means no usable
+    hardware surface either way.
+    """
+    render_node = _dri_render_node()
+    if render_node is None:
+        return False
+    fd = None
+    try:
+        lib_gbm = ctypes.CDLL(ctypes.util.find_library("gbm") or "libgbm.so.1")
+        egl = ctypes.CDLL(ctypes.util.find_library("EGL") or "libEGL.so.1")
+        fd = os.open(render_node, os.O_RDWR)
+
+        lib_gbm.gbm_create_device.restype = ctypes.c_void_p
+        lib_gbm.gbm_create_device.argtypes = [ctypes.c_int]
+        gbm_device = lib_gbm.gbm_create_device(fd)
+        if not gbm_device:
+            return False
+
+        egl.eglGetProcAddress.restype = ctypes.c_void_p
+        egl.eglGetProcAddress.argtypes = [ctypes.c_char_p]
+        get_platform_display_addr = egl.eglGetProcAddress(b"eglGetPlatformDisplayEXT")
+        if not get_platform_display_addr:
+            return False
+        get_platform_display = ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p
+        )(get_platform_display_addr)
+        display = get_platform_display(_EGL_PLATFORM_GBM_KHR, ctypes.c_void_p(gbm_device), None)
+        if not display:
+            return False
+
+        egl.eglInitialize.restype = ctypes.c_int
+        egl.eglInitialize.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        return bool(egl.eglInitialize(display, None, None))
+    except OSError:
+        return False
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _decide_gl_mode() -> tuple[str, str]:
+    """Returns (mode, reason) — mode is "hw" (let Chromium use real GPU
+    WebGL) or "sw" (force the SwiftShader flags block below).
+
+    NETGEO_GL env var forces the choice (hw|sw); default "auto" runs
+    _hardware_gl_available(). Documented in --help.
+    """
+    override = os.environ.get("NETGEO_GL", "auto")
+    if override in ("hw", "sw"):
+        return override, f"NETGEO_GL={override}"
+    if _hardware_gl_available():
+        return "hw", "EGL probe succeeded"
+    return "sw", "EGL probe failed (no hardware GL surface)"
 
 
 def _webview_unavailable(exc: Exception | None) -> str:
@@ -500,11 +621,23 @@ def _try_webview(url: str) -> bool:
     # blank canvas to actually rendering. `--enable-unsafe-swiftshader`
     # alone (no --use-gl/--use-angle) was tested and is NOT sufficient by
     # itself; the three flags together are what CDP-verified working.
-    # setdefault: never override a user's own QTWEBENGINE_CHROMIUM_FLAGS.
-    os.environ.setdefault(
-        "QTWEBENGINE_CHROMIUM_FLAGS",
-        "--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader-webgl",
-    )
+    #
+    # Leader review (2026-09-20, same day): the block above was applied
+    # UNCONDITIONALLY — forcing every host, including ones with working
+    # hardware GL, onto the CPU SwiftShader path for the rack 3D view and
+    # the MapLibre map. Gated behind _decide_gl_mode() instead: only forced
+    # when the EGL probe (or an explicit NETGEO_GL=sw) says hardware GL
+    # isn't reachable. setdefault: never override a user's own
+    # QTWEBENGINE_CHROMIUM_FLAGS.
+    gl_mode, gl_reason = _decide_gl_mode()
+    if gl_mode == "sw":
+        os.environ.setdefault(
+            "QTWEBENGINE_CHROMIUM_FLAGS",
+            "--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader-webgl",
+        )
+        print(f"[netgeo-launcher] WebGL: software (SwiftShader) — {gl_reason}", file=sys.stderr)
+    else:
+        print(f"[netgeo-launcher] WebGL: hardware — {gl_reason}", file=sys.stderr)
     try:
         import webview
     except ImportError as exc:
@@ -683,6 +816,7 @@ def _print_help() -> None:
     print("  NETGEO_NO_WINDOW=1    same as --no-window (for systemd/containers)")
     print("  NETGEO_NO_BROWSER=1   run the backend headless, no window/browser")
     print("  PYWEBVIEW_GUI=gtk|qt  force the native-window backend")
+    print("  NETGEO_GL=hw|sw|auto  force/auto-probe hardware GL for WebGL (default: auto)")
 
 
 def main() -> None:
