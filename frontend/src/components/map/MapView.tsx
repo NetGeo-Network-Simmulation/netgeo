@@ -79,7 +79,8 @@ import {
   MAP_TILES,
   resolveBaseTile,
   vectorBaseLayers,
-  OFFLINE_TILE_PREFIX,
+  MAPS_API_PREFIX,
+  OFFLINE_GLYPHS_URL,
   type TileLayerConfig,
   type MapTileKey,
 } from '@/config/mapTiles';
@@ -232,6 +233,8 @@ function syncRasterLayers(
           source: BASE_VECTOR_SOURCE_ID,
           'source-layer': layer.sourceLayer,
           paint: layer.paint,
+          ...(layer.layout ? { layout: layer.layout } : {}),
+          ...(layer.filter ? { filter: layer.filter } : {}),
           ...(layer.minzoom ? { minzoom: layer.minzoom } : {}),
         } as Parameters<MapLibreMap['addLayer']>[0],
         beforeId,
@@ -329,13 +332,14 @@ function GlobeBasemap({
       // added back explicitly at bottom-left instead (QA-visual #2), the one
       // corner nothing else in this view claims.
       attributionControl: false,
-      // OFFLINE-MAP-2: MapLibre's own tile fetches never carry our axios
-      // instance's Authorization header. Every other tile provider here is
-      // a public, key-less external host — only our own offline-tiles route
-      // sits behind the app's normal bearer-token auth (same as every other
-      // API route, see backend/app/api/__init__.py), so only it needs one.
+      // OFFLINE-MAP-2/5: MapLibre's own tile/glyph fetches never carry our
+      // axios instance's Authorization header. Every other tile provider
+      // here is a public, key-less external host — only our own /api/maps/*
+      // routes (offline tiles + OFFLINE-MAP-5 glyphs) sit behind the app's
+      // normal bearer-token auth (same as every other API route, see
+      // backend/app/api/__init__.py), so only they need one.
       transformRequest: (url) => {
-        if (!url.startsWith(OFFLINE_TILE_PREFIX)) return undefined;
+        if (!url.startsWith(MAPS_API_PREFIX)) return undefined;
         const token = getToken();
         return token ? { url, headers: { Authorization: `Bearer ${token}` } } : undefined;
       },
@@ -343,6 +347,13 @@ function GlobeBasemap({
     map.addControl(new NavigationControl({ showCompass: false }), 'bottom-right');
     map.addControl(new AttributionControl({ compact: true }), 'bottom-left');
     map.once('load', () => {
+      // OFFLINE-MAP-5: glyph source for `symbol`/text layers (config/
+      // mapTiles.ts `vectorBaseLayers`). Must wait for 'load' — MapLibre's
+      // setGlyphs throws "Style is not done loading" if called on the empty
+      // initial style synchronously after construction. Harmless to set
+      // unconditionally otherwise: a style with no symbol layers (raster
+      // basemap mode) never requests it.
+      map.setGlyphs(OFFLINE_GLYPHS_URL);
       map.setProjection({ type: 'globe' });
       const s = useMapStore.getState();
       syncRasterLayers(map, s.mapLayer, s.gisLayers, offlineRef.current, themeRef.current);

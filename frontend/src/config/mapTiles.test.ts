@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { MAP_TILES, OFFLINE_TILE_PREFIX, resolveBaseTile, vectorBaseLayers } from './mapTiles';
+import { MAP_TILES, MAPS_API_PREFIX, OFFLINE_GLYPHS_URL, OFFLINE_TILE_PREFIX, resolveBaseTile, vectorBaseLayers } from './mapTiles';
 
 describe('resolveBaseTile', () => {
   it('falls back to the online provider when no local map is installed', () => {
@@ -66,20 +66,46 @@ describe('resolveBaseTile', () => {
 });
 
 describe('vectorBaseLayers', () => {
-  it('renders no symbol/text layers — offline has no glyph server to draw them with', () => {
+  it('renders symbol/text layers for place, road and water names (OFFLINE-MAP-5)', () => {
     for (const theme of ['dark', 'light'] as const) {
       const layers = vectorBaseLayers(theme);
-      expect(layers.length).toBeGreaterThan(0);
-      for (const layer of layers) {
-        expect(layer.type === 'fill' || layer.type === 'line').toBe(true);
-        expect(layer.paint).not.toHaveProperty('text-field');
+      const symbolLayers = layers.filter((l) => l.type === 'symbol');
+      expect(symbolLayers.map((l) => l.sourceLayer).sort()).toEqual(
+        ['place', 'transportation_name', 'water_name'].sort(),
+      );
+      for (const layer of symbolLayers) {
+        expect(layer.layout).toHaveProperty('text-field');
+        expect(layer.layout).toHaveProperty('text-font');
+        expect(layer.paint).toHaveProperty('text-color');
+        expect(layer.paint).toHaveProperty('text-halo-color');
       }
     }
   });
 
+  it('restricts place labels to settlement classes only (no clutter from country/state/etc.)', () => {
+    const place = vectorBaseLayers('dark').find((l) => l.sourceLayer === 'place')!;
+    expect(place.filter).toEqual(['in', ['get', 'class'], ['literal', ['city', 'town', 'village']]]);
+  });
+
+  it('places road names along the line, not as points', () => {
+    const road = vectorBaseLayers('dark').find((l) => l.sourceLayer === 'transportation_name')!;
+    expect(road.layout?.['symbol-placement']).toBe('line');
+  });
+
   it('covers the OpenMapTiles layers this basemap is expected to draw', () => {
     const ids = vectorBaseLayers('dark').map((l) => l.sourceLayer);
-    for (const expected of ['water', 'landcover', 'landuse', 'park', 'building', 'transportation', 'boundary']) {
+    for (const expected of [
+      'water',
+      'landcover',
+      'landuse',
+      'park',
+      'building',
+      'transportation',
+      'boundary',
+      'place',
+      'transportation_name',
+      'water_name',
+    ]) {
       expect(ids).toContain(expected);
     }
   });
@@ -88,5 +114,17 @@ describe('vectorBaseLayers', () => {
     const dark = vectorBaseLayers('dark').find((l) => l.id === 'water')!;
     const light = vectorBaseLayers('light').find((l) => l.id === 'water')!;
     expect(dark.paint['fill-color']).not.toBe(light.paint['fill-color']);
+
+    const darkLabel = vectorBaseLayers('dark').find((l) => l.id === 'place-label')!;
+    const lightLabel = vectorBaseLayers('light').find((l) => l.id === 'place-label')!;
+    expect(darkLabel.paint['text-color']).not.toBe(lightLabel.paint['text-color']);
+  });
+});
+
+describe('glyph URLs', () => {
+  it('the glyph URL template sits under the same authed prefix as tiles', () => {
+    expect(OFFLINE_GLYPHS_URL.startsWith(MAPS_API_PREFIX)).toBe(true);
+    expect(OFFLINE_TILE_PREFIX.startsWith(MAPS_API_PREFIX)).toBe(true);
+    expect(OFFLINE_GLYPHS_URL).toBe(`${MAPS_API_PREFIX}fonts/{fontstack}/{range}.pbf`);
   });
 });

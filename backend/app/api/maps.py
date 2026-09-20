@@ -1,4 +1,5 @@
-"""Offline map tile serving (OFFLINE-MAP-1) + install (OFFLINE-MAP-3).
+"""Offline map tile serving (OFFLINE-MAP-1) + install (OFFLINE-MAP-3) + glyph
+serving (OFFLINE-MAP-5).
 
 GET    /api/maps/status            — is a local MBTiles region installed,
                                       which one, what it covers. The frontend
@@ -7,6 +8,9 @@ GET    /api/maps/status            — is a local MBTiles region installed,
                                       contacts Esri/OSM itself.
 GET    /api/maps/tiles/{z}/{x}/{y} — raster tile bytes from that file,
                                       standard XYZ (slippy-map) coordinates.
+GET    /api/maps/fonts/{fontstack}/{range} — glyph (font) PBF bytes for
+                                      vector-tile text labels, bundled with
+                                      the app (see app/services/glyphs.py).
 POST   /api/maps/offline-map/upload   — install a user-supplied .mbtiles file.
 POST   /api/maps/offline-map/download — download a .mbtiles file from a URL
                                          and install it.
@@ -30,6 +34,7 @@ from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFil
 from pydantic import BaseModel
 
 from app.exceptions.base import ValidationError
+from app.services import glyphs as offline_glyphs
 from app.services import offline_maps
 
 router = APIRouter(prefix="/maps", tags=["maps"])
@@ -64,6 +69,23 @@ async def maps_tile(z: int, x: int, y: int, request: Request) -> Response:
         else:
             data = gzip.decompress(data)
     return Response(content=data, media_type=content_type, headers=headers)
+
+
+@router.get("/fonts/{fontstack}/{range_file}")
+async def maps_font_range(fontstack: str, range_file: str) -> Response:
+    # range_file is "<start>-<end>.pbf" e.g. "0-255.pbf" — the layout every
+    # MapLibre glyph client requests (style `glyphs` URL template's
+    # `{range}` placeholder).
+    name, _, ext = range_file.rpartition(".")
+    if ext != "pbf" or "-" not in name:
+        raise HTTPException(status_code=400, detail="range must be '<start>-<end>.pbf'")
+    start_str, _, end_str = name.partition("-")
+    if not (start_str.isdigit() and end_str.isdigit()):
+        raise HTTPException(status_code=400, detail="range must be '<start>-<end>.pbf'")
+    data = offline_glyphs.get_range(fontstack, int(start_str), int(end_str))
+    if data is None:
+        raise HTTPException(status_code=404, detail="glyph range not available offline")
+    return Response(content=data, media_type="application/x-protobuf")
 
 
 @router.post("/offline-map/upload")
