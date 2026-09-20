@@ -25,7 +25,6 @@ ETH_VLAN = 0x8100
 ETH_IPV6 = 0x86DD
 ETH_MPLS = 0x8847        # MPLS unicast (labelled data plane)
 ETH_LDP = 0x8848         # reused here for LDP-lite label-mapping discovery
-ETH_SR = 0x8849          # bespoke SR-MPLS SID advertisement flood (NG-SIM-09)
 
 # IP protocol numbers
 PROTO_ICMP = 1
@@ -604,31 +603,11 @@ class VpnUpdate:
         return f"MP-BGP VPNv4 UPDATE {len(self.routes)} route(s)"
 
 
-@dataclass(slots=True)
-class SrSidAdvert:
-    """Segment Routing SID advertisement (NG-SIM-09): the advertising router's
-    node-SID for its loopback, plus its own adjacency-SIDs. A bespoke LSA-style
-    flood (real IS-IS/OSPF carry this in a Prefix-SID sub-TLV); rides raw L2 to
-    the same all-routers multicast LDP uses, dispatched at the frame edge."""
-
-    router_id: str
-    prefix: str                                              # own loopback /32
-    node_sid: int
-    adj_sids: dict[str, int] = field(default_factory=dict)   # neighbor id -> label
-
-    @property
-    def wire_size(self) -> int:
-        return 24 + 8 * len(self.adj_sids)
-
-    def copy(self) -> SrSidAdvert:
-        return SrSidAdvert(self.router_id, self.prefix, self.node_sid, dict(self.adj_sids))
-
-    def summary(self) -> str:
-        return f"SR SID-advert from {self.router_id} node-sid {self.node_sid}"
-
-
-# LDP + SR ride raw L2 (dispatched at the device frame edge, like IS-IS PDUs).
-MPLS_L2_PDUS = (LdpBinding, SrSidAdvert)
+# LDP rides raw L2 (dispatched at the device frame edge, like IS-IS PDUs). SR
+# no longer has a PDU of its own here (NG-SIM-09 A5) -- its SID advertisements
+# ride OSPF opaque LSAs (RFC 8665, see protocols/ospf.py's OpaqueLsa) instead
+# of a bespoke flood, so it needs no frame-edge dispatch at all.
+MPLS_L2_PDUS = (LdpBinding,)
 
 
 # ---------------------------------------------------------------------------

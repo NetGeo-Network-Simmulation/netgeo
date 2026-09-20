@@ -175,8 +175,8 @@ class LfibEntry:
 @dataclass(slots=True)
 class AdjSidEntry:
     """One SR adjacency-SID: pop the label and send out this specific L2
-    adjacency (NG-SIM-09). Written by SrProcess from the LDP-learned neighbor
-    table, read by :meth:`Router._mpls_forward`."""
+    adjacency (NG-SIM-09). Written by SrProcess from OSPF's own Full-neighbor
+    table (A5 -- no longer LDP's), read by :meth:`Router._mpls_forward`."""
 
     out_iface: str
     nh_mac: str
@@ -784,11 +784,12 @@ class Router(L3Device):
             self._mpls_forward(net, iface, payload)
             return
         if isinstance(payload, MPLS_L2_PDUS):
-            # LDP + SR ride raw L2 (no IP), dispatched here like IS-IS. Pass the
+            # LDP rides raw L2 (no IP), dispatched here like IS-IS. Pass the
             # whole frame so the process can learn the L2 next hop (src_mac).
-            # Each process ignores PDUs that aren't its own.
+            # SR (NG-SIM-09 A5) no longer has a PDU here -- it reads OSPF's
+            # opaque LSAs and arp_table instead, see protocols/sr.py.
             for proc in self.processes:
-                if getattr(proc, "proto", "") in ("ldp", "sr"):
+                if getattr(proc, "proto", "") == "ldp":
                     proc.on_frame(net, iface, frame)
             return
         if isinstance(payload, ISIS_PDUS):

@@ -1,9 +1,15 @@
-r"""Segment Routing (SR-MPLS) — NG-SIM-09.
+r"""Segment Routing (SR-MPLS) — NG-SIM-09, A5.
 
 Core: the PE1–P–PE2 OSPF+LDP diamond from test_mpls_l3vpn, with an SrProcess on
-every router. Node-SIDs come from an SRGB formula (label = srgb_base + node_sid),
-adjacency-SIDs are auto-allocated one per LDP neighbor. A host sits behind PE2 so
-an explicit-path packet can be observed being delivered end to end.
+every router. SR is OSPF-native (A5): node-SIDs come from an SRGB formula
+(label = srgb_base + node_sid) advertised via OSPF opaque LSAs, adjacency-SIDs
+are auto-allocated one per Full OSPF neighbor. LdpProcess still runs alongside
+to prove the two control planes coexist without label collisions (see
+protocols/sr.py's module docstring) — SR no longer reads anything from it. A
+host sits behind PE2 so an explicit-path packet can be observed being
+delivered end to end. Native-OSPF-only coverage (no LDP at all) and the
+opaque-LSA infrastructure itself live in test_sr_ospf_native.py and
+test_ospf_sr_opaque.py.
 
                        node-sids: pe1=101  p=100  pe2=102  (p2=104, diamond only)
       install_policy   loopbacks: pe1 10.255.0.1  p .2  pe2 .3  (p2 .4)
@@ -59,22 +65,25 @@ def _lab(diamond: bool = False) -> Network:
         net.add_iface(p2, "lo0", ["10.255.0.4/32"])
         pe1_core, pe2_core = ["eth0", "eth1", "lo0"], ["eth0", "eth1", "lo0"]
 
-    # IGP + LDP + SR — built once, with the final port lists.
-    OspfProcess(pe1, router_id="10.255.0.1", hello_interval=1.0, ifaces=pe1_core)
-    OspfProcess(p, router_id="10.255.0.2", hello_interval=1.0, ifaces=["eth0", "eth1", "lo0"])
-    OspfProcess(pe2, router_id="10.255.0.3", hello_interval=1.0, ifaces=pe2_core)
+    # IGP + LDP + SR — built once, with the final port lists. SR (A5) is
+    # OSPF-native, not LDP-sourced: LdpProcess still runs here to prove the
+    # two control planes coexist without label-range collisions (see
+    # sr.py's module docstring), but SrProcess only takes the OspfProcess.
+    ospf_pe1 = OspfProcess(pe1, router_id="10.255.0.1", hello_interval=1.0, ifaces=pe1_core)
+    ospf_p = OspfProcess(p, router_id="10.255.0.2", hello_interval=1.0, ifaces=["eth0", "eth1", "lo0"])
+    ospf_pe2 = OspfProcess(pe2, router_id="10.255.0.3", hello_interval=1.0, ifaces=pe2_core)
     LdpProcess(pe1, label_base=16, interval=2.0)
     LdpProcess(p, label_base=100, interval=2.0)
     LdpProcess(pe2, label_base=200, interval=2.0)
-    SrProcess(pe1, _ldp(pe1), node_sid=101)
-    SrProcess(p, _ldp(p), node_sid=100)
-    SrProcess(pe2, _ldp(pe2), node_sid=102)
+    SrProcess(pe1, ospf_pe1, node_sid=101)
+    SrProcess(p, ospf_p, node_sid=100)
+    SrProcess(pe2, ospf_pe2, node_sid=102)
     if diamond:
         p2 = net.devices["p2"]
-        OspfProcess(p2, router_id="10.255.0.4", hello_interval=1.0,
-                    ifaces=["eth0", "eth1", "lo0"])
+        ospf_p2 = OspfProcess(p2, router_id="10.255.0.4", hello_interval=1.0,
+                               ifaces=["eth0", "eth1", "lo0"])
         LdpProcess(p2, label_base=300, interval=2.0)
-        SrProcess(p2, _ldp(p2), node_sid=104)
+        SrProcess(p2, ospf_p2, node_sid=104)
 
     net.start()
     net.run(until=60.0)
@@ -83,10 +92,6 @@ def _lab(diamond: bool = False) -> Network:
 
 def _proc(net: Network, name: str, proto: str):
     return next(p for p in net.devices[name].processes if p.proto == proto)
-
-
-def _ldp(dev: Router) -> LdpProcess:
-    return next(p for p in dev.processes if p.proto == "ldp")
 
 
 # ----- node-SID -----------------------------------------------------------------

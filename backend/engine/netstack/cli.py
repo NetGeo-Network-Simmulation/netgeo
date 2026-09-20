@@ -391,6 +391,17 @@ class CliSession:
                     f"{n['ip']:<16} {n['iface']}"
                 )
             return "\n".join(rows) + "\n"
+        if low.startswith("show ip ospf database opaque-area"):
+            proc = self._proc("ospf")
+            if proc is None:
+                return "% OSPF is not running\n"
+            rows = ["Opaque Type  Opaque ID  Advertising Router  Seq  TLVs"]
+            for o in proc.opaque_rows():
+                rows.append(
+                    f"{o['opaque_type']:<12} {o['opaque_id']:<10} {o['router_id']:<19} "
+                    f"{o['seq']:<4} {o['tlvs']}"
+                )
+            return "\n".join(rows) + "\n"
         if low.startswith(("show isis neighbors", "show clns neighbors")):
             proc = self._proc("isis")
             if proc is None:
