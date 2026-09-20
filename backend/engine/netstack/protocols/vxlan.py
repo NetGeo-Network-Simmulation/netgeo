@@ -30,8 +30,12 @@ Deliberate simplifications (ponytail — each names its ceiling + upgrade path):
   so correctness holds before Type-2 converges. Upgrade = data-plane MAC
   learning on decap if a scenario needs conversational learning without EVPN.
 - ``# ponytail:`` one VTEP per node, keyed by the loopback /32 (like SR). No
-  multi-homing/ESI, no Type-5 IP-VRF, no anycast gateway (all NG-SIM-10
-  non-goals). Upgrade = an ESI/DF-election layer when multi-homing is needed.
+  Type-5 IP-VRF, no anycast gateway (still NG-SIM-10 non-goals).
+- ``# ponytail:`` ESI multi-homing (A4, RFC 7432 sec 5/7.1/8.2) tracks per-ES
+  and per-EVI Ethernet A-D routes for mass withdrawal, but skips DF election
+  (sec 8.5) and aliasing/load-balancing consumption (sec 8.4) — a remote PE
+  still picks exactly one VTEP per learned MAC. Upgrade = DF election +
+  multi-path forwarding when an active-active lab needs it.
 """
 from __future__ import annotations
 
@@ -56,6 +60,19 @@ from engine.netstack.iface import Interface
 if TYPE_CHECKING:  # pragma: no cover
     from engine.netstack.network import Network
 
+# RFC 7432 sec 5: ESI 0 (all-zero, 10 octets) means "not multi-homed".
+ESI_SINGLE_HOMED = "00:00:00:00:00:00:00:00:00:00"
+
+
+def normalize_esi(value: str) -> str:
+    """Validate/normalize a 10-octet Type-0 ESI, colon-hex like a MAC x2."""
+    v = value.strip().lower().replace("-", ":")
+    parts = v.split(":")
+    hexdigits = set("0123456789abcdef")
+    if len(parts) != 10 or not all(len(p) == 2 and set(p) <= hexdigits for p in parts):
+        raise ValueError(f"invalid ESI, want 10 hex octets (e.g. a MAC twice): {value!r}")
+    return v
+
 
 def _schedule(net: Network, after: float, node_id: str, fn) -> None:
     net.scheduler.schedule_after(
@@ -74,22 +91,34 @@ class VxlanProcess:
         self.interval = interval
         self.vtep_ip: IPv4Address | None = None       # our loopback = VTEP IP
         self.access: dict[str, int] = {}              # access iface name -> VNI
+        self.esi: dict[str, str] = {}                  # access iface name -> ESI (A4)
         # (vni, mac) -> location: a str = local access port, an IPv4Address =
         # remote VTEP (learned via Type-2). Absence = unknown -> BUM.
         self.mac_vni: dict[tuple[int, str], str | IPv4Address] = {}
         self.remote_vteps: dict[int, set[IPv4Address]] = {}   # vni -> remote VTEPs (Type-3)
+        # (esi, vni) -> remote VTEPs advertising Ethernet A-D for it (Type-1);
+        # vni 0 = per-ES (all EVIs, RFC 7432 sec 7.1), used for mass withdrawal.
+        self.remote_ad: dict[tuple[str, int], set[IPv4Address]] = {}
         self._sent: dict[IPv4Address, tuple] = {}    # peer -> last snapshot sent
         self._started = False
         router.processes.append(self)
 
     # ----- configuration -----------------------------------------------------
-    def bind_access(self, iface_name: str, vni: int) -> None:
+    def bind_access(self, iface_name: str, vni: int, esi: str = ESI_SINGLE_HOMED) -> None:
+        """``esi``: 10-octet colon-hex (see :func:`normalize_esi`); default
+        single-homed. Two access ports (on different routers) sharing the same
+        non-default ESI model one multi-homed CE (RFC 7432 sec 5)."""
         self.access[iface_name] = vni
+        self.esi[iface_name] = normalize_esi(esi)
         self.router.vxlan_ports.add(iface_name)
         self.remote_vteps.setdefault(vni, set())
 
-    def _local_vnis(self) -> set[int]:
-        return set(self.access.values())
+    def _port_up(self, iface_name: str) -> bool:
+        iface = self.router.interfaces.get(iface_name)
+        return iface is not None and iface.is_up
+
+    def _live_vnis(self) -> set[int]:
+        return {vni for name, vni in self.access.items() if self._port_up(name)}
 
     def _own_loopback_ip(self) -> IPv4Address:
         for iface in self.router.interfaces.values():
@@ -121,13 +150,22 @@ class VxlanProcess:
         return None
 
     def _local_routes(self) -> list[EvpnRoute]:
+        # A down access port withdraws everything tied to it (its Type-3 IMET,
+        # its Ethernet A-D, and its locally-learned Type-2 MACs) from the next
+        # snapshot — that's the whole mass-withdrawal mechanism (sec 8.2): the
+        # remote side's full-snapshot replace (_on_update) does the rest.
         vtep = str(self.vtep_ip)
+        live_vnis = self._live_vnis()
         routes: list[EvpnRoute] = [
-            EvpnRoute(route_type=3, vni=vni, vtep=vtep)
-            for vni in sorted(self._local_vnis())
+            EvpnRoute(route_type=3, vni=vni, vtep=vtep) for vni in sorted(live_vnis)
         ]
+        for name, esi in sorted(self.esi.items()):
+            if esi == ESI_SINGLE_HOMED or not self._port_up(name):
+                continue
+            routes.append(EvpnRoute(route_type=1, vni=0, vtep=vtep, esi=esi))          # per-ES
+            routes.append(EvpnRoute(route_type=1, vni=self.access[name], vtep=vtep, esi=esi))  # per-EVI
         for (vni, mac), loc in sorted(self.mac_vni.items()):
-            if isinstance(loc, str):   # locally-learned MAC -> Type-2
+            if isinstance(loc, str) and self._port_up(loc):   # locally-learned MAC -> Type-2
                 routes.append(EvpnRoute(route_type=2, vni=vni, vtep=vtep, mac=mac))
         return routes
 
@@ -166,26 +204,30 @@ class VxlanProcess:
         seg = pkt.payload
         if not isinstance(seg, TcpSegment) or not isinstance(seg.payload, EvpnUpdate):
             return
-        self._on_update(seg.payload)
+        self._on_update(pkt.src, seg.payload)
 
-    def _on_update(self, update: EvpnUpdate) -> None:
-        # Full-snapshot replace keyed by the sending VTEP(s): drop this sender's
-        # prior state, then reinstall from the snapshot (multi-sender safe).
-        senders = {IPv4Address(r.vtep) for r in update.routes}
+    def _on_update(self, sender: IPv4Address, update: EvpnUpdate) -> None:
+        # Full-snapshot replace keyed by the sending VTEP (the packet's IP
+        # source — not reconstructed from the NLRI, so a *fully withdrawn*
+        # sender with an empty route list still clears its old state; that's
+        # what makes mass withdrawal (sec 8.2) a single atomic step here).
+        if sender == self.vtep_ip:
+            return
         for vteps in self.remote_vteps.values():
-            vteps -= senders
+            vteps.discard(sender)
+        for vteps in self.remote_ad.values():
+            vteps.discard(sender)
         self.mac_vni = {
             k: v for k, v in self.mac_vni.items()
-            if not (isinstance(v, IPv4Address) and v in senders)
+            if not (isinstance(v, IPv4Address) and v == sender)
         }
         for r in update.routes:
-            vtep = IPv4Address(r.vtep)
-            if vtep == self.vtep_ip:
-                continue
             if r.route_type == 3:
-                self.remote_vteps.setdefault(r.vni, set()).add(vtep)
+                self.remote_vteps.setdefault(r.vni, set()).add(sender)
             elif r.route_type == 2 and r.mac:
-                self.mac_vni[(r.vni, r.mac)] = vtep
+                self.mac_vni[(r.vni, r.mac)] = sender
+            elif r.route_type == 1 and r.esi:
+                self.remote_ad.setdefault((r.esi, r.vni), set()).add(sender)
 
     # ----- data plane: access -> overlay -------------------------------------
     def on_access_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
@@ -277,22 +319,35 @@ class VxlanProcess:
         return rows
 
     def evpn_rows(self) -> list[dict]:
-        """The EVPN table: local + learned Type-2 (MAC) and Type-3 (IMET)."""
+        """The EVPN table: local + learned Type-1 (Ethernet A-D), Type-2
+        (MAC) and Type-3 (IMET). ``esi`` is "-" for non-Type-1 rows; a
+        Type-1 ``vni`` of "*" is the per-ES (all-EVI) route."""
         rows: list[dict] = []
-        for vni in sorted(self._local_vnis()):
+        for vni in sorted(self._live_vnis()):
             rows.append({"type": 3, "vni": vni, "mac": "*",
-                         "vtep": str(self.vtep_ip), "origin": "local"})
+                         "vtep": str(self.vtep_ip), "origin": "local", "esi": "-"})
+        for name, esi in sorted(self.esi.items()):
+            if esi == ESI_SINGLE_HOMED or not self._port_up(name):
+                continue
+            rows.append({"type": 1, "vni": "*", "mac": "-",
+                         "vtep": str(self.vtep_ip), "origin": "local", "esi": esi})
+            rows.append({"type": 1, "vni": self.access[name], "mac": "-",
+                         "vtep": str(self.vtep_ip), "origin": "local", "esi": esi})
         for (vni, mac), loc in sorted(self.mac_vni.items()):
             local = isinstance(loc, str)
             rows.append({
                 "type": 2, "vni": vni, "mac": mac,
                 "vtep": str(self.vtep_ip) if local else str(loc),
-                "origin": "local" if local else "remote",
+                "origin": "local" if local else "remote", "esi": "-",
             })
         for vni in sorted(self.remote_vteps):
             for vtep in sorted(self.remote_vteps[vni]):
                 rows.append({"type": 3, "vni": vni, "mac": "*",
-                             "vtep": str(vtep), "origin": "remote"})
+                             "vtep": str(vtep), "origin": "remote", "esi": "-"})
+        for esi, vni in sorted(self.remote_ad):
+            for vtep in sorted(self.remote_ad[(esi, vni)]):
+                rows.append({"type": 1, "vni": vni or "*", "mac": "-",
+                             "vtep": str(vtep), "origin": "remote", "esi": esi})
         return rows
 
 

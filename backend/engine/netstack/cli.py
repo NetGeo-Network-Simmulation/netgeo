@@ -317,11 +317,11 @@ class CliSession:
             vx = self._proc("vxlan")
             if vx is None:
                 return "% EVPN/VXLAN is not enabled\n"
-            rows = ["Type  VNI     MAC                  VTEP             Origin"]
+            rows = ["Type  VNI     MAC                  VTEP             Origin   ESI"]
             for r in vx.evpn_rows():
                 rows.append(
-                    f"T{r['type']:<4} {r['vni']:<7} {r['mac']:<20} "
-                    f"{r['vtep']:<16} {r['origin']}"
+                    f"T{r['type']:<4} {r['vni']!s:<7} {r['mac']:<20} "
+                    f"{r['vtep']:<16} {r['origin']:<8} {r['esi']}"
                 )
             return "\n".join(rows) + "\n"
         if low.startswith(("show vxlan vtep", "show nve peers")):
