@@ -291,56 +291,60 @@ export function ProblemsWorkspace() {
         {/* Header — no page title: the Problems tab in TopBar's sub-nav
             already carries this page's identity, so an in-page h1 was a
             duplicate (root gets aria-label="Problem Center" above instead). */}
-        <div className="flex flex-col gap-3 border-b border-fg/10 bg-panel pt-4 pr-6 pb-4 pl-[116px]">
-          {/* Filter chips lead the header — first row, so this row sits at
-              the top-left of the content area right after the minimum
-              pt-4/pl-[116px] inset (Surya's QA: the chip row read as too far
-              from the corner when it followed the search/acknowledge row). */}
-          <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
-            <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
-            <FilterChip
-              active={filter === 'critical'}
-              onClick={() => setFilter('critical')}
-              label="Critical"
-              count={counts.critical}
-              icon={CircleAlert}
-              tone="text-danger"
-            />
-            <FilterChip
-              active={filter === 'warning'}
-              onClick={() => setFilter('warning')}
-              label="Warning"
-              count={counts.warning}
-              icon={AlertTriangle}
-              tone="text-warning"
-            />
-            <FilterChip
-              active={filter === 'info'}
-              onClick={() => setFilter('info')}
-              label="Info"
-              count={counts.info}
-              icon={Info}
-              tone="text-accent"
-            />
-          </div>
-          <div className="flex items-center justify-end gap-3">
-            <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
-              <Search className="h-4 w-4 text-fg/40" aria-hidden />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search nodes, problems…"
-                aria-label="Search problems"
-                className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
+        <div className="border-b border-fg/10 bg-panel pt-4 pr-6 pb-4 pl-[116px]">
+          {/* Same mx-auto max-w-5xl box the table below uses (leader review
+              2026-09-20): the strip's background still bleeds full-width,
+              but the toolbar's own content shares the table's left/right
+              edges instead of the chips hugging the rail-inset corner while
+              the table centers narrower — one visually coherent block, not
+              two different widths. */}
+          <div className="mx-auto flex w-full max-w-5xl flex-wrap items-center gap-3">
+            <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
+              <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
+              <FilterChip
+                active={filter === 'critical'}
+                onClick={() => setFilter('critical')}
+                label="Critical"
+                count={counts.critical}
+                icon={CircleAlert}
+                tone="text-danger"
               />
-            </label>
-            <button
-              onClick={ackAll}
-              disabled={counts.all === 0}
-              className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-            >
-              Acknowledge all
-            </button>
+              <FilterChip
+                active={filter === 'warning'}
+                onClick={() => setFilter('warning')}
+                label="Warning"
+                count={counts.warning}
+                icon={AlertTriangle}
+                tone="text-warning"
+              />
+              <FilterChip
+                active={filter === 'info'}
+                onClick={() => setFilter('info')}
+                label="Info"
+                count={counts.info}
+                icon={Info}
+                tone="text-accent"
+              />
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
+                <Search className="h-4 w-4 text-fg/40" aria-hidden />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search nodes, problems…"
+                  aria-label="Search problems"
+                  className="w-56 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
+                />
+              </label>
+              <button
+                onClick={ackAll}
+                disabled={counts.all === 0}
+                className="rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              >
+                Acknowledge all
+              </button>
+            </div>
           </div>
         </div>
 
@@ -361,29 +365,49 @@ export function ProblemsWorkspace() {
             ) : visible.length === 0 ? (
               <p className="p-4 text-sm text-fg/40">No problem matches the current filter.</p>
             ) : (
-              <div className="overflow-hidden rounded-lg border border-fg/10">
-                <table className="w-full border-collapse text-left">
-                  <thead>
-                    <tr className="border-b border-fg/10 bg-recess/30 text-[12px] text-fg/55">
-                      <th className="w-10 px-4 py-2 font-normal" aria-label="Severity" />
-                      <th className="px-4 py-2 font-normal">Problem</th>
-                      <th className="px-4 py-2 font-normal">Affected node</th>
-                      <th className="px-4 py-2 font-normal">Detected</th>
-                      <th className="px-4 py-2 font-normal">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="font-mono text-[12px]">
-                    {visible.map((p) => (
-                      <ProblemRow
-                        key={p.id}
-                        problem={p}
-                        active={p.id === selected?.id}
-                        acked={acks.has(p.id)}
-                        onSelect={() => setSelectedId(p.id)}
-                      />
-                    ))}
-                  </tbody>
-                </table>
+              // max-w-5xl + mx-auto: caps the table at a readable width on
+              // ultra-wide windows instead of stretching into a thin edge-
+              // to-edge slab, and table-fixed + colgroup gives each column a
+              // deliberate share instead of ragged content-driven widths
+              // (Surya QA 2026-09-20: "plain full-width slab"). The row
+              // count caption below turns the leftover space under a short
+              // list into a readable footer instead of bare emptiness.
+              <div className="mx-auto w-full max-w-5xl">
+                <div className="overflow-hidden rounded-xl border border-fg/10">
+                  <table className="w-full table-fixed border-collapse text-left">
+                    <colgroup>
+                      <col className="w-10" />
+                      <col className="w-[38%]" />
+                      <col className="w-[28%]" />
+                      <col className="w-[17%]" />
+                      <col className="w-[17%]" />
+                    </colgroup>
+                    <thead>
+                      <tr className="border-b border-fg/10 bg-recess/30 text-[12px] text-fg/55">
+                        <th className="px-4 py-2 font-normal" aria-label="Severity" />
+                        <th className="px-4 py-2 font-normal">Problem</th>
+                        <th className="px-4 py-2 font-normal">Affected node</th>
+                        <th className="px-4 py-2 font-normal">Detected</th>
+                        <th className="px-4 py-2 font-normal">Status</th>
+                      </tr>
+                    </thead>
+                    <tbody className="font-mono text-[12px]">
+                      {visible.map((p) => (
+                        <ProblemRow
+                          key={p.id}
+                          problem={p}
+                          active={p.id === selected?.id}
+                          acked={acks.has(p.id)}
+                          onSelect={() => setSelectedId(p.id)}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <p className="mt-3 px-1 text-[11px] text-fg/35">
+                  {visible.length} of {counts.all} problem{counts.all === 1 ? '' : 's'}
+                  {acks.size > 0 ? ` · ${acks.size} acknowledged` : ''}
+                </p>
               </div>
             )}
           </div>
@@ -510,35 +534,43 @@ function Inspector({
   return (
     <>
       <div className={cn('h-1.5 w-full shrink-0', bannerTone)} aria-hidden />
-      <div className="ng-scroll flex min-h-0 flex-1 flex-col overflow-y-auto p-6">
-        <div className="mb-2 flex items-center gap-2">
-          <Icon className={cn('h-5 w-5', tone)} aria-hidden />
-          <span className={cn('font-mono text-[12px] uppercase tracking-wider', tone)}>{label} event</span>
-        </div>
-        <h2 className="mb-1 font-display text-xl font-semibold text-fg">{problem.title}</h2>
-        <div className="mb-5 font-mono text-[12px] text-fg/55">{problem.node}</div>
-        <p className="mb-5 text-[13px] leading-relaxed text-fg/70">{problem.detail}</p>
-
-        <div className="mb-5">
-          <h3 className="mb-2 text-[13px] font-medium text-fg/85">Evidence</h3>
-          <pre className="ng-scroll overflow-x-auto rounded-lg border border-fg/10 bg-recess/50 p-3 font-mono text-[11px] leading-relaxed text-fg/70">
-            {problem.evidence.join('\n')}
-          </pre>
-        </div>
-
-        <div className="mb-auto rounded-lg border border-fg/10 bg-recess/30 p-4">
+      {/* Content and actions are two normal-flow children of the same scroll
+          box (not two flex items split by mb-auto/mt-auto — that spacer was
+          shoving the buttons to the very bottom of the panel even when the
+          content was short, Surya QA 2026-09-20). Actions flow directly
+          after the content; `sticky bottom-0` only engages once the content
+          actually overflows the panel and the box scrolls. */}
+      <div className="ng-scroll min-h-0 flex-1 overflow-y-auto">
+        <div className="p-6 pb-4">
           <div className="mb-2 flex items-center gap-2">
-            <Wrench className="h-[18px] w-[18px] text-accent" aria-hidden />
-            <h3 className="text-[13px] font-medium text-fg">Suggested Actions</h3>
+            <Icon className={cn('h-5 w-5', tone)} aria-hidden />
+            <span className={cn('font-mono text-[12px] uppercase tracking-wider', tone)}>{label} event</span>
           </div>
-          <ul className="list-inside list-disc space-y-1 text-[13px] text-fg/70">
-            {problem.actions.map((a, i) => (
-              <li key={i}>{a}</li>
-            ))}
-          </ul>
+          <h2 className="mb-1 font-display text-xl font-semibold text-fg">{problem.title}</h2>
+          <div className="mb-5 font-mono text-[12px] text-fg/55">{problem.node}</div>
+          <p className="mb-5 text-[13px] leading-relaxed text-fg/70">{problem.detail}</p>
+
+          <div className="mb-5">
+            <h3 className="mb-2 text-[13px] font-medium text-fg/85">Evidence</h3>
+            <pre className="ng-scroll overflow-x-auto rounded-lg border border-fg/10 bg-recess/50 p-3 font-mono text-[11px] leading-relaxed text-fg/70">
+              {problem.evidence.join('\n')}
+            </pre>
+          </div>
+
+          <div className="rounded-lg border border-fg/10 bg-recess/30 p-4">
+            <div className="mb-2 flex items-center gap-2">
+              <Wrench className="h-[18px] w-[18px] text-accent" aria-hidden />
+              <h3 className="text-[13px] font-medium text-fg">Suggested Actions</h3>
+            </div>
+            <ul className="list-inside list-disc space-y-1 text-[13px] text-fg/70">
+              {problem.actions.map((a, i) => (
+                <li key={i}>{a}</li>
+              ))}
+            </ul>
+          </div>
         </div>
 
-        <div className="mt-6 flex flex-col gap-2">
+        <div className="sticky bottom-0 flex flex-col gap-2 border-t border-fg/10 bg-panel p-6 pt-4">
           <button
             onClick={onOpenTopology}
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-fg/10 px-4 py-2 text-[13px] font-medium text-fg/85 transition-colors hover:bg-fg/5"

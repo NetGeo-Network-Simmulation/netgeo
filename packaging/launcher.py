@@ -14,6 +14,8 @@ Smoke:  curl http://127.0.0.1:<port>/api/health
 """
 from __future__ import annotations
 
+import ctypes
+import ctypes.util
 import os
 import signal
 import socket
@@ -58,6 +60,25 @@ def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
+
+
+def _wait_until_ready(
+    port: int, server_thread: threading.Thread, timeout: float = 10.0, interval: float = 0.05
+) -> bool:
+    """Poll for uvicorn to accept TCP connections instead of a blind sleep
+    (measured median ready time ~0.24s vs the old fixed 1.0s — see
+    docs/qa/native-lag-2026-09-18.md). Returns False on timeout or if the
+    server thread died; caller proceeds either way (no new failure mode)."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if not server_thread.is_alive():
+            return False
+        try:
+            with socket.create_connection(("127.0.0.1", port), timeout=interval):
+                return True
+        except OSError:
+            time.sleep(interval)
+    return False
 
 
 def _mount_frontend() -> None:
@@ -112,6 +133,125 @@ def _dri_driver_path() -> str | None:
             if header[:4] == b"\x7fELF" and header[4] == 2:  # ELFCLASS64
                 return candidate
     return None
+
+
+_EGL_PLATFORM_GBM_KHR = 0x31D7
+
+
+def _dri_render_node() -> str | None:
+    """First DRM render node (/dev/dri/renderD*), or None — no render node
+    at all (headless box, no /dev/dri, or this user isn't in the `render`
+    group so the open below would fail anyway) means no GBM device is
+    possible either way. Split out from _hardware_gl_available() as its
+    own function purely so tests can stub it directly instead of faking
+    pathlib.Path.
+    """
+    dri_dir = Path("/dev/dri")
+    if not dri_dir.is_dir():
+        return None
+    nodes = sorted(dri_dir.glob("renderD*"))
+    return str(nodes[0]) if nodes else None
+
+
+def _hardware_gl_available() -> bool:
+    """Cheap, dependency-free probe: can Chromium's GPU process actually
+    build a hardware EGL surface on this host?
+
+    MUST go through the GBM platform specifically, not plain
+    eglGetDisplay(EGL_DEFAULT_DISPLAY) — measured by hand while building
+    this probe (2026-09-20): eglGetDisplay(EGL_DEFAULT_DISPLAY) +
+    eglInitialize() returns True unconditionally on this machine, because
+    libEGL's default-platform auto-detect picks X11/Wayland (DISPLAY /
+    WAYLAND_DISPLAY are set) and that path never touches libgbm at all. It
+    does NOT reproduce the actual bug (confirmed: same call sequence still
+    returns True even with LD_LIBRARY_PATH forced at the installed rpm's
+    bundled _internal/, which is where the broken libgbm.so.1 lives).
+    Chromium's own GPU process, for the headless/off-screen surface this
+    launcher needs, initializes EGL through the GBM platform — its
+    documented failure is literally "EGL: Failed to initialize GBM
+    device" (see _dri_driver_path()) — so the probe has to open a DRM
+    render node and drive libgbm the same way: gbm_create_device() then
+    eglGetPlatformDisplayEXT(EGL_PLATFORM_GBM_KHR, ...) then
+    eglInitialize(). Verified by hand against the exact bundled
+    _internal/libgbm.so.1 from the installed netgeo-1.2.125.1 rpm (LD_
+    LIBRARY_PATH pointed at it): gbm_create_device() fails outright with
+    the same "MESA-LOADER: failed to open iris: ... wrong ELF class"/
+    "did not find extension DRI_Mesa version 1" lines this file already
+    documents — even with LIBGL_DRIVERS_PATH correctly set first (that
+    fix only rescues the 2D/X11-EGL compositing path in _dri_driver_path,
+    not the bundled libgbm's own GBM init) — while the real system
+    libgbm.so.1 succeeds. That is the actual hw/sw fork this launcher
+    needs to detect.
+
+    Runs in-process, no subprocess/--window-child wrapper of its own
+    needed: this function only ever executes inside _try_webview(), which
+    itself only ever runs inside the `--window-child` re-exec (see
+    main()) — already isolated by _run_webview_in_subprocess()'s existing
+    SIGABRT handling, so a hard crash here degrades exactly like a Qt/EGL
+    abort already does today (this process dies, the parent launcher
+    falls back to the system browser).
+
+    Must run AFTER LIBGL_DRIVERS_PATH is set in _try_webview() below, so
+    this probe sees the exact driver search path the real Chromium/Qt
+    process will use.
+
+    Measured cost (this machine, Fedora 44, real system + bundled
+    libgbm/libEGL, single call — the real call site runs it exactly once):
+    8-23ms, dominated by the two dlopen calls and the DRM ioctl inside
+    gbm_create_device. Never raises: any OSError (no render node, no
+    libgbm/libEGL at all, no permission on the node) means no usable
+    hardware surface either way.
+    """
+    render_node = _dri_render_node()
+    if render_node is None:
+        return False
+    fd = None
+    try:
+        lib_gbm = ctypes.CDLL(ctypes.util.find_library("gbm") or "libgbm.so.1")
+        egl = ctypes.CDLL(ctypes.util.find_library("EGL") or "libEGL.so.1")
+        fd = os.open(render_node, os.O_RDWR)
+
+        lib_gbm.gbm_create_device.restype = ctypes.c_void_p
+        lib_gbm.gbm_create_device.argtypes = [ctypes.c_int]
+        gbm_device = lib_gbm.gbm_create_device(fd)
+        if not gbm_device:
+            return False
+
+        egl.eglGetProcAddress.restype = ctypes.c_void_p
+        egl.eglGetProcAddress.argtypes = [ctypes.c_char_p]
+        get_platform_display_addr = egl.eglGetProcAddress(b"eglGetPlatformDisplayEXT")
+        if not get_platform_display_addr:
+            return False
+        get_platform_display = ctypes.CFUNCTYPE(
+            ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p
+        )(get_platform_display_addr)
+        display = get_platform_display(_EGL_PLATFORM_GBM_KHR, ctypes.c_void_p(gbm_device), None)
+        if not display:
+            return False
+
+        egl.eglInitialize.restype = ctypes.c_int
+        egl.eglInitialize.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_void_p]
+        return bool(egl.eglInitialize(display, None, None))
+    except OSError:
+        return False
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+def _decide_gl_mode() -> tuple[str, str]:
+    """Returns (mode, reason) — mode is "hw" (let Chromium use real GPU
+    WebGL) or "sw" (force the SwiftShader flags block below).
+
+    NETGEO_GL env var forces the choice (hw|sw); default "auto" runs
+    _hardware_gl_available(). Documented in --help.
+    """
+    override = os.environ.get("NETGEO_GL", "auto")
+    if override in ("hw", "sw"):
+        return override, f"NETGEO_GL={override}"
+    if _hardware_gl_available():
+        return "hw", "EGL probe succeeded"
+    return "sw", "EGL probe failed (no hardware GL surface)"
 
 
 def _webview_unavailable(exc: Exception | None) -> str:
@@ -349,6 +489,75 @@ class _WindowBridge:
         self._run_on_gui_thread(_do)
 
 
+_BUNDLE_LOADER_VARS = (
+    "GIO_MODULE_DIR",
+    "GSETTINGS_SCHEMA_DIR",
+    "GI_TYPELIB_PATH",
+    "GDK_PIXBUF_MODULE_FILE",
+    "FONTCONFIG_FILE",
+    "FONTCONFIG_PATH",
+    "PYTHONHOME",
+    "QT_PLUGIN_PATH",
+)
+
+
+def _system_subprocess_env() -> dict | None:
+    """Env for spawning a *system* binary (gsettings, not another copy of
+    ourselves) from inside the frozen bundle.
+
+    BUG (2026-09-18, reported by Surya): installed rpm build — minimize/
+    maximize buttons missing from the native title bar, only close showed.
+    Root cause: PyInstaller's bootloader points LD_LIBRARY_PATH at the
+    bundle's _internal/ dir (which ships its own libglib-2.0/libgio-2.0) so
+    that our own re-exec'd `netgeo --window-child` finds its bundled Qt libs.
+    `gsettings`, a system binary, inherits that same LD_LIBRARY_PATH and
+    loads the bundled glib instead of the system one, which can't reach the
+    real dconf backend — it silently returns a bogus default ('appmenu:close')
+    instead of raising. `_button_layout()`'s parser then sees only "close" as
+    a known token and renders just the close button.
+    Confirmed by hand: `LD_LIBRARY_PATH=<bundle>/_internal gsettings get
+    org.gnome.desktop.wm.preferences button-layout` -> 'appmenu:close' vs the
+    real 'close,minimize,maximize:appmenu' with a clean env.
+
+    STILL BROKEN (2026-09-20, this round): the first fix relied on
+    LD_LIBRARY_PATH_ORIG, which PyInstaller's bootloader only sets when the
+    *parent* process already had LD_LIBRARY_PATH — a normal GNOME desktop
+    launch (app grid / dock icon) doesn't, so ORIG was absent and this
+    function returned None, i.e. "no change", leaving the bundle path in
+    place. Confirmed on the installed netgeo-1.2.125.1 rpm: launching
+    `/opt/netgeo/netgeo` from a clean env (no LD_LIBRARY_PATH, matching a
+    real desktop launch) and reading /proc/<pid>/environ shows
+    LD_LIBRARY_PATH=/opt/netgeo/_internal with **no** LD_LIBRARY_PATH_ORIG
+    key at all.
+    Fix: don't depend on `*_ORIG` existing. Strip the bundle's own dir out
+    of LD_LIBRARY_PATH directly (sys._MEIPASS — the exact path the
+    bootloader injects), keeping any unrelated entries the user had. Still
+    prefer LD_LIBRARY_PATH_ORIG when it *is* present (covers the case where
+    the user already had a custom LD_LIBRARY_PATH). Also drops other
+    bundle-injected loader vars (_BUNDLE_LOADER_VARS) that break system
+    binaries the same way if set.
+    """
+    if not FROZEN:
+        return None
+    env = dict(os.environ)
+    orig = env.pop("LD_LIBRARY_PATH_ORIG", None)
+    if orig is not None:
+        if orig:
+            env["LD_LIBRARY_PATH"] = orig
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    else:
+        bundle_dir = str(getattr(sys, "_MEIPASS", ""))
+        kept = [p for p in env.get("LD_LIBRARY_PATH", "").split(":") if p and p != bundle_dir]
+        if kept:
+            env["LD_LIBRARY_PATH"] = ":".join(kept)
+        else:
+            env.pop("LD_LIBRARY_PATH", None)
+    for var in _BUNDLE_LOADER_VARS:
+        env.pop(var, None)
+    return env
+
+
 def _button_layout() -> dict:
     """Read GNOME's `button-layout` gsetting (org.gnome.desktop.wm.
     preferences) so NativeTitleBar.tsx places its own minimize/maximize/
@@ -375,6 +584,7 @@ def _button_layout() -> dict:
             capture_output=True,
             text=True,
             timeout=2,
+            env=_system_subprocess_env(),
         )
     except (OSError, subprocess.SubprocessError):
         return default
@@ -429,6 +639,43 @@ def _try_webview(url: str) -> bool:
         driver_path = _dri_driver_path()
         if driver_path:
             os.environ["LIBGL_DRIVERS_PATH"] = driver_path
+    # WebGL fix (2026-09-20, this round): "renders normally" above is true
+    # for 2D compositing only. Verified live against the INSTALLED
+    # netgeo-1.2.125.1 rpm (isolated config dir, CDP probe on the real
+    # QtWebEngine renderer, not a browser guess): when EGL/GBM init fails
+    # (same host defect as above — stderr shows the identical "EGL: Failed
+    # to initialize GBM device"), Chromium falls back to
+    # --disable-gpu-compositing on its own for 2D, but a bare
+    # `canvas.getContext('webgl')` still returns null — modern Chromium
+    # (the version QtWebEngine 6.11 bundles) requires an explicit opt-in to
+    # use its bundled SwiftShader software renderer for WebGL, it does not
+    # fall back to it silently. This is the actual cause of Physical
+    # Plant's "3D view unavailable — WebGL" and (confirmed by canvas probe)
+    # a MapLibre canvas with zero GL context on the Map view too, on any
+    # host where hardware GL can't be reached.
+    # Confirmed by A/B on the same rpm: raw WebGL probe is
+    # {ok:false,"reason":"no context"} without this var, and
+    # {ok:true,"renderer":"ANGLE (...)"} with it — Map tiles go from a
+    # blank canvas to actually rendering. `--enable-unsafe-swiftshader`
+    # alone (no --use-gl/--use-angle) was tested and is NOT sufficient by
+    # itself; the three flags together are what CDP-verified working.
+    #
+    # Leader review (2026-09-20, same day): the block above was applied
+    # UNCONDITIONALLY — forcing every host, including ones with working
+    # hardware GL, onto the CPU SwiftShader path for the rack 3D view and
+    # the MapLibre map. Gated behind _decide_gl_mode() instead: only forced
+    # when the EGL probe (or an explicit NETGEO_GL=sw) says hardware GL
+    # isn't reachable. setdefault: never override a user's own
+    # QTWEBENGINE_CHROMIUM_FLAGS.
+    gl_mode, gl_reason = _decide_gl_mode()
+    if gl_mode == "sw":
+        os.environ.setdefault(
+            "QTWEBENGINE_CHROMIUM_FLAGS",
+            "--enable-unsafe-swiftshader --use-gl=angle --use-angle=swiftshader-webgl",
+        )
+        print(f"[netgeo-launcher] WebGL: software (SwiftShader) — {gl_reason}", file=sys.stderr)
+    else:
+        print(f"[netgeo-launcher] WebGL: hardware — {gl_reason}", file=sys.stderr)
     try:
         import webview
     except ImportError as exc:
@@ -460,21 +707,54 @@ def _try_webview(url: str) -> bool:
         transparent=True,  # required for the CSS border-radius rounded corners to actually show
         background_color="#0F0F0E",  # theme/tokens.ts --ng-bg-0 — avoids a white flash before CSS paints
         # Surya QA, 2026-09-14: default pywebview size (800x600) left the
-        # topology UI "berantakan" — rail overlapping the filter chips/
-        # search field, top-toolbar buttons pushed off-screen. Measured
-        # live with Playwright against this same built frontend.dist (not
-        # guessed): layout is intact at 1040x700, and breaks (search field
-        # clipped to "…ce or IP…", OSPF chip clipped off, rail overlapping
-        # the filter row) at both 1000x720 (width-driven) and 1040x650
-        # (height-driven — the left rail's fixed content height no longer
-        # fits). min_size below adds a small margin over that measured
-        # floor; initial size is a comfortable common laptop resolution
-        # well above it, not a fix for the clipping itself (still real at
-        # the floor — see class docstring / packaging/README.md for that
-        # open item).
+        # topology UI "berantakan". min_size below is re-measured 2026-09-18
+        # a SECOND time (supersedes 680x640 from earlier the same day): a
+        # leader review of that 680x640 QA screenshot
+        # (docs/qa/shots/native-controls-2026-09-18/03) found the floating
+        # nav rail actually OVERLAPPING the topology chips row, search field,
+        # bottom tool dock and minimap at that size — the 680x640 floor only
+        # ever measured the rail's OWN content height (558px, itself
+        # inflated — a live remeasure got 526.5px) against the window,
+        # never against the OTHER floating chrome sharing its screen space.
+        # NavigationRail.tsx no longer trusts "vertically centered means
+        # clear of the edges" for that reason: it now confines itself to a
+        # fixed band (RAIL_TOP_CLEAR/RAIL_BOTTOM_CLEAR, theme/shell.ts) sized
+        # from real measurements across Topology AND Physical Plant (whose
+        # own toolbar is taller), degrading its own content (drop decoration,
+        # then scroll the icon list) rather than overlap anything if that
+        # band is shorter than its content — so the rail itself no longer
+        # drives either floor below. What's left, re-measured the same way
+        # (Playwright, this same built frontend/dist, real login+device+
+        # inspector-open, element-rect comparison, every pairwise
+        # combination asserted non-intersecting, not just eyeballed):
+        #   - width floor is now the topology top-left panel (chips+search,
+        #     374px wide) and the bottom tool dock both needing to coexist
+        #     with the 360px inspector panel without touching it OR the
+        #     minimap (which shifts left by the inspector's width when one
+        #     is open) — overlap-free from 949px content width, whichever of
+        #     those three pairs clears last.
+        #   - height floor is no longer the rail (it degrades instead of
+        #     overlapping); 604px content height already has every pairwise
+        #     combination clear with room to spare, so this file just keeps
+        #     that same number rather than shaving it further.
+        # min_size adds a margin over the measured width floor (949 -> 980)
+        # for a sliver of breathing room, THEN +36 on height for
+        # NativeTitleBar.NATIVE_TITLE_BAR_HEIGHT: the Playwright measurement
+        # is a plain browser tab (no native title bar rendered at all —
+        # `useIsNativeShell()` is false without `window.pywebview`), but
+        # here `height` is the *whole* frameless window, title bar included
+        # (App.tsx: `h-screen` flex-col with NativeTitleBar as a shrink-0
+        # sibling of AppShell, not overlaid on top of it). On a common
+        # 1366x768 laptop screen with a GNOME top bar (~700px usable height),
+        # 980x640 leaves comfortable slack on both axes — a real fit, not
+        # just a floor that happens to survive. Confirmed enforced on the
+        # real Qt/Wayland window: pywebview's Qt backend calls
+        # `self.setMinimumSize(*min_size)` on the QMainWindow itself
+        # (webview/platforms/qt.py) — a native Qt constraint, not something
+        # this file has to re-implement or verify by hand.
         width=1440,
         height=900,
-        min_size=(1100, 720),
+        min_size=(980, 640),
     )
     bridge.bind(window)
     try:
@@ -574,6 +854,7 @@ def _print_help() -> None:
     print("  NETGEO_NO_WINDOW=1    same as --no-window (for systemd/containers)")
     print("  NETGEO_NO_BROWSER=1   run the backend headless, no window/browser")
     print("  PYWEBVIEW_GUI=gtk|qt  force the native-window backend")
+    print("  NETGEO_GL=hw|sw|auto  force/auto-probe hardware GL for WebGL (default: auto)")
 
 
 def main() -> None:
@@ -612,7 +893,7 @@ def main() -> None:
         daemon=True,
     )
     server_thread.start()
-    time.sleep(1.0)  # give uvicorn a moment to bind before opening the window
+    _wait_until_ready(port, server_thread)  # poll instead of a blind sleep
 
     reason = _no_window_reason(args)
     if reason:

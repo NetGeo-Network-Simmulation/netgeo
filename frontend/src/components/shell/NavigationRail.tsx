@@ -18,7 +18,22 @@
  * Groups (fixed IA, do not redesign): Projects · Design(topology/plant/
  * config) · Map(map) · Simulate(twin/edu/scenarios) ·
  * Operate(problems/reports). Settings stays a separate bottom button.
+ *
+ * Height (2026-09-18, closes the QA bug in docs/qa/shots/native-controls-
+ * 2026-09-18/03): the rail no longer just centers on the full workspace
+ * height — it's confined to the band between RAIL_TOP_CLEAR/
+ * RAIL_BOTTOM_CLEAR (theme/shell.ts), which keeps it clear of Topology's
+ * top chips/search row and bottom tool dock on any window short enough
+ * that the old unbounded, content-sized rail used to grow into them. Inside
+ * that band it still centers itself exactly as before. When the band is
+ * shorter than the rail's own content, it degrades in two steps rather than
+ * overlap anything: first the decorative grille + "NETGEO NG-5X" nameplate
+ * disappear (measured once on mount, see `fullHeightRef` below), then — if
+ * even the icon list alone doesn't fit — that list becomes its own vertical
+ * scroll region (`min-h-0 flex-1 overflow-y-auto`), so every button stays
+ * reachable instead of clipped.
  */
+import { useLayoutEffect, useRef, useState } from 'react';
 import {
   FolderKanban,
   Network,
@@ -36,6 +51,7 @@ import {
 import { useUiStore, type ViewMode } from '@/store/uiStore';
 import { cn } from '@/lib/cn';
 import { zc } from '@/theme/z';
+import { RAIL_BOTTOM_CLEAR, RAIL_TOP_CLEAR } from '@/theme/shell';
 
 export type RailMember =
   | { key: string; label: string; icon: LucideIcon; view: ViewMode }
@@ -117,63 +133,108 @@ export function NavigationRail() {
   const viewMode = useUiStore((s) => s.viewMode);
   const activeModal = useUiStore((s) => s.activeModal);
 
+  const bandRef = useRef<HTMLDivElement>(null);
+  const chassisRef = useRef<HTMLElement>(null);
+  // Measured once, on mount — while `showDecor` still starts `true` so the
+  // grille + nameplate are actually in the DOM to measure. The rail's
+  // content never changes at runtime (GROUPS is a static list), so one
+  // measurement is enough for every later comparison; no need to re-measure
+  // a block after it's been removed from the DOM.
+  const fullHeightRef = useRef(0);
+  const [showDecor, setShowDecor] = useState(true);
+
+  useLayoutEffect(() => {
+    fullHeightRef.current = chassisRef.current?.scrollHeight ?? 0;
+  }, []);
+
+  useLayoutEffect(() => {
+    const band = bandRef.current;
+    if (!band) return;
+    const recalc = () => setShowDecor(band.clientHeight >= fullHeightRef.current);
+    recalc();
+    const ro = new ResizeObserver(recalc);
+    ro.observe(band);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <nav
-      aria-label="Primary"
-      className={cn(
-        'rail-chassis pointer-events-auto absolute left-6 top-1/2 flex w-[76px] -translate-y-1/2 flex-col items-center gap-1 overflow-hidden rounded-xl border py-4',
-        zc.workspace,
-      )}
+    <div
+      ref={bandRef}
+      className={cn('pointer-events-none absolute left-6 flex w-[76px] flex-col items-center justify-center', RAIL_TOP_CLEAR, RAIL_BOTTOM_CLEAR)}
     >
-      {/* Metal-grain overlay — decorative, procedural (no raster asset). */}
-      <div className="rail-grain pointer-events-none absolute inset-0" aria-hidden />
+      <nav
+        ref={chassisRef}
+        aria-label="Primary"
+        className={cn(
+          'rail-chassis pointer-events-auto relative flex w-full min-h-0 max-h-full flex-col items-center gap-1 overflow-hidden rounded-xl border py-4',
+          zc.workspace,
+        )}
+      >
+        {/* Metal-grain overlay — decorative, procedural (no raster asset). */}
+        <div className="rail-grain pointer-events-none absolute inset-0" aria-hidden />
 
-      {/* Screws */}
-      {(['top-2 left-2', 'top-2 right-2', 'bottom-2 left-2', 'bottom-2 right-2'] as const).map((pos) => (
-        <span
-          key={pos}
-          className={cn('absolute h-1.5 w-1.5 rounded-full bg-fg/15 shadow-[inset_0_1px_1px_rgba(0,0,0,0.5)]', pos)}
-          aria-hidden
-        />
-      ))}
-
-      {/* Vents */}
-      <div className="relative z-10 mb-5 flex w-8 flex-col gap-1" aria-hidden>
-        {Array.from({ length: 5 }).map((_, i) => (
-          <div key={i} className="h-0.5 rounded-full bg-recess/80 shadow-[0_1px_0_rgba(255,255,255,0.1)]" />
-        ))}
-      </div>
-
-      <div className="relative z-10 flex w-full flex-col gap-3 px-2">
-        {GROUPS.map((group) => (
-          <RailButton
-            key={group.key}
-            icon={group.icon}
-            label={group.label}
-            active={isGroupActive(group, viewMode)}
-            onClick={() => activateMember(group.members[0])}
+        {/* Screws */}
+        {(['top-2 left-2', 'top-2 right-2', 'bottom-2 left-2', 'bottom-2 right-2'] as const).map((pos) => (
+          <span
+            key={pos}
+            className={cn('absolute h-1.5 w-1.5 rounded-full bg-fg/15 shadow-[inset_0_1px_1px_rgba(0,0,0,0.5)]', pos)}
+            aria-hidden
           />
         ))}
-      </div>
 
-      {/* Divider groove */}
-      <div className="relative z-10 my-4 h-px w-[80%] bg-recess/70 shadow-[0_1px_0_rgba(255,255,255,0.05)]" aria-hidden />
+        {/* Vents — first thing dropped when the band is too short (see class
+            doc above); purely decorative, safe to lose before anything else. */}
+        {showDecor && (
+          <div className="relative z-10 mb-5 flex w-8 flex-col gap-1" aria-hidden>
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="h-0.5 rounded-full bg-recess/80 shadow-[0_1px_0_rgba(255,255,255,0.1)]" />
+            ))}
+          </div>
+        )}
 
-      <div className="relative z-10 w-full px-2">
-        <RailButton
-          icon={SETTINGS.icon}
-          label={SETTINGS.label}
-          active={activeModal === 'settings'}
-          onClick={() => useUiStore.getState().openModal('settings')}
-        />
-      </div>
+        {/* Everything below the vents — icon list, divider, Settings — shares
+            ONE scroll region: the one thing that must never be unreachable
+            is a rail BUTTON, and Settings is a button too, so it scrolls
+            with the rest rather than being pinned outside this box (a
+            pinned-but-`shrink-0` Settings would just overflow the chassis'
+            own `max-h-full` clip in an extreme squeeze instead of shrinking
+            — still invisible, just uncounted). `min-h-0`/`flex-1` only
+            matter once the chassis above is actually height-capped. */}
+        <div className="ng-scroll relative z-10 flex w-full min-h-0 flex-1 flex-col items-center overflow-y-auto">
+          <div className="flex w-full flex-col gap-3 px-2">
+            {GROUPS.map((group) => (
+              <RailButton
+                key={group.key}
+                icon={group.icon}
+                label={group.label}
+                active={isGroupActive(group, viewMode)}
+                onClick={() => activateMember(group.members[0])}
+              />
+            ))}
+          </div>
 
-      {/* Engraved nameplate */}
-      <div className="relative z-10 mt-3 flex flex-col items-center text-fg-subtle opacity-70">
-        <span className="text-[9px] font-bold tracking-widest">NETGEO</span>
-        <span className="font-mono text-[8px]">NG-5X</span>
-      </div>
-    </nav>
+          {/* Divider groove */}
+          <div className="my-4 h-px w-[80%] shrink-0 bg-recess/70 shadow-[0_1px_0_rgba(255,255,255,0.05)]" aria-hidden />
+
+          <div className="w-full shrink-0 px-2">
+            <RailButton
+              icon={SETTINGS.icon}
+              label={SETTINGS.label}
+              active={activeModal === 'settings'}
+              onClick={() => useUiStore.getState().openModal('settings')}
+            />
+          </div>
+        </div>
+
+        {/* Engraved nameplate — second (last) thing dropped; see class doc. */}
+        {showDecor && (
+          <div className="relative z-10 mt-3 flex flex-col items-center text-fg-subtle opacity-70">
+            <span className="text-[9px] font-bold tracking-widest">NETGEO</span>
+            <span className="font-mono text-[8px]">NG-5X</span>
+          </div>
+        )}
+      </nav>
+    </div>
   );
 }
 

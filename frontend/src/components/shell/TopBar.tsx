@@ -19,6 +19,7 @@ import { SimulationBar } from '@/components/SimulationBar';
 import { ModeSwitch } from '@/components/ModeSwitch';
 import { UpdatesButton } from '@/components/shell/UpdatesButton';
 import { PresenceBar } from '@/components/shell/PresenceBar';
+import { HScrollToolbar } from '@/components/shell/HScrollToolbar';
 import { GROUPS, isGroupActive, activateMember, type RailMember } from '@/components/shell/NavigationRail';
 import { cn } from '@/lib/cn';
 
@@ -130,80 +131,92 @@ export function TopBar({ projectName, conn }: TopBarProps) {
 
   return (
     <header className="glass-strong flex h-14 shrink-0 items-center gap-3 border-b border-fg/10 px-3 text-[13px] text-fg/85">
-      {/* Brand + project + saved state */}
-      <div className="flex items-center gap-2 font-semibold">
+      {/* Brand — the one thing that stays pinned even when the rest of the
+          bar scrolls (HScrollToolbar below); everything else is either
+          per-project or a control, this is the app's own identity. */}
+      <div className="flex shrink-0 items-center gap-2 font-semibold">
         <NetGeoMark />
         <span className="hidden font-display text-sm tracking-tight sm:inline">NetGeo</span>
       </div>
-      <span className="text-fg/25">/</span>
-      <span className="max-w-[160px] truncate text-fg/70">{projectName}</span>
-      <span
-        className={cn(
-          'hidden items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] md:inline-flex',
-          dirty ? 'text-warning' : 'text-success',
-        )}
-        title={dirty ? 'Unsaved local changes' : 'All changes saved'}
-      >
-        {dirty ? <span className="h-1.5 w-1.5 rounded-full bg-warning" /> : <Check className="h-3.5 w-3.5" />}
-        {dirty ? 'Unsaved' : 'Saved'}
-      </span>
 
-      <SubNavStrip />
+      {/* Everything else: never wraps or clips (Surya 2026-09-18 — WPS-
+          ribbon pattern). At comfortable widths this never visibly scrolls;
+          below it, it scrolls instead of the controls disappearing off the
+          right edge. */}
+      <HScrollToolbar className="flex-1 gap-3">
+        <span className="shrink-0 text-fg/25">/</span>
+        <span className="max-w-[160px] shrink-0 truncate text-fg/70">{projectName}</span>
+        <span
+          className={cn(
+            'hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] md:inline-flex',
+            dirty ? 'text-warning' : 'text-success',
+          )}
+          title={dirty ? 'Unsaved local changes' : 'All changes saved'}
+        >
+          {dirty ? <span className="h-1.5 w-1.5 rounded-full bg-warning" /> : <Check className="h-3.5 w-3.5" />}
+          {dirty ? 'Unsaved' : 'Saved'}
+        </span>
 
-      {/* Command bar (center) */}
-      <div className="mx-2 flex flex-1 justify-center">
+        <SubNavStrip />
+
         <button
           onClick={() => openModal('command')}
-          className="flex w-full max-w-xl items-center gap-2 rounded-lg border border-fg/10 bg-fg/5 px-3 py-2 text-left text-xs text-fg/40 transition-colors hover:border-fg/20 hover:bg-fg/8"
+          className="flex w-72 shrink-0 items-center gap-2 rounded-lg border border-fg/10 bg-fg/5 px-3 py-2 text-left text-xs text-fg/40 transition-colors hover:border-fg/20 hover:bg-fg/8"
           aria-label="Open command palette"
         >
           <Search className="h-3.5 w-3.5 shrink-0" />
           <span className="flex-1 truncate">Search devices, IPs, places, or run a command…</span>
           <kbd className="hidden shrink-0 rounded border border-fg/15 px-1.5 py-0.5 font-mono text-[10px] sm:inline">⌘K</kbd>
         </button>
-      </div>
 
-      {/* Right cluster */}
-      <SimulationBar />
-      <ModeSwitch />
+        <SimulationBar />
+        <ModeSwitch />
 
-      <div className="flex items-center gap-1.5">
-        <button
-          onClick={() => projectId && openModal('addressingWizard')}
-          disabled={!projectId}
-          aria-label="Open the auto-addressing wizard"
-          title="Auto-address: preview and apply a dual-stack IP plan"
-          className={cn(
-            'grid h-8 w-8 place-items-center rounded-md transition-colors',
-            'text-fg/60 hover:bg-fg/10 hover:text-fg disabled:opacity-40',
-          )}
-        >
-          <Wand2 className="h-4 w-4" />
-        </button>
+        <div className="flex shrink-0 items-center gap-1.5">
+          <button
+            onClick={() => projectId && openModal('addressingWizard')}
+            disabled={!projectId}
+            aria-label="Open the auto-addressing wizard"
+            title="Auto-address: preview and apply a dual-stack IP plan"
+            className={cn(
+              'grid h-8 w-8 place-items-center rounded-md transition-colors',
+              'text-fg/60 hover:bg-fg/10 hover:text-fg disabled:opacity-40',
+            )}
+          >
+            <Wand2 className="h-4 w-4" />
+          </button>
 
-        <PresenceBar />
+          <PresenceBar />
 
-        <div
-          className={cn('flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs', online ? 'text-success' : 'text-warning')}
-          title={`Realtime channel: ${conn}`}
-        >
-          {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-          <span className="hidden lg:inline">{conn}</span>
+          <div
+            className={cn('flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs', online ? 'text-success' : 'text-warning')}
+            title={`Realtime channel: ${conn}`}
+          >
+            {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
+            <span className="hidden lg:inline">{conn}</span>
+          </div>
+
+          <button
+            onClick={toggleTheme}
+            aria-label="Toggle theme"
+            className="grid h-8 w-8 place-items-center rounded-md text-fg/60 hover:bg-fg/10 hover:text-fg"
+          >
+            {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          </button>
+
+          <time className="hidden tabular-nums text-fg/50 lg:inline">
+            {clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+          </time>
         </div>
+      </HScrollToolbar>
 
+      {/* Pinned, not scrolled: both drop their own popover below the header,
+          which an `overflow-x-auto` ancestor (HScrollToolbar) would clip
+          vertically too (an overflow-x other than visible forces the
+          computed overflow-y to auto as well — CSS2.1 §11.1.1) — same
+          reason the brand stays pinned on the other end. */}
+      <div className="flex shrink-0 items-center gap-1.5">
         <UpdatesButton />
-
-        <button
-          onClick={toggleTheme}
-          aria-label="Toggle theme"
-          className="grid h-8 w-8 place-items-center rounded-md text-fg/60 hover:bg-fg/10 hover:text-fg"
-        >
-          {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-        </button>
-
-        <time className="hidden tabular-nums text-fg/50 lg:inline">
-          {clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-        </time>
 
         <div className="relative" ref={userMenuRef}>
           <button

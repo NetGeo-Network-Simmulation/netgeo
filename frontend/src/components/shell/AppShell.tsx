@@ -110,7 +110,20 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
   useShortcuts();
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden">
+    // h-full/w-full, not h-screen/w-screen: in the native shell, App.tsx
+    // already spent 36px of the 100vh viewport on NativeTitleBar before this
+    // ever mounts, so an AppShell that re-claims the full 100vh renders 36px
+    // taller than the space its own parent (`overflow-hidden`) actually
+    // gives it — invisibly clipping the bottom 36px of AppShell's own last
+    // children (StatusBar entirely, plus the last ~12px of any workspace's
+    // own bottom bar, e.g. Physical Plant's — leader review of
+    // docs/qa/shots/native-controls-2026-09-18/09, confirmed via Playwright
+    // getBoundingClientRect against a forced-native build: StatusBar's
+    // footer measured bottom=676 against a 640px-tall frame). h-full simply
+    // fills whatever height its flex-1 parent actually handed it, which is
+    // 100vh in a plain browser tab (no title bar) and 100vh-36px natively —
+    // both correct, with zero per-bar padding hacks needed.
+    <div className="flex h-full w-full flex-col overflow-hidden">
       <TopBar projectName={projectName} conn={conn} />
 
       {/* relative: anchors the floating device-rail (design 12-UI shell-device-

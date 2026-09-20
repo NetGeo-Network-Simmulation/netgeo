@@ -31,6 +31,7 @@ import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiE
 import { useUiStore } from '@/store/uiStore';
 import { useTopologyStore } from '@/store/topologyStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
+import { HScrollToolbar } from '@/components/shell/HScrollToolbar';
 import { cn } from '@/lib/cn';
 import { autoName } from '@/lib/mapDeploy';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
@@ -1052,8 +1053,15 @@ export function Rack3DElevationPanel() {
 
   return (
     <div className="absolute inset-0 flex flex-col">
-      {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-2">
+      {/* toolbar — WPS-style: never wraps to a 2nd row (Surya 2026-09-18,
+          same pattern as TopBar/ConfigWorkspace). Select's own dropdown is
+          `absolute` (ui/Select.tsx); an overflow-x-auto ancestor clips a
+          popover vertically too (CSS2.1 11.1.1), so all 3 Selects here
+          (rack site, rack height, site viewed) stay in the fixed,
+          non-scrolling cluster up front. The Depan/Belakang/Pintu/Label/
+          Animasi/Cable/Tambah-perangkat toggles never open a popover, so
+          they're safe inside HScrollToolbar. */}
+      <div className="flex min-w-0 items-center gap-2 border-b border-fg/10 px-3 py-2">
         {/* Create site / rack — moved here from the deleted 2D elevation
             panel, the only place these existed before. */}
         <button
@@ -1066,7 +1074,7 @@ export function Rack3DElevationPanel() {
             void import('@/store/mapStore').then(({ useMapStore }) => useMapStore.getState().setTool('site'));
           }}
           title="Opens the map — click a point to place and name the new site"
-          className={btn(false)}
+          className={cn(btn(false), 'shrink-0')}
         >
           <Plus className="size-3.5" /> Site
         </button>
@@ -1076,20 +1084,20 @@ export function Rack3DElevationPanel() {
           onChange={(e) => setNewRackName(e.target.value)}
           placeholder="New rack name"
           aria-label="New rack name"
-          className="w-28 min-w-0 rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none placeholder:text-fg/30 focus:border-accent/50"
+          className="w-28 shrink-0 rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none placeholder:text-fg/30 focus:border-accent/50"
         />
         <Select
           aria-label="New rack site"
           value={newRackSite}
           onChange={setNewRackSite}
-          className="w-24"
+          className="w-24 shrink-0"
           options={[{ value: '', label: '(no site)' }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
         />
         <Select
           aria-label="Rack height"
           value={String(newRackU)}
           onChange={(v) => setNewRackU(Number(v))}
-          className="w-16"
+          className="w-16 shrink-0"
           options={RACK_SIZES.map((u) => ({ value: String(u), label: `${u}U` }))}
         />
         <button
@@ -1104,15 +1112,15 @@ export function Rack3DElevationPanel() {
             createRack.mutate({ name, siteId: newRackSite || null, ruHeight: newRackU });
           }}
           disabled={createRack.isPending}
-          className={cn(btn(false), 'disabled:cursor-not-allowed disabled:opacity-40')}
+          className={cn(btn(false), 'shrink-0 disabled:cursor-not-allowed disabled:opacity-40')}
         >
           <Plus className="size-3.5" /> Rack
         </button>
-        <div className="mx-1 h-5 w-px bg-fg/10" />
+        <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
         {/* Site being viewed — every rack in it renders, no manual per-rack
             picking (permintaan Surya). Switching this is what "resets to 0"
             and then shows only the new site's racks. */}
-        <div className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+        <div className="flex shrink-0 items-center gap-1.5 text-xs text-fg-muted">
           Site
           <Select
             aria-label="Site ditampilkan"
@@ -1122,26 +1130,28 @@ export function Rack3DElevationPanel() {
             options={[{ value: '', label: '(no site)' }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
           />
         </div>
-        <div className="mx-1 h-5 w-px bg-fg/10" />
-        <button type="button" className={btn(face === 'front')} onClick={() => setFace('front')}>Depan</button>
-        <button type="button" className={btn(face === 'back')} onClick={() => setFace('back')}>Belakang</button>
-        <div className="mx-1 h-5 w-px bg-fg/10" />
-        <button type="button" className={btn(doors)} onClick={() => setDoors((v) => !v)} title="Tutup pintu mesh depan">
-          <DoorClosed className="size-3.5" /> Pintu
-        </button>
-        <button type="button" className={btn(labels)} onClick={() => setLabels((v) => !v)}>
-          <Tag className="size-3.5" /> Label
-        </button>
-        <button type="button" className={btn(anim)} onClick={() => setAnim((v) => !v)}>
-          <Zap className="size-3.5" /> Animasi
-        </button>
-        <div className="mx-1 h-5 w-px bg-fg/10" />
-        <button type="button" className={btn(mode === 'cable')} onClick={() => toggleMode('cable')} title="Buat kabel patch nyata">
-          <Cable className="size-3.5" /> Cable Mode
-        </button>
-        <button type="button" className={btn(mode === 'adddev')} onClick={() => toggleMode('adddev')} title="Tambah perangkat ke rak">
-          <Plus className="size-3.5" /> Tambah perangkat
-        </button>
+        <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
+        <HScrollToolbar className="flex-1 gap-2">
+          <button type="button" className={cn(btn(face === 'front'), 'shrink-0')} onClick={() => setFace('front')}>Depan</button>
+          <button type="button" className={cn(btn(face === 'back'), 'shrink-0')} onClick={() => setFace('back')}>Belakang</button>
+          <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
+          <button type="button" className={cn(btn(doors), 'shrink-0')} onClick={() => setDoors((v) => !v)} title="Tutup pintu mesh depan">
+            <DoorClosed className="size-3.5" /> Pintu
+          </button>
+          <button type="button" className={cn(btn(labels), 'shrink-0')} onClick={() => setLabels((v) => !v)}>
+            <Tag className="size-3.5" /> Label
+          </button>
+          <button type="button" className={cn(btn(anim), 'shrink-0')} onClick={() => setAnim((v) => !v)}>
+            <Zap className="size-3.5" /> Animasi
+          </button>
+          <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
+          <button type="button" className={cn(btn(mode === 'cable'), 'shrink-0')} onClick={() => toggleMode('cable')} title="Buat kabel patch nyata">
+            <Cable className="size-3.5" /> Cable Mode
+          </button>
+          <button type="button" className={cn(btn(mode === 'adddev'), 'shrink-0')} onClick={() => toggleMode('adddev')} title="Tambah perangkat ke rak">
+            <Plus className="size-3.5" /> Tambah perangkat
+          </button>
+        </HScrollToolbar>
       </div>
 
       {/* Per-rack enclosure profile, one chip per rack actually shown —
