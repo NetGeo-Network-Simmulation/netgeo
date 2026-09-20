@@ -44,6 +44,10 @@ export interface GisLayerDef {
   /** Hint for feature layers that only load when zoomed in (e.g. Overpass). */
   minZoom?: number;
   description?: string;
+  /** True for layers that fetch from a public internet API (Overpass, Esri
+   *  online tiles, …) — silently fails (and leaks the request) on an offline
+   *  install. Surfaced in GisLayerPanel; does not gate rendering itself. */
+  requiresInternet?: boolean;
 }
 
 export interface GisGroupDef {
@@ -110,10 +114,19 @@ export const GIS_LAYERS: GisLayerDef[] = [
     group: 'utilities',
     label: 'Telecom Towers (OSM)',
     kind: 'feature',
-    defaultVisible: true,
+    // OFFLINE-MAP-4 fix: was `true` — on an offline install this queried
+    // overpass-api.de by default and silently failed, leaking a request the
+    // user never asked for. Off by default everywhere (not just when the
+    // offline basemap is active): the store's initial gisLayers state is
+    // built synchronously at module load (mapStore.ts `initialGisLayers`),
+    // before the async /api/maps/status offline check resolves, so there's
+    // no offline flag available at that point to key off. A global
+    // default-off is the simpler, honest fix — still one click to enable.
+    defaultVisible: false,
     defaultOpacity: 1,
     minZoom: 12,
     description: 'Live BTS/mast/microwave towers from the Overpass API.',
+    requiresInternet: true,
   },
   {
     id: 'rf-coverage',
@@ -175,6 +188,7 @@ export const GIS_LAYERS: GisLayerDef[] = [
     defaultOpacity: 1,
     minZoom: 16,
     description: 'Building-density heat (OSM footprints binned per ~110 m cell).',
+    requiresInternet: true,
   },
   {
     id: 'pop-buildings',
@@ -185,6 +199,7 @@ export const GIS_LAYERS: GisLayerDef[] = [
     defaultOpacity: 1,
     minZoom: 16,
     description: 'Live OSM building footprints from the Overpass API.',
+    requiresInternet: true,
   },
 
   // --- Weather --------------------------------------------------------------

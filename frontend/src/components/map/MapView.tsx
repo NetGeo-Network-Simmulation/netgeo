@@ -2351,12 +2351,16 @@ export function MapView({ rfMode = false }: { rfMode?: boolean } = {}) {
       // doesn't narrow to it — one localized cast beats duplicating the
       // event union here (mirrors the ensureLayer cast above).
       const ev = e as { dataType?: string; sourceId?: string; isSourceLoaded?: boolean };
-      if (ev.dataType !== 'source' || ev.sourceId !== BASE_SOURCE_ID) return;
+      // OFFLINE-MAP-4: the vector basemap lands on BASE_VECTOR_SOURCE_ID, not
+      // BASE_SOURCE_ID (raster) — this badge was only ever listening for the
+      // raster id, so it never saw the vector source's ready event and got
+      // stuck on "Loading tiles…" forever once vector mode shipped.
+      if (ev.dataType !== 'source' || (ev.sourceId !== BASE_SOURCE_ID && ev.sourceId !== BASE_VECTOR_SOURCE_ID)) return;
       setTileStatus(ev.isSourceLoaded ? 'ready' : 'loading');
     };
     const onError = (e: unknown) => {
       const ev = e as { sourceId?: string };
-      if (ev.sourceId === BASE_SOURCE_ID) setTileStatus('error');
+      if (ev.sourceId === BASE_SOURCE_ID || ev.sourceId === BASE_VECTOR_SOURCE_ID) setTileStatus('error');
     };
     glMap.on('data', onData);
     glMap.on('error', onError);
