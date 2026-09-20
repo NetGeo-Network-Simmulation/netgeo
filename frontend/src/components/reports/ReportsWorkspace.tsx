@@ -141,26 +141,39 @@ export function ReportsWorkspace() {
           less width this column and the cards column on the right both
           claim, the more is left for the document in the middle. */}
       <div className="flex w-[300px] shrink-0 flex-col border-r border-fg/10 bg-panel">
-        <div className="flex flex-col gap-2 pt-4 pr-4 pb-4 pl-[116px]">
-          <button
-            onClick={() => window.print()}
-            disabled={!canDownload}
-            className="flex items-center gap-2 rounded border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-          >
-            <Printer className="h-[18px] w-[18px] shrink-0" aria-hidden />
-            Download PDF
-          </button>
-          <button
-            onClick={downloadHtml}
-            disabled={!canDownload}
-            className="flex items-center gap-2 rounded border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-          >
-            <Code2 className="h-[18px] w-[18px] shrink-0" aria-hidden />
-            Download HTML
-          </button>
-          <span className="mt-2 rounded border border-fg/10 bg-recess/30 px-3 py-1.5 text-center font-mono text-[12px] text-fg/60">
-            Template: Standard
-          </span>
+        {/* Grouped into one card (rounded-xl border, small caps label) instead
+            of raw buttons floating on the panel background — the pattern
+            already used elsewhere (Suggested Actions in Problem Center,
+            ReportCard on the right). "Template: Standard" becomes a pill
+            chip, matching the rounded-full meta-chip language established by
+            OverlayChips/FilterChip, instead of a plain rectangular label
+            (Surya QA 2026-09-20: "floating as a bare left-aligned stack"). */}
+        <div className="pt-4 pr-4 pb-4 pl-[116px]">
+          <div className="rounded-xl border border-fg/10 bg-recess/20 p-3">
+            <h3 className="mb-2 px-0.5 text-[11px] font-medium uppercase tracking-wider text-fg/45">Export</h3>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => window.print()}
+                disabled={!canDownload}
+                className="flex items-center gap-2 rounded-lg border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              >
+                <Printer className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                Download PDF
+              </button>
+              <button
+                onClick={downloadHtml}
+                disabled={!canDownload}
+                className="flex items-center gap-2 rounded-lg border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              >
+                <Code2 className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                Download HTML
+              </button>
+            </div>
+            <div className="mt-2.5 flex w-fit items-center gap-1.5 rounded-full border border-fg/10 bg-recess/40 px-3 py-1 font-mono text-[11px] text-fg/60">
+              <span className="h-1.5 w-1.5 rounded-full bg-fg/25" aria-hidden />
+              Template: Standard
+            </div>
+          </div>
         </div>
       </div>
 
