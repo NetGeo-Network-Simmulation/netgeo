@@ -26,6 +26,7 @@ for a .rpm/.deb package install (those have no interactive step).
 """
 from __future__ import annotations
 
+import json
 import logging
 import sqlite3
 import tempfile
@@ -59,6 +60,19 @@ def _connect(path: Path) -> sqlite3.Connection:
     return sqlite3.connect(f"file:{path}?mode=ro", uri=True)
 
 
+def _has_tiles(conn: sqlite3.Connection) -> bool:
+    """Whether ``conn`` has a queryable ``tiles`` relation — table OR view.
+    Planetiler's own output (the reference vector-MBTiles builder, see memory
+    mbtiles-vector-spike-2026-09-19) stores tiles as ``tiles_shallow`` +
+    ``tiles_data`` with a ``tiles`` VIEW joining them for de-duplication, not
+    a plain table; a type='table'-only check rejects every such file even
+    though ``SELECT ... FROM tiles`` works identically on a view."""
+    rows = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type IN ('table', 'view') AND name='tiles'"
+    ).fetchall()
+    return bool(rows)
+
+
 def _metadata(conn: sqlite3.Connection) -> dict[str, str]:
     try:
         return dict(conn.execute("SELECT name, value FROM metadata").fetchall())
@@ -66,23 +80,41 @@ def _metadata(conn: sqlite3.Connection) -> dict[str, str]:
         return {}
 
 
+_UNAVAILABLE_STATUS = {
+    "available": False,
+    "path": None,
+    "region": None,
+    "attribution": None,
+    "format": None,
+    "vector_layers": None,
+}
+
+
+def _vector_layers(meta: dict[str, str]) -> list | None:
+    """MBTiles' optional TileJSON-shaped ``json`` metadata value carries the
+    per-layer schema for vector (pbf) tiles — parse it defensively since it's
+    operator-supplied data, not something this app generated."""
+    raw = meta.get("json")
+    if not raw:
+        return None
+    try:
+        return json.loads(raw).get("vector_layers")
+    except (json.JSONDecodeError, AttributeError):
+        return None
+
+
 def get_status() -> dict:
-    """What the frontend needs to decide online vs. offline basemap."""
+    """What the frontend needs to decide online vs. offline basemap, and
+    (OFFLINE-MAP-4) whether that basemap is raster or vector."""
     path = _resolve_path()
     if path is None:
-        return {"available": False, "path": None, "region": None, "attribution": None}
+        return dict(_UNAVAILABLE_STATUS)
 
     try:
         conn = _connect(path)
         try:
-            tables = {
-                row[0]
-                for row in conn.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                ).fetchall()
-            }
-            if "tiles" not in tables:
-                raise sqlite3.DatabaseError("missing 'tiles' table")
+            if not _has_tiles(conn):
+                raise sqlite3.DatabaseError("missing 'tiles' table/view")
             meta = _metadata(conn)
         finally:
             conn.close()
@@ -92,7 +124,7 @@ def get_status() -> dict:
         logger.warning(
             "Offline map %s is unreadable, falling back to online tiles: %s", path, exc
         )
-        return {"available": False, "path": str(path), "region": None, "attribution": None}
+        return {**_UNAVAILABLE_STATUS, "path": str(path)}
 
     return {
         "available": True,
@@ -101,11 +133,20 @@ def get_status() -> dict:
         "attribution": meta.get("attribution"),
         "min_zoom": int(meta["minzoom"]) if meta.get("minzoom", "").isdigit() else None,
         "max_zoom": int(meta["maxzoom"]) if meta.get("maxzoom", "").isdigit() else None,
+        # "pbf" = vector (MapLibre vector source); anything else (png/jpg/webp,
+        # or absent on older raster exports) = raster, today's behavior.
+        "format": meta.get("format"),
+        "vector_layers": _vector_layers(meta),
     }
 
 
-def _content_type(data: bytes) -> str:
-    """Sniff the tile's own magic bytes rather than trust metadata claims."""
+def _content_type(data: bytes, *, is_gzip: bool) -> str:
+    """Sniff the tile's own bytes rather than trust metadata claims. A
+    gzip-magic blob is a compressed vector tile (MVT/pbf) — Planetiler/Martin
+    convention and the only gzip-wrapped shape MBTiles tiles come in; raster
+    formats below are never gzip-wrapped so this check is unambiguous."""
+    if is_gzip:
+        return "application/x-protobuf"
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"
     if data[:3] == b"\xff\xd8\xff":
@@ -115,8 +156,14 @@ def _content_type(data: bytes) -> str:
     return "application/octet-stream"
 
 
-def get_tile(z: int, x: int, y: int) -> tuple[bytes, str] | None:
-    """Return (tile_bytes, content_type) for XYZ (slippy-map) coords, or None."""
+def get_tile(z: int, x: int, y: int) -> tuple[bytes, str, bool] | None:
+    """Return (tile_bytes, content_type, is_gzip) for XYZ (slippy-map)
+    coords, or None. ``is_gzip`` tells the caller whether ``tile_bytes`` is
+    still gzip-compressed (vector tiles are stored that way) so it can decide
+    the Content-Encoding header the way Martin does (see OFFLINE-MAP-4
+    research): pass compressed bytes through when the client accepts gzip,
+    decompress first otherwise. Raster tiles are never gzipped -> is_gzip is
+    always False for them, so their response is byte-identical to before."""
     path = _resolve_path()
     if path is None:
         return None
@@ -139,7 +186,9 @@ def get_tile(z: int, x: int, y: int) -> tuple[bytes, str] | None:
 
     if row is None:
         return None
-    return row[0], _content_type(row[0])
+    data = row[0]
+    is_gzip = data[:2] == b"\x1f\x8b"
+    return data, _content_type(data, is_gzip=is_gzip), is_gzip
 
 
 def _target_path() -> Path:
@@ -153,17 +202,15 @@ def _target_path() -> Path:
 
 
 def _require_tiles_table(path: Path) -> None:
-    """Raise ValueError unless ``path`` is a readable MBTiles file."""
+    """Raise ValueError unless ``path`` is a readable MBTiles file (a
+    ``tiles`` table or view — see ``_has_tiles``)."""
     conn = _connect(path)
     try:
-        tables = {
-            row[0]
-            for row in conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        }
+        ok = _has_tiles(conn)
     finally:
         conn.close()
-    if "tiles" not in tables:
-        raise ValueError("not a valid MBTiles file (missing 'tiles' table)")
+    if not ok:
+        raise ValueError("not a valid MBTiles file (missing 'tiles' table/view)")
 
 
 def _write_capped(chunks, dest: BinaryIO) -> None:
