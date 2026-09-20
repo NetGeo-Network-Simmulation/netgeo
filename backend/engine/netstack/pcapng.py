@@ -173,16 +173,21 @@ def _bgp_bytes(seg: TcpSegment) -> bytes:
 
 
 def _dns_bytes(m: DnsMessage) -> bytes:
-    flags = 0x0100 if m.op == "query" else 0x8180
+    qtype_num = 28 if m.qtype == "AAAA" else 1  # RFC 1035 A=1, RFC 3596 AAAA=28
+    if m.op == "query":
+        flags = 0x0100
+    else:
+        flags = 0x8180 | (3 if m.rcode == "nxdomain" else 0)  # RFC 1035 §4.1.1 RCODE
     out = struct.pack("!HHHHHH", m.xid & 0xFFFF, flags, 1,
                       1 if (m.op != "query" and m.answer) else 0, 0, 0)
     qname = b"".join(
         bytes([len(part)]) + part.encode() for part in m.qname.split(".") if part
     ) + b"\x00"
-    out += qname + struct.pack("!HH", 1, 1)  # QTYPE A, QCLASS IN
+    out += qname + struct.pack("!HH", qtype_num, 1)
     if m.op != "query" and m.answer:
-        out += b"\xc0\x0c" + struct.pack("!HHIH", 1, 1, 300, 4)
-        out += IPv4Address(m.answer).packed
+        rdata = IPv6Address(m.answer).packed if m.qtype == "AAAA" else IPv4Address(m.answer).packed
+        out += b"\xc0\x0c" + struct.pack("!HHIH", qtype_num, 1, 300, len(rdata))
+        out += rdata
     return out
 
 
@@ -233,9 +238,10 @@ def _tcp_bytes(seg: TcpSegment, pseudo: bytes) -> bytes:
     else:
         payload = _l4_payload_bytes(seg.payload)
     flag_bits = {"SYN": 0x02, "SYN-ACK": 0x12, "ACK": 0x10, "PSH": 0x18,
-                 "FIN": 0x11, "RST": 0x04}.get(seg.flags, 0x18)
-    head = struct.pack("!HHIIBBHHH", seg.src_port, seg.dst_port, 0, 0,
-                       5 << 4, flag_bits, 65535, 0, 0)
+                 "FIN": 0x11, "RST": 0x04, "RST-ACK": 0x14}.get(seg.flags, 0x18)
+    head = struct.pack("!HHIIBBHHH", seg.src_port, seg.dst_port,
+                       seg.seq & 0xFFFFFFFF, seg.ack & 0xFFFFFFFF,
+                       5 << 4, flag_bits, seg.window, 0, 0)
     total = head + payload
     ck = _cksum(pseudo + struct.pack("!H", len(total)) + total)
     return total[:16] + struct.pack("!H", ck) + total[18:]

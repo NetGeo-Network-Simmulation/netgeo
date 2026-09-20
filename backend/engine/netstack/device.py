@@ -35,6 +35,7 @@ from engine.netstack.frames import (
     ETH_IPV6,
     PROTO_ICMP,
     PROTO_ICMPV6,
+    PROTO_TCP,
     PROTO_UDP,
     ArpPacket,
     DhcpMessage,
@@ -44,9 +45,11 @@ from engine.netstack.frames import (
     Icmpv6Message,
     Ipv4Packet,
     Ipv6Packet,
+    TcpSegment,
     UdpSegment,
 )
 from engine.netstack.iface import Interface
+from engine.netstack.tcp import TcpEndpoint
 
 if TYPE_CHECKING:  # pragma: no cover
     from engine.netstack.network import Network
@@ -152,13 +155,14 @@ class Device:
         }
 
 
-class L3Device(Device):
-    """Shared ARP + ICMP-echo machinery for anything with an IP stack."""
+class L3Device(Device, TcpEndpoint):
+    """Shared ARP + ICMP-echo + TCP machinery for anything with an IP stack."""
 
     def __init__(
         self, name: str, node_id: str | None = None, nos: str = "forgeos", mode: str = "sim"
     ) -> None:
         super().__init__(name, node_id, nos, mode)
+        self._tcp_init()
         # ip -> (mac, iface_name)
         self.arp_table: dict[IPv4Address, tuple[MacAddr, str]] = {}
         # next-hop ip -> queued IP packets awaiting resolution
@@ -579,7 +583,9 @@ class Host(L3Device):
         self.default_gateway6: IPv6Address | None = None
         self._gateway6_iface: str | None = None   # iface the RA arrived on
         self.dns_server: IPv4Address | None = None
+        self.dns_server6: IPv6Address | None = None
         self.dns_cache: dict[str, IPv4Address] = {}
+        self.dns_cache6: dict[str, IPv6Address] = {}
         self._dhcp_xid = 0
         self._dhcp_server_ip: dict[str, str] = {}   # iface.name -> server that granted the lease
         self._dhcp_lease_seq: dict[str, int] = {}   # iface.name -> T1/T2/expiry epoch (sequence-guard)
@@ -707,6 +713,10 @@ class Host(L3Device):
             self._handle_icmp_to_self(net, pkt)
             return
 
+        if pkt.proto == PROTO_TCP and isinstance(pkt.payload, TcpSegment):
+            self._handle_tcp(net, iface, pkt)
+            return
+
         if pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):
             self._handle_udp(net, iface, pkt, pkt.payload)
 
@@ -715,6 +725,10 @@ class Host(L3Device):
             return  # hosts do not forward
         if pkt.proto == PROTO_ICMPV6 and isinstance(pkt.payload, Icmpv6Message):
             self._handle_icmpv6(net, iface, pkt, pkt.payload)
+        elif pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):
+            app = pkt.payload.payload
+            if isinstance(app, DnsMessage) and app.op == "response":
+                self._dns_response_received(net, app)
 
     # ----- applications ---------------------------------------------------------
     def ping(
@@ -834,13 +848,18 @@ class Host(L3Device):
         if isinstance(app, DhcpMessage) and udp.dst_port == 68:
             self._handle_dhcp(net, iface, app)
         elif isinstance(app, DnsMessage) and app.op == "response":
-            cb = self._dns_waiting.pop(app.xid, None)
-            answer = IPv4Address(app.answer) if app.answer else None
-            if answer is not None:
-                self.dns_cache[app.qname] = answer
-            if cb is not None:
-                cb(answer)
-            net.on_dns_response(self, app)
+            self._dns_response_received(net, app)
+
+    def _dns_response_received(self, net: Network, app: DnsMessage) -> None:
+        cb = self._dns_waiting.pop(app.xid, None)
+        answer: IPv4Address | IPv6Address | None = None
+        if app.answer:
+            answer = IPv6Address(app.answer) if app.qtype == "AAAA" else IPv4Address(app.answer)
+            cache = self.dns_cache6 if app.qtype == "AAAA" else self.dns_cache
+            cache[app.qname] = answer
+        if cb is not None:
+            cb(answer)
+        net.on_dns_response(self, app)
 
     def _handle_dhcp(self, net: Network, iface: Interface, msg: DhcpMessage) -> None:
         if msg.xid != self._dhcp_xid:
@@ -958,33 +977,62 @@ class Host(L3Device):
         self,
         net: Network,
         qname: str,
-        callback: Callable[[IPv4Address | None], None] | None = None,
+        qtype: str = "A",
+        callback: Callable[[IPv4Address | IPv6Address | None], None] | None = None,
     ) -> None:
-        cached = self.dns_cache.get(qname)
+        """Query ``qtype`` ("A" or "AAAA"). Transport picks itself from
+        whichever resolver address is configured — ``dns_server6`` (IPv6,
+        e.g. an IPv6-only host reaching a DNS64 resolver) if set, else
+        ``dns_server`` (IPv4) — independent of ``qtype`` itself, same as a
+        real dual-stack resolver library trying its configured servers."""
+        cache = self.dns_cache if qtype != "AAAA" else self.dns_cache6
+        cached = cache.get(qname)
         if cached is not None:
             if callback:
                 callback(cached)
             return
-        if self.dns_server is None:
+        server = self.dns_server6 if self.dns_server6 is not None else self.dns_server
+        if server is None:
             if callback:
                 callback(None)
             return
         self._dns_xid = net.next_xid()
         if callback:
             self._dns_waiting[self._dns_xid] = callback
-        route = self.egress_for(self.dns_server)
+        query = DnsMessage(op="query", qname=qname, qtype=qtype, xid=self._dns_xid)
+        if isinstance(server, IPv6Address):
+            route = self.egress_for6(server)
+            iface = route[0] if route else None
+            if iface is None:
+                src_ip = IPv6Address("::")
+            elif iface.ips6:
+                src_ip = iface.ips6[0].ip
+            else:
+                src_ip = iface.link_local.ip
+            self.send_ip6(
+                net,
+                Ipv6Packet(
+                    src=src_ip,
+                    dst=server,
+                    proto=PROTO_UDP,
+                    hop_limit=64,
+                    payload=UdpSegment(
+                        src_port=30000 + (self._dns_xid % 20000), dst_port=53, payload=query
+                    ),
+                ),
+            )
+            return
+        route = self.egress_for(server)
         src_ip = route[0].ip.ip if route and route[0].ip else IPv4Address("0.0.0.0")
         self.send_ip(
             net,
             Ipv4Packet(
                 src=src_ip,
-                dst=self.dns_server,
+                dst=server,
                 proto=PROTO_UDP,
                 ttl=64,
                 payload=UdpSegment(
-                    src_port=30000 + (self._dns_xid % 20000),
-                    dst_port=53,
-                    payload=DnsMessage(op="query", qname=qname, xid=self._dns_xid),
+                    src_port=30000 + (self._dns_xid % 20000), dst_port=53, payload=query
                 ),
             ),
         )

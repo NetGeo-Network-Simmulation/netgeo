@@ -7,6 +7,10 @@ Realism model per egress interface:
 - **Queueing/QoS**: two egress queues — priority (DSCP >= 40, e.g. EF/CS6
   control traffic) and best-effort. Priority is always drained first. Each
   queue has a bounded depth; overflow is a **tail drop**.
+- **Shaping** (optional, per interface): a single-rate token bucket gates
+  *when* the strict-priority winner may leave, after it's chosen but before
+  serialization. A frame short on tokens isn't dropped — it stays at the head
+  of its queue and a scheduler event retries once enough tokens accrue.
 - **Propagation**: fixed one-way delay plus optional uniform jitter drawn from
   the simulation's seeded RNG (deterministic).
 - **Loss**: independent per-frame drop probability, same RNG.
@@ -77,6 +81,9 @@ class IfaceCounters:
     tx_by_class: list = field(default_factory=_three_zeros)
     drops_queue_by_class: list = field(default_factory=_three_zeros)
     drops_policed_by_class: list = field(default_factory=_three_zeros)
+    # Times the egress shaper held a frame back for lack of tokens (not a
+    # drop — counts distinct wait decisions, see Interface._arm_shaper_retry).
+    shaper_delays: int = 0
 
     def as_dict(self) -> dict:
         return {
@@ -94,6 +101,7 @@ class IfaceCounters:
             "tx_by_class": list(self.tx_by_class),
             "drops_queue_by_class": list(self.drops_queue_by_class),
             "drops_policed_by_class": list(self.drops_policed_by_class),
+            "shaper_delays": self.shaper_delays,
         }
 
 
@@ -103,6 +111,10 @@ class Interface:
     __slots__ = (
         "_bucket_ts",
         "_queues",
+        "_shaper_release_time",
+        "_shaper_seq",
+        "_shaper_tokens",
+        "_shaper_ts",
         "_tokens",
         "_transmitting",
         "access_vlan",
@@ -156,6 +168,12 @@ class Interface:
         # not yet primed (bucket starts full on first use of that class).
         self._tokens: list = [None, None, None]
         self._bucket_ts: list = [0.0, 0.0, 0.0]
+        # Egress shaper state — one bucket for the whole interface (not
+        # per-class, unlike the policer). None tokens = not yet primed.
+        self._shaper_tokens: float | None = None
+        self._shaper_ts: float = 0.0
+        self._shaper_release_time: float | None = None  # sim-time of the pending retry, if any
+        self._shaper_seq: int = 0                        # sequence guard for stale retries
         self.queue_depth = queue_depth
         self.stp_state: str = "forwarding"       # forwarding | learning | listening | blocking
         self.stp_role: str = "designated"        # root | designated | alternate | backup | blocked
@@ -284,7 +302,13 @@ class Interface:
             self._start_next(net)
 
     def _police(self, net: Network, cls: QosClass, rate_bps: float, burst_bytes: int, size_bytes: int) -> bool:
-        """Token-bucket policer (RFC-2698-style single bucket) for one class.
+        """Single-rate, two-colour token-bucket policer for one class.
+
+        This is neither RFC 2697 srTCM (CIR/CBS + EBS) nor RFC 2698 trTCM
+        (CIR/CBS + PIR/PBS) — just one bucket, one rate, one burst size; a
+        frame either fits (green) or doesn't (red, dropped). See RFC 2475
+        §2.3.3.3 for the shaper/dropper split this implements the drop side
+        of — the delay side is :meth:`_shape`.
 
         Refill is computed lazily from elapsed *simulation* time (``net.now``)
         at each call — no wall clock, no periodic timer, so it stays
@@ -310,6 +334,70 @@ class Interface:
             return False
         self._tokens[idx] = tokens - size_bytes
         return True
+
+    # Retry-driven refill (see _shape) asks "how long until exactly enough
+    # tokens", waits exactly that long, then checks again — a fixed point
+    # that float rounding can miss by a fraction of a byte on every pass,
+    # looping forever a hair short of the threshold. A sub-microbyte slack
+    # absorbs that round-trip error without affecting any real timing.
+    _TOKEN_EPSILON = 1e-6  # bytes
+
+    def _shape(self, net: Network, size_bytes: int, rate_bps: float, burst_bytes: int) -> float:
+        """Interface-wide egress token bucket (Bc bytes @ CIR ``rate_bps``).
+
+        Unlike :meth:`_police` this never drops: it reports how many seconds
+        must still elapse before ``size_bytes`` worth of tokens exist, so the
+        caller can delay the frame instead. Same lazy-refill-from-``net.now``
+        trick, so it stays a pure function of the sim clock (no periodic
+        timer, replay-safe) and drifts exactly the way the policer doesn't.
+        Returns ``0.0`` when the frame may go now (tokens already consumed).
+        """
+        tokens = self._shaper_tokens
+        if tokens is None:
+            tokens = float(burst_bytes)
+        else:
+            elapsed = net.now - self._shaper_ts
+            tokens = min(float(burst_bytes), tokens + elapsed * (rate_bps / 8.0))
+        self._shaper_ts = net.now
+        if tokens >= size_bytes - self._TOKEN_EPSILON:
+            self._shaper_tokens = max(0.0, tokens - size_bytes)
+            return 0.0
+        self._shaper_tokens = tokens
+        return (size_bytes - tokens) * 8.0 / rate_bps
+
+    def _arm_shaper_retry(self, net: Network, wait: float) -> None:
+        """Schedule a retry of :meth:`_start_next` once enough tokens exist.
+
+        ``wait`` is recomputed from scratch on every call to ``_start_next``
+        (new arrivals included, via ``transmit``'s ``not self._transmitting``
+        check — shaper waits leave ``_transmitting`` False on purpose). If an
+        earlier retry is already pending we keep it; a later one is a no-op —
+        this is the same sequence-guard idiom as
+        ``routing.py``'s ``_frag_timer_seq``: the stale timer fires later,
+        finds its ``seq`` superseded, and does nothing.
+        """
+        release_time = net.now + wait
+        if self._shaper_release_time is not None and release_time >= self._shaper_release_time:
+            return
+        self.counters.shaper_delays += 1
+        self._shaper_seq += 1
+        seq = self._shaper_seq
+        self._shaper_release_time = release_time
+        net.scheduler.schedule_after(
+            wait,
+            SimEvent(
+                time=0.0,
+                type=EventType.TIMER,
+                handler=lambda _c, _e, s=seq: self._shaper_fire(net, s),
+                node_id=self.device.node_id,
+            ),
+        )
+
+    def _shaper_fire(self, net: Network, seq: int) -> None:
+        if seq != self._shaper_seq:
+            return  # superseded by an earlier-firing retry
+        self._shaper_release_time = None
+        self._start_next(net)
 
     def _fragment_and_transmit(self, net: Network, frame: EthernetFrame, mtu: int) -> None:
         """DF=0 and oversized: split into RFC 791 sec 3.2 fragments and
@@ -353,19 +441,33 @@ class Interface:
         # Strict-priority drain: EF first, then AF, then BE.
         # Disabled path: AF queue is always empty so EF→BE order is preserved
         # bit-for-bit (same as former _queue_prio → _queue_be drain).
+        # Peeked, not popped: a shaper delay (below) must leave the frame in
+        # place so a higher-priority arrival can still preempt it before it
+        # actually leaves — shaping only changes *when*, never the order.
         frame = None
         drained_cls: QosClass | None = None
         for i, q in enumerate(self._queues):
             if q:
-                frame = q.popleft()
+                frame = q[0]
                 drained_cls = QosClass(i)
                 break
         if frame is None:
             self._transmitting = False
+            self._shaper_release_time = None
             return
 
         att = self.attachment
         assert att is not None
+
+        shaper_bps = att.qos.shaper_bps
+        if shaper_bps:
+            wait = self._shape(net, frame.size_bytes, shaper_bps, att.qos.shaper_burst_bytes)
+            if wait > 0.0:
+                self._arm_shaper_retry(net, wait)
+                return
+        self._shaper_release_time = None
+
+        self._queues[int(drained_cls)].popleft()
         self._transmitting = True
         ser = att.serialization_delay(frame.size_bytes)
         self.counters.tx_frames += 1

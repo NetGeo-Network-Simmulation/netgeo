@@ -25,7 +25,6 @@ ETH_VLAN = 0x8100
 ETH_IPV6 = 0x86DD
 ETH_MPLS = 0x8847        # MPLS unicast (labelled data plane)
 ETH_LDP = 0x8848         # reused here for LDP-lite label-mapping discovery
-ETH_SR = 0x8849          # bespoke SR-MPLS SID advertisement flood (NG-SIM-09)
 
 # IP protocol numbers
 PROTO_ICMP = 1
@@ -159,13 +158,18 @@ class UdpSegment:
 
 @dataclass(slots=True)
 class TcpSegment:
-    """Minimal TCP model: flags + ports, enough for session-style protocols
-    (BGP) and stateful firewall rules. No sequence-number machinery — the DES
-    delivers segments reliably in order; loss is modelled at the link layer."""
+    """TCP segment: flags + ports + real seq/ack numbers (RFC 9293 §3.1).
+    BGP/L3VPN/EVPN still frame their own segments directly over port 179
+    with seq/ack left at 0 (a pre-existing shortcut, untouched by A2-1) —
+    the :mod:`engine.netstack.protocols.tcp` state machine is the only
+    producer of non-zero seq/ack, for connections it originates or accepts."""
 
     src_port: int = 0
     dst_port: int = 0
-    flags: str = "PSH"          # SYN | SYN-ACK | ACK | PSH | FIN | RST
+    flags: str = "PSH"          # SYN | SYN-ACK | ACK | PSH | FIN | RST | RST-ACK
+    seq: int = 0
+    ack: int = 0
+    window: int = 65535
     payload: Any = None
     payload_len: int = 0
 
@@ -204,21 +208,30 @@ class DhcpMessage:
 
 @dataclass(slots=True)
 class DnsMessage:
-    """DNS over UDP 53."""
+    """DNS over UDP 53 (RFC 1035). ``qtype``: "A" (RFC 1035 §3.2.2, default —
+    back-compat with callers built before A vs AAAA existed) or "AAAA"
+    (RFC 3596). ``rcode`` (response only): "noerror" — NODATA when
+    ``answer`` is also empty (RFC 2308 §2.2), i.e. the name exists but has
+    no record of this type — or "nxdomain" — the name doesn't exist at all
+    (RFC 1035 §4.1.1)."""
 
     op: str = "query"           # query | response
     qname: str = ""
-    answer: str | None = None   # A record (IPv4 string) or None = NXDOMAIN
+    qtype: str = "A"            # A | AAAA
+    answer: str | None = None   # A/AAAA record (IPv4/IPv6 string) or None
+    rcode: str = "noerror"      # noerror | nxdomain (response only)
     xid: int = 0
 
     @property
     def wire_size(self) -> int:
-        return 12 + len(self.qname) + (16 if self.answer else 0)
+        return 12 + len(self.qname) + ((28 if self.qtype == "AAAA" else 16) if self.answer else 0)
 
     def summary(self) -> str:
         if self.op == "query":
-            return f"DNS query {self.qname}"
-        return f"DNS response {self.qname} -> {self.answer or 'NXDOMAIN'}"
+            return f"DNS query {self.qname} {self.qtype}"
+        if self.answer:
+            return f"DNS response {self.qname} -> {self.answer}"
+        return f"DNS response {self.qname} -> {self.rcode.upper()}"
 
 
 # ---------------------------------------------------------------------------
@@ -590,31 +603,11 @@ class VpnUpdate:
         return f"MP-BGP VPNv4 UPDATE {len(self.routes)} route(s)"
 
 
-@dataclass(slots=True)
-class SrSidAdvert:
-    """Segment Routing SID advertisement (NG-SIM-09): the advertising router's
-    node-SID for its loopback, plus its own adjacency-SIDs. A bespoke LSA-style
-    flood (real IS-IS/OSPF carry this in a Prefix-SID sub-TLV); rides raw L2 to
-    the same all-routers multicast LDP uses, dispatched at the frame edge."""
-
-    router_id: str
-    prefix: str                                              # own loopback /32
-    node_sid: int
-    adj_sids: dict[str, int] = field(default_factory=dict)   # neighbor id -> label
-
-    @property
-    def wire_size(self) -> int:
-        return 24 + 8 * len(self.adj_sids)
-
-    def copy(self) -> SrSidAdvert:
-        return SrSidAdvert(self.router_id, self.prefix, self.node_sid, dict(self.adj_sids))
-
-    def summary(self) -> str:
-        return f"SR SID-advert from {self.router_id} node-sid {self.node_sid}"
-
-
-# LDP + SR ride raw L2 (dispatched at the device frame edge, like IS-IS PDUs).
-MPLS_L2_PDUS = (LdpBinding, SrSidAdvert)
+# LDP rides raw L2 (dispatched at the device frame edge, like IS-IS PDUs). SR
+# no longer has a PDU of its own here (NG-SIM-09 A5) -- its SID advertisements
+# ride OSPF opaque LSAs (RFC 8665, see protocols/ospf.py's OpaqueLsa) instead
+# of a bespoke flood, so it needs no frame-edge dispatch at all.
+MPLS_L2_PDUS = (LdpBinding,)
 
 
 # ---------------------------------------------------------------------------
@@ -652,18 +645,22 @@ class VxlanPacket:
 
 @dataclass(slots=True)
 class EvpnRoute:
-    """One EVPN NLRI. ``route_type`` 2 = MAC/IP advertisement (``mac``/``ip``),
-    3 = Inclusive Multicast (IMET, ingress-replication for BUM). ``vtep`` is the
-    advertising VTEP IP (the overlay next hop)."""
+    """One EVPN NLRI. ``route_type`` 1 = Ethernet A-D (per-ES when ``vni`` is 0,
+    per-EVI otherwise, RFC 7432 sec 7.1), 2 = MAC/IP advertisement (``mac``/
+    ``ip``), 3 = Inclusive Multicast (IMET, ingress-replication for BUM).
+    ``vtep`` is the advertising VTEP IP (the overlay next hop)."""
 
-    route_type: int          # 2 (MAC/IP) | 3 (IMET)
+    route_type: int          # 1 (Ethernet A-D) | 2 (MAC/IP) | 3 (IMET)
     vni: int
     vtep: str
     mac: str = ""            # Type-2 only
     ip: str = ""            # Type-2 MAC/IP (optional, unused for pure-L2)
+    esi: str = ""             # Type-1 only, RFC 7432 sec 5: 10-octet colon-hex
 
     @property
     def wire_size(self) -> int:
+        if self.route_type == 1:
+            return 25 + 10   # + ESI (10 octets, sec 5)
         return 25 + (12 if self.route_type == 2 else 0)
 
 
@@ -783,6 +780,16 @@ class EthernetFrame:
             elif isinstance(l4, (UdpSegment, TcpSegment)):
                 key = "udp" if isinstance(l4, UdpSegment) else "tcp"
                 out[key] = {"src_port": l4.src_port, "dst_port": l4.dst_port}
+                if isinstance(l4, TcpSegment):
+                    out[key].update(flags=l4.flags, seq=l4.seq, ack=l4.ack)
+                app = l4.payload
+                if isinstance(app, DnsMessage):
+                    out["dns"] = {
+                        "op": app.op, "qname": app.qname, "qtype": app.qtype,
+                        "answer": app.answer, "rcode": app.rcode,
+                    }
+                elif app is not None and hasattr(app, "summary"):
+                    out["app"] = {"info": app.summary()}
         elif isinstance(p, Ipv4Packet):
             out["ipv4"] = {
                 "src": str(p.src),
@@ -800,11 +807,16 @@ class EthernetFrame:
             elif isinstance(l4, (UdpSegment, TcpSegment)):
                 key = "udp" if isinstance(l4, UdpSegment) else "tcp"
                 out[key] = {"src_port": l4.src_port, "dst_port": l4.dst_port}
+                if isinstance(l4, TcpSegment):
+                    out[key].update(flags=l4.flags, seq=l4.seq, ack=l4.ack)
                 app = l4.payload
                 if isinstance(app, DhcpMessage):
                     out["dhcp"] = {"op": app.op, "your_ip": app.your_ip}
                 elif isinstance(app, DnsMessage):
-                    out["dns"] = {"op": app.op, "qname": app.qname, "answer": app.answer}
+                    out["dns"] = {
+                        "op": app.op, "qname": app.qname, "qtype": app.qtype,
+                        "answer": app.answer, "rcode": app.rcode,
+                    }
                 elif app is not None and hasattr(app, "summary"):
                     out["app"] = {"info": app.summary()}
             elif l4 is not None and hasattr(l4, "summary"):
