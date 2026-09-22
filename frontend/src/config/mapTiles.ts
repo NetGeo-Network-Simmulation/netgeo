@@ -96,14 +96,24 @@ export interface OfflineMapStatus {
   attribution: string | null;
   min_zoom?: number | null;
   max_zoom?: number | null;
+  /** "pbf" = vector MBTiles (OFFLINE-MAP-4); anything else/absent = raster. */
+  format?: string | null;
 }
 
-/** The offline tile endpoint sits behind the same bearer-token auth as every
- *  other API route (unlike the external Esri/OSM providers above, which need
- *  no header) — MapView's `transformRequest` matches requests against this
- *  prefix to attach the Authorization header MapLibre's own fetch wouldn't
- *  otherwise send. */
-export const OFFLINE_TILE_PREFIX = `${API_BASE}/maps/tiles/`;
+/** Every offline map route (tiles, and OFFLINE-MAP-5's glyphs below) sits
+ *  behind the same bearer-token auth as every other API route (unlike the
+ *  external Esri/OSM providers above, which need no header) — MapView's
+ *  `transformRequest` matches requests against this shared prefix to attach
+ *  the Authorization header MapLibre's own fetch wouldn't otherwise send. */
+export const MAPS_API_PREFIX = `${API_BASE}/maps/`;
+export const OFFLINE_TILE_PREFIX = `${MAPS_API_PREFIX}tiles/`;
+
+/** Glyph (font PBF) source for vector-tile text labels (OFFLINE-MAP-5, see
+ *  `vectorBaseLayers` below). MapLibre substitutes `{fontstack}`/`{range}`
+ *  itself; served by the backend from fonts bundled with the app (backend/
+ *  app/data/glyphs/), never a public glyph CDN — same "zero external
+ *  requests while offline" contract as the tile endpoint above. */
+export const OFFLINE_GLYPHS_URL = `${MAPS_API_PREFIX}fonts/{fontstack}/{range}.pbf`;
 
 /** Decide which tiles actually back the basemap: the local file when the
  *  operator installed one, else the online provider for `mapLayer` — exactly
@@ -112,7 +122,7 @@ export const OFFLINE_TILE_PREFIX = `${API_BASE}/maps/tiles/`;
 export function resolveBaseTile(
   mapLayer: MapTileKey,
   offline: OfflineMapStatus | null | undefined,
-): TileLayerConfig & { offline: boolean } {
+): TileLayerConfig & { offline: boolean; vector: boolean } {
   const cfg: TileLayerConfig = MAP_TILES[mapLayer];
   if (offline?.available) {
     return {
@@ -120,7 +130,161 @@ export function resolveBaseTile(
       attribution: offline.attribution || 'Offline map data',
       maxZoom: offline.max_zoom ?? cfg.maxZoom,
       offline: true,
+      vector: offline.format === 'pbf',
     };
   }
-  return { url: cfg.url, subdomains: cfg.subdomains, maxZoom: cfg.maxZoom, attribution: cfg.attribution, offline: false };
+  return {
+    url: cfg.url,
+    subdomains: cfg.subdomains,
+    maxZoom: cfg.maxZoom,
+    attribution: cfg.attribution,
+    offline: false,
+    vector: false,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* OFFLINE-MAP-4 — vector basemap (format=pbf offline MBTiles, e.g. a         */
+/* Planetiler/OpenMapTiles build — see memory                                 */
+/* mbtiles-vector-spike-2026-09-19). MapView adds one MapLibre 'vector'       */
+/* source + these style layers instead of a single raster layer when         */
+/* `resolveBaseTile(...).vector` is true.                                     */
+/*                                                                            */
+/* OFFLINE-MAP-5 adds `symbol`/text layers on top: place names (city/town/     */
+/* village), road names (transportation_name) and water names (water_name).   */
+/* These need the glyph server this file's `OFFLINE_GLYPHS_URL` points at —   */
+/* backend-bundled Noto Sans Regular/Bold PBF glyphs (backend/app/data/       */
+/* glyphs/, see backend/app/services/glyphs.py), not a public CDN, so the     */
+/* offline contract above still holds. Sprites are still not needed: nothing */
+/* here uses `icon-image`.                                                    */
+/* -------------------------------------------------------------------------- */
+
+export interface VectorBaseLayer {
+  /** MapLibre layer id (prefixed by the caller) and OpenMapTiles source-layer
+   *  name (they match 1:1 here, kept separate in case that ever changes). */
+  id: string;
+  sourceLayer: string;
+  type: 'fill' | 'line' | 'symbol';
+  paint: Record<string, unknown>;
+  layout?: Record<string, unknown>;
+  filter?: unknown[];
+  minzoom?: number;
+}
+
+/** Approximate, theme-matched colors for an OpenMapTiles-schema basemap —
+ *  independent of the brand token ramp in theme/tokens.ts (that ramp is for
+ *  app chrome, not cartography), picked to read as "map" in each theme the
+ *  way the online satellite/street tiles already do. `label`/`labelHalo`
+ *  are the one exception: they intentionally mirror theme/tokens.ts' own
+ *  `--ng-fg` (ivory-on-charcoal / ink-on-ivory) and `--ng-bg-1` values so map
+ *  text reads like the rest of the app's text, not a third ad hoc color. */
+const VECTOR_COLORS = {
+  dark: {
+    water: '#16232E',
+    landcover: '#1E2420',
+    landuse: '#242320',
+    park: '#20301F',
+    building: '#332F2A',
+    road: '#4A453D',
+    boundary: '#5C574E',
+    label: '#FAF9F5', // == --ng-fg (dark)
+    labelHalo: '#141413', // == --ng-bg-1 (dark)
+  },
+  light: {
+    water: '#AAD3DF',
+    landcover: '#E4E8DA',
+    landuse: '#EFEBE0',
+    park: '#CFE3C8',
+    building: '#DCD5C6',
+    road: '#FFFFFF',
+    boundary: '#B7AE9C',
+    label: '#141413', // == --ng-fg (light)
+    labelHalo: '#F3F1EA', // == --ng-bg-1 (light)
+  },
+} as const;
+
+/** Text font stacks for the two weights bundled in backend/app/data/glyphs —
+ *  see backend/app/services/glyphs.py `resolve_weight` for how the server
+ *  maps a requested stack (including foreign/unknown ones) back to these. */
+const LABEL_FONT_REGULAR = ['Noto Sans Regular'];
+const LABEL_FONT_BOLD = ['Noto Sans Bold'];
+
+/** `name:latin` is Planetiler/OpenMapTiles' own pre-transliterated field;
+ *  falling back to `name` covers the common case (Indonesian place/road/
+ *  water names are already Latin script) without needing a `name:id` special
+ *  case — same pattern as upstream's default style. */
+const LABEL_TEXT_FIELD = ['coalesce', ['get', 'name:latin'], ['get', 'name']];
+
+/** OpenMapTiles layer stack, bottom to top: water < landcover < landuse <
+ *  park < building < transportation (roads) < boundary. */
+export function vectorBaseLayers(theme: 'light' | 'dark'): VectorBaseLayer[] {
+  const c = VECTOR_COLORS[theme];
+  return [
+    { id: 'water', sourceLayer: 'water', type: 'fill', paint: { 'fill-color': c.water } },
+    { id: 'landcover', sourceLayer: 'landcover', type: 'fill', paint: { 'fill-color': c.landcover, 'fill-opacity': 0.7 } },
+    { id: 'landuse', sourceLayer: 'landuse', type: 'fill', paint: { 'fill-color': c.landuse, 'fill-opacity': 0.5 } },
+    { id: 'park', sourceLayer: 'park', type: 'fill', paint: { 'fill-color': c.park, 'fill-opacity': 0.6 } },
+    { id: 'building', sourceLayer: 'building', type: 'fill', paint: { 'fill-color': c.building }, minzoom: 13 },
+    {
+      id: 'transportation',
+      sourceLayer: 'transportation',
+      type: 'line',
+      paint: {
+        'line-color': c.road,
+        'line-width': ['interpolate', ['linear'], ['zoom'], 5, 0.4, 12, 1.2, 18, 6],
+      },
+    },
+    {
+      id: 'boundary',
+      sourceLayer: 'boundary',
+      type: 'line',
+      paint: { 'line-color': c.boundary, 'line-width': 1, 'line-dasharray': [2, 1.5] },
+    },
+    // Labels sit on top of every fill/line layer above, and in ascending
+    // "importance" order among themselves (water lowest, place highest) so a
+    // place label wins any collision against a road/water one.
+    {
+      id: 'water-name',
+      sourceLayer: 'water_name',
+      type: 'symbol',
+      minzoom: 3,
+      layout: {
+        'text-field': LABEL_TEXT_FIELD,
+        'text-font': LABEL_FONT_REGULAR,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 3, 10, 8, 12, 14, 16],
+        'text-letter-spacing': 0.05,
+      },
+      paint: { 'text-color': c.label, 'text-halo-color': c.labelHalo, 'text-halo-width': 1 },
+    },
+    {
+      id: 'road-name',
+      sourceLayer: 'transportation_name',
+      type: 'symbol',
+      minzoom: 12,
+      filter: ['has', 'name'],
+      layout: {
+        'symbol-placement': 'line',
+        'text-field': LABEL_TEXT_FIELD,
+        'text-font': LABEL_FONT_REGULAR,
+        'text-size': 11,
+      },
+      paint: { 'text-color': c.label, 'text-halo-color': c.labelHalo, 'text-halo-width': 1 },
+    },
+    {
+      id: 'place-label',
+      sourceLayer: 'place',
+      type: 'symbol',
+      minzoom: 4,
+      // Only settlement names, per this slice's scope — country/state/
+      // continent labels etc. stay out to avoid clutter at low zoom.
+      filter: ['in', ['get', 'class'], ['literal', ['city', 'town', 'village']]],
+      layout: {
+        'text-field': LABEL_TEXT_FIELD,
+        'text-font': LABEL_FONT_BOLD,
+        'text-size': ['interpolate', ['linear'], ['zoom'], 4, 10, 10, 14, 16, 18],
+        'text-max-width': 8,
+      },
+      paint: { 'text-color': c.label, 'text-halo-color': c.labelHalo, 'text-halo-width': 1.2 },
+    },
+  ];
 }
