@@ -11,6 +11,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Eye, EyeOff, Lock, LogIn, ShieldCheck, User } from 'lucide-react';
 import { useAuthStore } from '@/store/authStore';
 import { applyTheme } from '@/theme/tokens';
+import { useWindowChrome, WindowButtons, BrandGlyph } from '@/components/shell/NativeTitleBar';
 import { cn } from '@/lib/cn';
 
 const MIN_PASSWORD_LENGTH = 8;
@@ -27,6 +28,7 @@ function BrandMark({ className }: { className?: string }) {
 }
 
 export function LoginPage() {
+  const chrome = useWindowChrome();
   const login = useAuthStore((s) => s.login);
   const setup = useAuthStore((s) => s.setup);
   const checkSetup = useAuthStore((s) => s.checkSetup);
@@ -88,6 +90,32 @@ export function LoginPage() {
           'radial-gradient(120% 120% at 12% 0%, #141a2e 0%, #0b1020 60%)',
       }}
     >
+      {/* Native chrome overlay — same single-row contract as TopBar (no
+          separate strip above the page): transparent, no background/border
+          of its own, so it reads as controls floating on this page's own
+          gradient rather than a second bar stacked on top of it. Full-width
+          so the window stays draggable before login too, same as it always
+          was via the old standalone title bar. */}
+      {chrome.isNative && (
+        <div
+          className="absolute inset-x-0 top-0 z-10 flex h-9 shrink-0 select-none items-center text-fg/50"
+          onMouseDown={chrome.onMove}
+          onDoubleClick={chrome.toggleMaximize}
+        >
+          {chrome.layout.side === 'left' && (
+            <WindowButtons api={chrome.api} layout={chrome.layout} isMaximized={chrome.isMaximized} toggleMaximize={chrome.toggleMaximize} />
+          )}
+          <div className="flex items-center gap-1.5 pl-3 text-xs font-medium">
+            <BrandGlyph />
+            <span>NetGeo</span>
+          </div>
+          <div className="flex-1" />
+          {chrome.layout.side === 'right' && (
+            <WindowButtons api={chrome.api} layout={chrome.layout} isMaximized={chrome.isMaximized} toggleMaximize={chrome.toggleMaximize} />
+          )}
+        </div>
+      )}
+
       {/* Decorative blobs */}
       <div
         className="pointer-events-none absolute left-1/4 top-1/4 h-96 w-96 -translate-x-1/2 -translate-y-1/2 rounded-full opacity-20 blur-3xl"

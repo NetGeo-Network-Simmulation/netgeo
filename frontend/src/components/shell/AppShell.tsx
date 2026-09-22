@@ -110,7 +110,17 @@ export function AppShell({ projectName, conn }: { projectName: string; conn: Con
   useShortcuts();
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden">
+    // h-full/w-full, not h-screen/w-screen: fills whatever height its flex-1
+    // parent (App.tsx) actually hands it. Until 2026-09-20 that was 100vh in
+    // a browser tab but 100vh-36px natively (App.tsx spent 36px of the
+    // viewport on a standalone NativeTitleBar strip before this ever
+    // mounted) — h-screen here would have re-claimed the full 100vh and
+    // clipped AppShell's own last children by that 36px. The native window
+    // buttons now live inside TopBar's own row instead of a separate strip
+    // (NativeTitleBar.tsx), so both cases hand this component the full
+    // viewport height uniformly — h-full stays correct either way, no
+    // longer for a reason specific to the native shell.
+    <div className="flex h-full w-full flex-col overflow-hidden">
       <TopBar projectName={projectName} conn={conn} />
 
       {/* relative: anchors the floating device-rail (design 12-UI shell-device-

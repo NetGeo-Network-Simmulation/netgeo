@@ -1,17 +1,34 @@
 /**
- * NativeTitleBar — the app's own window chrome, shown ONLY inside the
- * frameless native window (packaging/launcher.py's `_try_webview`, Surya
- * 2026-09-14: "tetap frameless+title bar sendiri biar bisa full rounded").
- * In a plain browser tab (distribution variants #4/#5) this renders nothing
- * at all — `window.pywebview` only exists inside the pywebview runtime, so
- * the browser gets zero extra DOM and zero layout shift.
+ * Native window chrome — minimize/maximize/close + drag-to-move, shared by
+ * whichever surface hosts the single merged chrome row: TopBar in the
+ * authenticated app, LoginPage's own overlay before login. Shown ONLY
+ * inside the frameless native window (packaging/launcher.py's
+ * `_try_webview`). In a plain browser tab (distribution variants #4/#5)
+ * `useWindowChrome().isNative` is false and every consumer below renders
+ * its normal, unmodified chrome — `window.pywebview` only exists inside the
+ * pywebview runtime, so the browser gets zero extra DOM and zero layout
+ * shift.
+ *
+ * Until 2026-09-20 this rendered as its own 36px strip, stacked ABOVE
+ * TopBar/LoginPage — a visibly separate bar with its own background/border,
+ * exactly the "orphan strip" seam Surya's QA flagged (screenshot: window
+ * buttons + "NetGeo" sitting in a bar above the app's real header row,
+ * instead of sharing it). The controls now render INSIDE each host's own
+ * top row instead, via `useWindowChrome()` + `<WindowButtons>` — one
+ * continuous surface, no seam. `ResizeHandles` stays window-global (App.tsx
+ * mounts it directly) since resizing isn't tied to whichever surface is on
+ * screen.
  *
  * pywebview 6.2.1 has no working drag/resize for a frameless window on
  * Wayland (see packaging/launcher.py's `_WindowBridge` docstring — its own
- * move()/easy_drag are no-ops or too broad), so this bar talks to the
+ * move()/easy_drag are no-ops or too broad), so drag talks to the
  * `_WindowBridge` js_api instead of the CSS `pywebview-drag-region` class:
- * mousedown on the title strip calls `begin_move()`, and four invisible
- * edge/corner strips call `begin_resize(edge)`.
+ * mousedown on a drag-eligible area calls `begin_move()`, and four
+ * invisible edge/corner strips call `begin_resize(edge)`. "No-drag" for an
+ * interactive region (a button, the search box, the whole scrollable
+ * toolbar) is done the same way pywebview's CSS trick doesn't work here —
+ * `e.stopPropagation()` on that region's own mousedown, so the host row's
+ * begin_move() handler never sees the event bubble up to it.
  */
 import { useEffect, useState } from 'react';
 import { Minus, Square, X } from 'lucide-react';
@@ -43,7 +60,7 @@ declare global {
 
 /** 24×24 "mirrored node" mark — brand set 8a, `netgeo-icon.svg` — inlined so
  * it inherits `currentColor` instead of shipping a second asset request. */
-function BrandGlyph() {
+export function BrandGlyph() {
   return (
     <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor" fillRule="evenodd" aria-hidden>
       <path d="M8.8 8.2 A3.2 3.2 0 1 0 15.2 8.2 A3.2 3.2 0 1 0 8.8 8.2 Z M8.8 15.8 A3.2 3.2 0 1 0 15.2 15.8 A3.2 3.2 0 1 0 8.8 15.8 Z M4.6 3.4 A1.8 1.8 0 1 0 8.2 3.4 A1.8 1.8 0 1 0 4.6 3.4 Z M15.8 3.4 A1.8 1.8 0 1 0 19.4 3.4 A1.8 1.8 0 1 0 15.8 3.4 Z M4.6 20.6 A1.8 1.8 0 1 0 8.2 20.6 A1.8 1.8 0 1 0 4.6 20.6 Z M15.8 20.6 A1.8 1.8 0 1 0 19.4 20.6 A1.8 1.8 0 1 0 15.8 20.6 Z M2.6 10.9 H7.2 V13.1 H2.6 Z M16.8 10.9 H21.4 V13.1 H16.8 Z" />
@@ -53,8 +70,10 @@ function BrandGlyph() {
 
 /** Invisible strips along the four edges/corners — the only way to resize a
  * frameless pywebview window (see file header). Rendered above everything,
- * including modals, since resizing is a window-level action. */
-function ResizeHandles({ api }: { api: NetGeoWindowApi }) {
+ * including modals, since resizing is a window-level action; mounted once
+ * from App.tsx, independent of whichever surface (TopBar/LoginPage) is
+ * hosting the drag/button row this render. */
+export function ResizeHandles({ api }: { api: NetGeoWindowApi }) {
   const grab = (edge: ResizeEdge) => (e: React.MouseEvent) => {
     if (e.button !== 0) return;
     api.begin_resize(edge);
@@ -74,36 +93,52 @@ function ResizeHandles({ api }: { api: NetGeoWindowApi }) {
   );
 }
 
-export const NATIVE_TITLE_BAR_HEIGHT = 36;
-
-export function NativeTitleBar() {
-  const isNative = useIsNativeShell();
+/** Shared native-chrome state + actions. `isNative` is false (and `api`
+ * null) in a plain browser tab, so every consumer can gate on it alone. */
+export function useWindowChrome() {
+  const isNativeShell = useIsNativeShell();
   const [isMaximized, setIsMaximized] = useIsMaximized();
   // Fetched once from packaging/launcher.py's button_layout() bridge method
   // (reads GNOME's button-layout gsetting) — starts at the same right-side
   // default the buttons always had, so there's no flash for non-GNOME
   // desktops or before the async call resolves.
   const [layout, setLayout] = useState<ButtonLayout>(DEFAULT_BUTTON_LAYOUT);
+  const isNative = isNativeShell && !!window.pywebview;
 
   useEffect(() => {
-    if (!isNative || !window.pywebview) return;
-    window.pywebview.api
+    if (!isNative) return;
+    window.pywebview!.api
       .button_layout()
       .then(setLayout)
       .catch(() => {}); // ponytail: keep the default on any failure
   }, [isNative]);
 
-  if (!isNative || !window.pywebview) return null;
-  const api = window.pywebview.api;
+  const api = isNative ? window.pywebview!.api : null;
 
   const onMove = (e: React.MouseEvent) => {
-    if (e.button !== 0 || e.detail > 1) return; // left-click only; double-click falls through to toggleMaximize
+    if (!api || e.button !== 0 || e.detail > 1) return; // left-click only; double-click falls through to toggleMaximize
     api.begin_move();
   };
   const toggleMaximize = () => {
+    if (!api) return;
     api.toggle_maximize();
     setIsMaximized((v) => !v);
   };
+
+  return { isNative, api, layout, isMaximized, onMove, toggleMaximize };
+}
+
+/** The three window buttons only — no bar, no brand. Embed inline in
+ * whichever row is the host's own top row (TopBar/LoginPage), on the
+ * `layout.side` the caller resolves from `useWindowChrome()`. Renders
+ * nothing when `api` is null (browser tab). */
+export function WindowButtons({
+  api,
+  layout,
+  isMaximized,
+  toggleMaximize,
+}: Pick<ReturnType<typeof useWindowChrome>, 'api' | 'layout' | 'isMaximized' | 'toggleMaximize'>) {
+  if (!api) return null;
 
   const buttonProps: Record<ButtonKind, { label: string; icon: React.ReactNode; onClick: () => void; className: string }> = {
     minimize: {
@@ -126,8 +161,8 @@ export function NativeTitleBar() {
     },
   };
 
-  const buttons = (
-    <div className="flex h-full items-stretch" onMouseDown={(e) => e.stopPropagation()}>
+  return (
+    <div className="flex h-full shrink-0 items-stretch" onMouseDown={(e) => e.stopPropagation()}>
       {layout.order.map((kind) => {
         const b = buttonProps[kind];
         return (
@@ -136,32 +171,12 @@ export function NativeTitleBar() {
             type="button"
             aria-label={b.label}
             onClick={b.onClick}
-            className={cn('flex w-11 items-center justify-center', b.className)}
+            className={cn('flex w-11 items-center justify-center text-fg-muted', b.className)}
           >
             {b.icon}
           </button>
         );
       })}
     </div>
-  );
-
-  return (
-    <>
-      <ResizeHandles api={api} />
-      <div
-        className="relative z-[999] flex h-9 shrink-0 select-none items-center bg-panel text-fg-muted"
-        style={{ height: NATIVE_TITLE_BAR_HEIGHT }}
-        onMouseDown={onMove}
-        onDoubleClick={toggleMaximize}
-      >
-        {layout.side === 'left' && buttons}
-        <div className="flex items-center gap-1.5 pl-3 text-xs font-medium text-fg-subtle">
-          <BrandGlyph />
-          <span>NetGeo</span>
-        </div>
-        <div className="flex-1" />
-        {layout.side === 'right' && buttons}
-      </div>
-    </>
   );
 }
