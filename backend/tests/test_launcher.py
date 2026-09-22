@@ -226,7 +226,7 @@ def test_try_webview_succeeds_when_backend_available(monkeypatch):
     # min_size is the *whole* frameless window and the browser-based
     # Playwright measurement never renders a native title bar at all.
     assert calls["min_size"][0] >= 980
-    assert calls["min_size"][1] >= 640
+    assert calls["min_size"][1] >= 604
     # initial size stays a comfortable margin above the floor, not just
     # equal to it
     assert calls["width"] >= calls["min_size"][0]

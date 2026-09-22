@@ -77,7 +77,7 @@ function SubNavStrip() {
     <div
       role="tablist"
       aria-label={`${group.label} sections`}
-      className="flex items-center gap-0.5 rounded-lg border border-fg/10 bg-fg/5 p-0.5"
+      className="flex shrink-0 items-center gap-0.5 rounded-lg border border-fg/10 bg-fg/5 p-0.5"
     >
       {group.members.map((m) => {
         const active = isMemberActive(m);
@@ -87,15 +87,21 @@ function SubNavStrip() {
             key={m.key}
             role="tab"
             aria-selected={active}
+            aria-label={m.label}
             onClick={() => activateMember(m)}
             title={m.label}
             className={cn(
-              'flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
+              'flex items-center gap-1.5 whitespace-nowrap rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors',
               active ? 'bg-accent/20 text-accent' : 'text-fg/55 hover:bg-fg/8 hover:text-fg/90',
             )}
           >
-            <Icon className="h-3.5 w-3.5" />
-            <span className="hidden sm:inline">{m.label}</span>
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            {/* Icon-only below 1024px (leader review 2026-09-20: labels were
+                wrapping onto 2 lines at 1280/1440 because this span had no
+                whitespace-nowrap and the tablist could shrink below its
+                content width) — the accessible name survives via
+                aria-label/title above regardless of whether this renders. */}
+            <span className="hidden whitespace-nowrap 2xl:inline">{m.label}</span>
           </button>
         );
       })}
@@ -170,7 +176,7 @@ export function TopBar({ projectName, conn }: TopBarProps) {
           ribbon pattern). At comfortable widths this never visibly scrolls;
           below it, it scrolls instead of the controls disappearing off the
           right edge. */}
-      <HScrollToolbar className="flex-1 gap-3" onMouseDown={chrome.isNative ? noDrag : undefined}>
+      <HScrollToolbar className="flex-1 gap-2" onMouseDown={chrome.isNative ? noDrag : undefined}>
         <span className="shrink-0 text-fg/25">/</span>
         <span className="max-w-[160px] shrink-0 truncate text-fg/70">{projectName}</span>
         <span
@@ -186,9 +192,14 @@ export function TopBar({ projectName, conn }: TopBarProps) {
 
         <SubNavStrip />
 
+        {/* The most elastic item in the row (leader review 2026-09-20): was
+            a fixed w-72/shrink-0, so every OTHER item had to fit around it
+            unchanged — the tabs took the overflow instead, wrapping. Now
+            shrinks first, down to a legible floor, before anything else
+            gives up width; xl+ gets its old full size back. */}
         <button
           onClick={() => openModal('command')}
-          className="flex w-72 shrink-0 items-center gap-2 rounded-lg border border-fg/10 bg-fg/5 px-3 py-2 text-left text-xs text-fg/40 transition-colors hover:border-fg/20 hover:bg-fg/8"
+          className="flex w-28 min-w-[104px] shrink items-center gap-2 rounded-lg border border-fg/10 bg-fg/5 px-3 py-2 text-left text-xs text-fg/40 transition-colors hover:border-fg/20 hover:bg-fg/8 2xl:w-72 2xl:shrink-0"
           aria-label="Open command palette"
         >
           <Search className="h-3.5 w-3.5 shrink-0" />
@@ -231,7 +242,10 @@ export function TopBar({ projectName, conn }: TopBarProps) {
             {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
 
-          <time className="hidden tabular-nums text-fg/50 lg:inline">
+          {/* Lowest-value item in the cluster (Surya QA 2026-09-20 collapse
+              order): goes first, at xl, well before the status chip's text
+              (lg) — so between 1100–1280 the clock is what gives way. */}
+          <time className="hidden tabular-nums text-fg/50 xl:inline">
             {clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </time>
         </div>
