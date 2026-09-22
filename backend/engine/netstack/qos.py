@@ -36,6 +36,13 @@ class QosConfig:
     # Only checked when enabled=True — same gate as the per-class depth check.
     police_bps: tuple = (None, None, None)
     police_burst_bytes: int = 8192  # shared bucket depth (~5-6 full-size frames)
+    # Egress shaper: single-rate token bucket for the whole interface, applied
+    # after strict-priority selection and before serialization (§A3). Unlike
+    # the policer above it never drops — a frame without enough tokens waits.
+    # None = unshaped (default; disabled-path parity, works whether or not
+    # QoS classes are enabled).
+    shaper_bps: float | None = None
+    shaper_burst_bytes: int = 8192  # Bc; Tc = shaper_burst_bytes*8/shaper_bps
 
 
 def classify(dscp: int, cfg: QosConfig) -> QosClass:

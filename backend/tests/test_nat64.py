@@ -6,10 +6,11 @@ families and is stateful/PAT-style — a ``Nat64Binding`` per flow, same shape
 as NAT44's ``NatBinding``, expiring on idle via the same sequence-guard timer
 idiom used elsewhere in this engine (fragmentation reassembly, DHCP leases).
 
-DNS64 (RFC 6147) is NOT implemented — see the slice notes; this engine's DNS
-support (``routing.py``'s ``dns_zone``/``DnsMessage``) has no query-type
-concept (no A vs AAAA) and runs over IPv4 UDP only, so there is nothing to
-synthesize an AAAA record *from*.
+DNS64 (RFC 6147) is implemented (A7, see ``test_dns64.py``): ``DnsMessage``
+carries a ``qtype`` (A/AAAA), the DNS server runs over both IPv4 and IPv6
+UDP, and ``Router.enable_dns64()`` synthesizes AAAA from a zone's A record
+via this same module's ``_nat64_embed`` (well-known /96 only, matching
+NAT64 above).
 """
 from __future__ import annotations
 
