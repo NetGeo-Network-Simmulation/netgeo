@@ -9,6 +9,7 @@
  */
 
 import { getToken, notifyUnauthorized } from './token';
+import { runtimeWebSocketBase } from '@/config/runtimeProfile';
 
 type Listener<T> = (event: T) => void;
 
@@ -23,7 +24,7 @@ export type ConnState = 'connecting' | 'open' | 'closed' | 'reconnecting';
 
 /** Resolve ws(s):// origin from current page when base is relative. */
 function wsUrl(path: string): string {
-  const base = import.meta.env.VITE_WS_BASE as string | undefined;
+  const base = runtimeWebSocketBase(import.meta.env.VITE_WS_BASE as string | undefined);
   if (base) return base.replace(/\/$/, '') + path;
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${proto}//${location.host}${path}`;
