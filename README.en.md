@@ -12,7 +12,7 @@ a footnote.*
 
 [![CI](https://github.com/NetGeo-Network-Simmulation/netgeo/actions/workflows/backend.yml/badge.svg)](https://github.com/NetGeo-Network-Simmulation/netgeo/actions)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Version](https://img.shields.io/badge/version-1.2.124-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.126-brightgreen)
 ![Channel](https://img.shields.io/badge/channel-beta-blueviolet)
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![React](https://img.shields.io/badge/react-18-61dafb)
@@ -36,29 +36,29 @@ sanity-check a topology without touching production gear.
 
 ## Install it
 
-NetGeo ships in five forms. Two work today. Read the table before you pick one — the sizes are
+NetGeo ships in five forms. Read the table before you pick one — the sizes are
 large on purpose (a real native window bundles a real Qt runtime; that is not a bug to "optimize
 away").
 
 | # | Form | Frontend | Backend | Map | Status |
 |---|---|---|---|---|---|
-| 1 | Native, fully offline | native window | local | open-source tiles | **not yet** — window is real, tiles still hit the internet by default |
+| 1 | Native, fully offline | native window | local | open-source tiles | **ready with a local MBTiles file** — local engine + socket; without one, only the basemap falls back online |
 | 2 | Native + Google Maps | native window | local | Google Maps API | **not built** — no integration exists |
-| 3 | Native + remote backend | native window | your server | online | **not built** — launcher always starts a local backend |
+| 3 | Native + remote backend | native window | your server | online | **ready** — select a server in `Settings → Runtime`; REST and WebSocket switch together |
 | 4 | Headless | browser | local | online or local | **works today** — `--no-window` (see below) |
 | 5 | Full online | browser | your server | online | **works today** — this is the Docker install below |
 
 ### Download a release (fastest path)
 
-Grab the latest tag's assets from [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.124):
+Grab the latest tag's assets from [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.126):
 
 | Asset | Size | What it is |
 |---|---|---|
-| `NetGeo-x86_64.AppImage` | 231.6 MB | Native Qt window, Linux, no install step — `chmod +x`, run it |
-| `netgeo_1.2.124_amd64.deb` | — | Debian/Ubuntu, `apt` installs the Qt dependencies |
-| `netgeo-1.2.124-1.x86_64.rpm` | — | Fedora/RHEL, `dnf` installs the Qt dependencies |
-| `netgeo-1.2.124-setup.exe` | 157.9 MB | Windows installer, native window — **built, never run-tested on real Windows** |
-| `netgeo-linux-x86_64.tar.gz` | 253.5 MB | Onedir bundle, Linux, extract and run `netgeo` |
+| `NetGeo-x86_64.AppImage` | Linux | Native Qt window, no install step — `chmod +x`, run it |
+| `netgeo_1.2.126_amd64.deb` | Debian/Ubuntu | `apt` installs the Qt dependencies |
+| `netgeo-1.2.126-1.x86_64.rpm` | Fedora/RHEL | `dnf` installs the Qt dependencies |
+| `netgeo-1.2.126-setup.exe` | Windows | Native-window installer — still needs real Windows QA |
+| `netgeo-linux-x86_64.tar.gz` | Linux | Onedir bundle, extract and run `netgeo` |
 
 The AppImage, exe, and tarball are all the native-window path (forms #1/#2/#3 above, minus the
 parts not built yet — today they behave like form #4, backend local, map online). See
@@ -69,8 +69,8 @@ declare their dependencies, so `apt`/`dnf` install the Qt/QtWebEngine runtime fo
 bundling everything itself the way the AppImage does.
 
 ```
-sudo apt install ./netgeo_1.2.124_amd64.deb    # Debian, Ubuntu
-sudo dnf install ./netgeo-1.2.124-1.x86_64.rpm # Fedora, RHEL
+sudo apt install ./netgeo_1.2.126_amd64.deb    # Debian, Ubuntu
+sudo dnf install ./netgeo-1.2.126-1.x86_64.rpm # Fedora, RHEL
 ```
 
 Uninstall anytime with `apt remove netgeo` / `dnf remove netgeo` — both only remove the files they
@@ -149,6 +149,14 @@ python packaging/launcher.py --no-window
 NETGEO_NO_WINDOW=1 python packaging/launcher.py   # same thing, for systemd units
 ```
 
+### Native runtime: local or remote sockets
+
+In the native app, open **Settings → Runtime**. Profile #1 uses local same-origin REST and
+WebSockets; profiles #3 and #5 accept a server origin such as `https://netgeo.example.com`, then
+derive `/api` and `wss://…` together and reconnect the client. The remote server must run this
+release or newer so it accepts the native loopback CORS origin. Profile #2 remains disabled until
+Google Maps and API-key management exist; profile #4 still starts with `--no-window`.
+
 ### Offline map region
 
 The backend can serve basemap tiles from a local `.mbtiles` file instead of the internet
@@ -202,7 +210,8 @@ eBGP boundaries, invisible for as long as its only value was zero.
 Beyond that: a pure-Python engine (no native deps — runs on Linux, Windows, ARM) driving L2 (MAC
 learning, 802.1Q, STP, LACP), L3 (longest-prefix routing, NAT44, ACLs, DHCP, DNS), OSPF multi-area,
 BGP with route-reflectors and communities, VRRP, dual-stack IPv4+IPv6, DSCP-based QoS queueing,
-a Cisco/MikroTik-like CLI per device, pcapng export, and a config-import digital twin with a
+per-interface token-bucket shaping, TCP FSM, EVPN Type-1, OSPF Segment Routing without LDP, NPTv6,
+DNS64, a Cisco/MikroTik-like CLI per device, pcapng export, and a config-import digital twin with a
 reachability engine that answers "can A reach B" with the actual routing decision as evidence.
 Full feature list: [`dev-docs/ARCHITECTURE.md`](dev-docs/ARCHITECTURE.md).
 
@@ -215,18 +224,17 @@ Starts in under 3 seconds, idles below 300 MB RAM.
 Said out loud on purpose — a missing feature you can plan around beats a claimed one that breaks
 on you:
 
-- No IS-IS, MPLS, Segment Routing, or EVPN.
-- No QoS traffic shaping beyond DSCP classify/mark/queue (no policers, no shaper hierarchies).
-- No full TCP state machine — the netstack simulates reachability and routing, not a byte-accurate
-  transport stack.
-- No DNS64/NAT64.
+- No IS-IS, MPLS dataplane, or EVPN DF election/aliasing. OSPF Segment Routing and EVPN Type-1 exist.
+- Token-bucket QoS shaping exists per interface, but not policers or shaper hierarchies.
+- TCP FSM covers simulated connect/close/retransmit, not byte-accurate transport.
+- DNS64 and NPTv6 exist; stateful NAT64 does not.
 - BGP local-pref/ORIGIN/MED are configurable as of v1.2.123, but not yet cross-checked against FRR —
   the oracle cases for them are written next. Defaults stay local-pref 100, origin IGP, MED 0.
 - Windows installer (`netgeo-1.2.123-setup.exe`) has never been run on a real Windows machine —
   built and inspected, not verified end-to-end.
 - No multi-tenant isolation on the full-online form (#5) — one shared instance, one set of data.
-- Distribution forms #1 (true offline maps), #2 (Google Maps), #3 (remote backend for the native
-  window) don't exist yet — see the table above.
+- Form #2 (Google Maps) does not exist. Form #1 still needs a user-installed MBTiles file to avoid
+  all online map traffic.
 
 ---
 

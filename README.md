@@ -12,7 +12,7 @@ bukan selisih yang kami maklumi.*
 
 [![CI](https://github.com/NetGeo-Network-Simmulation/netgeo/actions/workflows/backend.yml/badge.svg)](https://github.com/NetGeo-Network-Simmulation/netgeo/actions)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Version](https://img.shields.io/badge/version-1.2.124-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.126-brightgreen)
 ![Channel](https://img.shields.io/badge/channel-beta-blueviolet)
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![React](https://img.shields.io/badge/react-18-61dafb)
@@ -37,29 +37,29 @@ merencanakan atau memvalidasi topologi tanpa harus menyentuh perangkat produksi.
 
 ## Cara pasang
 
-NetGeo dirilis dalam lima bentuk, tapi baru dua yang benar-benar bisa dipakai hari ini. Baca dulu tabelnya
+NetGeo dirilis dalam lima bentuk. Baca dulu tabelnya
 sebelum milih. Ukuran filenya memang besar, dan itu disengaja — window native-nya asli, jadi ikut
 membawa runtime Qt sendiri. Itu bukan bug yang perlu "dioptimasi".
 
 | # | Bentuk | Frontend | Backend | Peta | Status |
 |---|---|---|---|---|---|
-| 1 | Native, sepenuhnya offline | window native | lokal | tile open-source | **belum** — window-nya nyata, tapi tile peta masih ambil dari internet secara default |
+| 1 | Native, sepenuhnya offline | window native | lokal | tile open-source | **siap bila MBTiles lokal dipasang** — engine + socket lokal; tanpa file peta, hanya basemap yang fallback online |
 | 2 | Native + Google Maps | window native | lokal | Google Maps API | **belum dibangun** — integrasinya belum ada |
-| 3 | Native + backend remote | window native | server sendiri | online | **belum dibangun** — launcher selalu menjalankan backend lokal |
+| 3 | Native + backend remote | window native | server sendiri | online | **siap** — pilih server di `Settings → Runtime`; REST dan WebSocket berpindah bersama |
 | 4 | Headless | browser | lokal | online atau lokal | **sudah jalan** — `--no-window` (lihat di bawah) |
 | 5 | Online penuh | browser | server sendiri | online | **sudah jalan** — ini instalasi Docker di bawah |
 
 ### Unduh rilis (jalur tercepat)
 
-Ambil aset dari tag terbaru di [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.124):
+Ambil aset dari tag terbaru di [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.126):
 
 | Aset | Ukuran | Apa isinya |
 |---|---|---|
-| `NetGeo-x86_64.AppImage` | 231.6 MB | Window Qt native, Linux, tanpa langkah instalasi — `chmod +x`, jalankan |
-| `netgeo_1.2.124_amd64.deb` | — | Debian/Ubuntu, `apt` yang pasang dependensi Qt |
-| `netgeo-1.2.124-1.x86_64.rpm` | — | Fedora/RHEL, `dnf` yang pasang dependensi Qt |
-| `netgeo-1.2.124-setup.exe` | 157.9 MB | Installer Windows, window native — **sudah dibangun, belum pernah diuji jalan di Windows asli** |
-| `netgeo-linux-x86_64.tar.gz` | 253.5 MB | Bundle onedir, Linux, extract lalu jalankan `netgeo` |
+| `NetGeo-x86_64.AppImage` | Linux | Window Qt native, tanpa langkah instalasi — `chmod +x`, jalankan |
+| `netgeo_1.2.126_amd64.deb` | Debian/Ubuntu | `apt` yang pasang dependensi Qt |
+| `netgeo-1.2.126-1.x86_64.rpm` | Fedora/RHEL | `dnf` yang pasang dependensi Qt |
+| `netgeo-1.2.126-setup.exe` | Windows | Installer window native — tetap perlu QA di Windows asli |
+| `netgeo-linux-x86_64.tar.gz` | Linux | Bundle onedir, extract lalu jalankan `netgeo` |
 
 Ketiganya (AppImage, exe, tarball) sama-sama lewat jalur window native (bentuk #1/#2/#3 di atas,
 minus bagian yang belum dibangun). Jadi hari ini perilakunya persis bentuk #4: backend lokal, peta
@@ -70,8 +70,8 @@ mendaftarkan dependensinya, jadi `apt`/`dnf` yang pasang runtime Qt/QtWebEngine 
 bukan kamu yang bawa semuanya sendiri seperti AppImage.
 
 ```
-sudo apt install ./netgeo_1.2.124_amd64.deb    # Debian, Ubuntu
-sudo dnf install ./netgeo-1.2.124-1.x86_64.rpm # Fedora, RHEL
+sudo apt install ./netgeo_1.2.126_amd64.deb    # Debian, Ubuntu
+sudo dnf install ./netgeo-1.2.126-1.x86_64.rpm # Fedora, RHEL
 ```
 
 Copot lewat `apt remove netgeo` / `dnf remove netgeo` kapan saja — keduanya cuma menghapus file
@@ -152,6 +152,15 @@ python packaging/launcher.py --no-window
 NETGEO_NO_WINDOW=1 python packaging/launcher.py   # same thing, for systemd units
 ```
 
+### Runtime native: socket lokal atau remote
+
+Di aplikasi native, buka **Settings → Runtime**. Profil #1 memakai REST dan WebSocket lokal
+(same-origin); profil #3 dan #5 meminta origin server `https://netgeo.example.com`, lalu klien
+menurunkan endpoint `/api` dan `wss://…` secara otomatis dan menyambungkannya ulang bersama-sama.
+Server remote harus menjalankan NetGeo versi ini atau lebih baru agar CORS loopback native diterima.
+Profil #2 tetap dinonaktifkan sampai integrasi Google Maps dan pengelolaan API key tersedia; profil
+#4 tetap harus dimulai lewat `--no-window`.
+
 ### Region peta offline
 
 Backend bisa menyajikan tile basemap dari file `.mbtiles` lokal, jadi tidak perlu ambil dari
@@ -208,7 +217,8 @@ batas eBGP, tersembunyi selama ini karena nilainya memang selalu nol.
 Selebihnya, ini engine pure-Python (tanpa dependensi native — jalan di Linux, Windows, ARM) yang
 menggerakkan L2 (MAC learning, 802.1Q, STP, LACP), L3 (longest-prefix routing, NAT44, ACL, DHCP,
 DNS), OSPF multi-area, BGP dengan route-reflector dan community, VRRP, dual-stack IPv4+IPv6,
-antrean QoS berbasis DSCP, CLI ala Cisco/MikroTik per device, export pcapng, sampai digital twin
+antrean QoS berbasis DSCP, token-bucket QoS shaping, TCP FSM, EVPN Type-1, Segment Routing OSPF
+tanpa LDP, NPTv6, DNS64, CLI ala Cisco/MikroTik per device, export pcapng, sampai digital twin
 hasil import config lengkap dengan reachability engine yang menjawab "apakah A bisa menjangkau B"
 pakai jejak keputusan routing yang benar-benar dieksekusi sebagai bukti. Daftar fitur lengkapnya ada di
 [`dev-docs/ARCHITECTURE.md`](dev-docs/ARCHITECTURE.md).
@@ -222,12 +232,11 @@ Start di bawah 3 detik, idle di bawah 300 MB RAM.
 Sengaja ditulis terus terang: fitur yang belum ada tapi kamu tahu, jauh lebih baik daripada fitur
 yang diklaim ada tapi ternyata rusak di tanganmu:
 
-- Tidak ada IS-IS, MPLS, Segment Routing, atau EVPN.
-- Tidak ada QoS traffic shaping di luar classify/mark/queue berbasis DSCP (tidak ada policer,
-  tidak ada hierarki shaper).
-- Tidak ada state machine TCP yang lengkap — netstack ini mensimulasikan reachability dan routing,
-  bukan transport stack yang akurat sampai level byte.
-- Tidak ada DNS64/NAT64.
+- Tidak ada IS-IS, MPLS dataplane, atau EVPN DF election/aliasing. Segment Routing OSPF dan EVPN
+  Type-1 sudah tersedia.
+- QoS shaping tersedia sebagai token bucket per interface, tetapi belum ada policer atau hierarki shaper.
+- TCP FSM tersedia untuk koneksi/penutupan/retransmisi simulasi, bukan transport stack akurat sampai byte.
+- DNS64 dan NPTv6 tersedia; NAT64 stateful belum ada.
 - BGP local-pref/ORIGIN/MED sudah bisa dikonfigurasi sejak v1.2.123, tapi belum dicek-silang
   lawan FRR — kasus oracle untuk itu ditulis berikutnya. Default-nya tetap local-pref 100, origin
   IGP, MED 0.
@@ -235,8 +244,8 @@ yang diklaim ada tapi ternyata rusak di tanganmu:
   sudah dibangun dan diperiksa, belum diverifikasi end-to-end.
 - Tidak ada isolasi multi-tenant di bentuk full-online (#5) — satu instance bersama, satu set data
   untuk semua.
-- Bentuk distribusi #1 (peta yang benar-benar offline), #2 (Google Maps), #3 (backend remote untuk window
-  native) belum ada — lihat tabel di atas.
+- Bentuk #2 (Google Maps) belum ada. Bentuk #1 masih memerlukan MBTiles yang dipasang pengguna agar
+  benar-benar tanpa akses peta internet.
 
 ---
 

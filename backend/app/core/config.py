@@ -17,7 +17,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # stale value overrode the code default forever — self-updated installs kept
 # reporting the version they were first installed at (e.g. "0.1"), so the
 # updater always saw an update available. The env var is now ignored.
-APP_VERSION = "1.2.125.1"
+APP_VERSION = "1.2.126"
 # Release channel (alpha/beta/stable). Kept out of APP_VERSION so the updater's
 # numeric version comparison against GitHub releases keeps working.
 APP_CHANNEL = "beta"
@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     ENVIRONMENT: str = "development"
     SECRET_KEY: str = "change-me"
     CORS_ORIGINS: str = "http://localhost,http://localhost:5173,http://localhost:3000"
+    # Native packages serve their frontend from a random loopback port. This
+    # narrowly permits that origin to call an explicitly configured remote
+    # backend; it does not allow arbitrary network origins.
+    NATIVE_CORS_ORIGIN_REGEX: str = r"^https?://(127\.0\.0\.1|localhost):\d+$"
 
     # URLs
     FRONTEND_URL: str = "http://localhost:5173"
