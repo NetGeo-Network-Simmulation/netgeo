@@ -108,7 +108,15 @@ const THEMES: Record<ThemeMode, ThemeVars> = {
     // (canvas) < ivory panels < white elevated surfaces.
     '--ng-bg-0': '#EFEDE6', // warm cream canvas ground (darkest layer)
     '--ng-bg-1': '#F3F1EA', // radial-gradient partner, a step lighter
-    '--ng-surface': 'rgba(255,255,255,0.92)', // elevated glass — white
+    // Warm ivory, not pure white (Surya QA 2026-09-20: "warna putihnya masih
+    // terlalu silau" — .glass-strong's blur+saturate(180%) pushed the old
+    // rgba(255,255,255,.92) surface toward a blown-out white glare on TopBar
+    // and every card/modal built on it). Composited over the light canvas
+    // (--ng-bg-1 #F3F1EA) this drops relative luminance 0.99 -> 0.88 while
+    // every existing text/surface pair stays >= its prior WCAG tier (ink
+    // 18.3:1 -> 16.4:1, fg-muted 5.5:1 -> 4.93:1, accent 5.6:1 -> 5.0:1 — all
+    // still >= AA 4.5:1 for the body-text pairs that need it).
+    '--ng-surface': 'rgba(245,241,233,0.92)',
     '--ng-surface-2': 'rgba(250,249,245,0.94)',
     '--ng-panel': '#FAF9F5', // ivory docked panels
     '--ng-panel-2': '#F0EEE6', // recessed panel
@@ -119,7 +127,7 @@ const THEMES: Record<ThemeMode, ThemeVars> = {
     '--ng-fg-subtle': '#928E85',
     '--ng-fg-rgb': '20 20 19', // ink — legible foreground/hairline on clay surfaces
     '--ng-recess-rgb': '41 37 36', // warm brown-black recessed wells
-    '--ng-glass-bg': 'rgba(255,255,255,0.82)',
+    '--ng-glass-bg': 'rgba(245,241,233,0.82)', // same warm-ivory softening as --ng-surface above
     '--ng-glass-border': 'rgba(20,20,19,0.12)',
     '--ng-elevate': '0 12px 34px rgba(80,60,45,0.14)', // warm claymorphism shadow
     // Deep terracotta (not the bright #D97757 fill) so it doubles as text/link

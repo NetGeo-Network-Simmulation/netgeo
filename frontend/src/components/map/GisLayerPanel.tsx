@@ -11,7 +11,7 @@
  * overlays. Toggled open via the Layers button in MapView.
  */
 import { useEffect, useRef, useState } from 'react';
-import { Layers, ChevronRight, X, Lock } from 'lucide-react';
+import { Layers, ChevronRight, X, Lock, WifiOff } from 'lucide-react';
 import { useMapStore } from '@/store/mapStore';
 import { GIS_GROUPS, GIS_LAYERS, type GisLayerGroup } from '@/config/gisLayers';
 import { cn } from '@/lib/cn';
@@ -143,6 +143,14 @@ export function GisLayerPanel() {
                               aria-label={layer.label}
                             />
                             <span className="flex-1 truncate">{layer.label}</span>
+                            {layer.requiresInternet && (
+                              <span
+                                className="flex items-center text-fg/30"
+                                title="Requires internet — fetches from a public API, fails silently offline"
+                              >
+                                <WifiOff className="h-2.5 w-2.5" aria-label="Requires internet" />
+                              </span>
+                            )}
                             {planned && (
                               <span
                                 className="flex items-center gap-0.5 text-[8px] uppercase text-fg/25"

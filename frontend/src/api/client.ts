@@ -219,6 +219,9 @@ export interface MapsStatus {
   attribution: string | null;
   min_zoom?: number | null;
   max_zoom?: number | null;
+  /** "pbf" = vector MBTiles (OFFLINE-MAP-4); anything else/absent = raster. */
+  format?: string | null;
+  vector_layers?: unknown[] | null;
 }
 
 export const mapsApi = {

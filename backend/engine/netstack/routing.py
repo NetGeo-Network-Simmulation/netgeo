@@ -175,8 +175,8 @@ class LfibEntry:
 @dataclass(slots=True)
 class AdjSidEntry:
     """One SR adjacency-SID: pop the label and send out this specific L2
-    adjacency (NG-SIM-09). Written by SrProcess from the LDP-learned neighbor
-    table, read by :meth:`Router._mpls_forward`."""
+    adjacency (NG-SIM-09). Written by SrProcess from OSPF's own Full-neighbor
+    table (A5 -- no longer LDP's), read by :meth:`Router._mpls_forward`."""
 
     out_iface: str
     nh_mac: str
@@ -372,17 +372,24 @@ class Nptv6Mapping:
     store per-flow; a binding table would fake statefulness this protocol
     doesn't have.
 
-    Only word-aligned prefixes up to /48 are supported (the RFC's own
-    worked example, and the common real-world default). RFC 6296 §3.7's
-    longer-prefix (/49-/64) IID-search algorithm is not implemented.
-    # ponytail: add §3.7 if a /49-/64 deployment is ever needed.
+    Prefixes /1-/64 are supported. RFC 6296 §3.4: for /48-or-shorter, the
+    checksum-adjustment always lands in word 3 (bits 48-63, the subnet
+    field) — *not* in a length-dependent word; an earlier version of this
+    class used ``plen // 16`` as the target word, which only happens to
+    equal 3 at exactly /48 and is wrong for /16 and /32. §3.5/§3.7: for
+    /49-/64, the adjustment lands in the first IID word (bits 64-127,
+    inspected 64..79, 80..95, 96..111, 112..127 in order) that is not
+    0xFFFF; if all four are 0xFFFF there is no word left to adjust and the
+    datagram is untranslatable (``_translate`` returns ``None``).
     """
 
     internal: IPv6Network
     external: IPv6Network
     inside_ifaces: frozenset[str]
     outside_iface: str
-    _word_idx: int = field(init=False, repr=False)
+    _full_words: int = field(init=False, repr=False)
+    _rem_bits: int = field(init=False, repr=False)
+    _long_prefix: bool = field(init=False, repr=False)
     _adjustment: int = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -393,30 +400,55 @@ class Nptv6Mapping:
                 f"/{self.external.prefixlen}"
             )
         plen = self.internal.prefixlen
-        if plen > 48 or plen % 16:
+        if not 1 <= plen <= 64:
             raise ValueError(
-                "NPTv6 here supports word-aligned prefixes up to /48 "
-                f"(/16, /32, /48); got /{plen}"
+                f"NPTv6 supports prefix lengths /1-/64 (RFC 6296 §3.4/§3.5); got /{plen}"
             )
-        self._word_idx = plen // 16
-        inner_sum = _ones_sum(_v6_words(self.internal.network_address)[: self._word_idx])
-        outer_sum = _ones_sum(_v6_words(self.external.network_address)[: self._word_idx])
+        self._full_words, self._rem_bits = divmod(plen, 16)
+        self._long_prefix = plen > 48
+        # §3.1: sum the /64-zero-extended prefix words. ``.network_address``
+        # already zero-fills every bit past plen, so words[:4] *is* that
+        # zero-extension regardless of how short or unaligned plen is.
+        inner_sum = _ones_sum(_v6_words(self.internal.network_address)[:4])
+        outer_sum = _ones_sum(_v6_words(self.external.network_address)[:4])
         # sub1(a, b) per RFC 6296 appendix: a + ~b (one's complement).
         self._adjustment = _ones_add(inner_sum, (~outer_sum) & 0xFFFF)
 
-    def _translate(self, addr: IPv6Address, new_prefix: IPv6Network, outbound: bool) -> IPv6Address:
+    def _translate(
+        self, addr: IPv6Address, new_prefix: IPv6Network, outbound: bool
+    ) -> IPv6Address | None:
         words = _v6_words(addr)
-        words[: self._word_idx] = _v6_words(new_prefix.network_address)[: self._word_idx]
+        new_words = _v6_words(new_prefix.network_address)
+        # §3.2/§3.3: overwrite exactly `plen` bits of the prefix. For
+        # non-word-aligned lengths (/49, /56, /60, ...) the boundary word is
+        # split bitwise; this never reaches words 4-7 (max plen is /64), so
+        # the IID is always untouched by this step.
+        words[: self._full_words] = new_words[: self._full_words]
+        if self._rem_bits:
+            idx = self._full_words
+            mask = (0xFFFF << (16 - self._rem_bits)) & 0xFFFF
+            words[idx] = (new_words[idx] & mask) | (words[idx] & ~mask & 0xFFFF)
+
+        if self._long_prefix:
+            target = next((j for j in (4, 5, 6, 7) if words[j] != 0xFFFF), None)
+            if target is None:
+                return None  # §3.7: no adjustable IID word — drop
+        else:
+            target = 3  # §3.4: fixed subnet-id word for /48-or-shorter
+
         adj = self._adjustment if outbound else (~self._adjustment) & 0xFFFF
-        words[self._word_idx] = _ones_add(words[self._word_idx], adj)
+        result = _ones_add(words[target], adj)
+        words[target] = 0 if result == 0xFFFF else result  # §3.2/§3.3
         return _v6_from_words(words)
 
-    def to_external(self, addr: IPv6Address) -> IPv6Address:
-        """Internal -> external (source rewrite on egress)."""
+    def to_external(self, addr: IPv6Address) -> IPv6Address | None:
+        """Internal -> external (source rewrite on egress); ``None`` if
+        RFC 6296 §3.7's IID search fails (all four words 0xFFFF)."""
         return self._translate(addr, self.external, outbound=True)
 
-    def to_internal(self, addr: IPv6Address) -> IPv6Address:
-        """External -> internal (destination rewrite on ingress)."""
+    def to_internal(self, addr: IPv6Address) -> IPv6Address | None:
+        """External -> internal (destination rewrite on ingress); ``None``
+        if RFC 6296 §3.7's IID search fails (all four words 0xFFFF)."""
         return self._translate(addr, self.internal, outbound=False)
 
 
@@ -578,6 +610,8 @@ class Router(L3Device):
         # Services
         self.dhcp_pools: list[DhcpPool] = []
         self.dns_zone: dict[str, IPv4Address] = {}
+        self.dns_zone6: dict[str, IPv6Address] = {}     # AAAA records (optional)
+        self.dns64_prefix: IPv6Network | None = None    # DNS64 (RFC 6147); None = disabled
         # Dynamic routing processes (duck-typed: .on_packet(net, iface, pkt),
         # .start(net), .on_iface_change(net))
         self.processes: list = []
@@ -750,11 +784,12 @@ class Router(L3Device):
             self._mpls_forward(net, iface, payload)
             return
         if isinstance(payload, MPLS_L2_PDUS):
-            # LDP + SR ride raw L2 (no IP), dispatched here like IS-IS. Pass the
+            # LDP rides raw L2 (no IP), dispatched here like IS-IS. Pass the
             # whole frame so the process can learn the L2 next hop (src_mac).
-            # Each process ignores PDUs that aren't its own.
+            # SR (NG-SIM-09 A5) no longer has a PDU here -- it reads OSPF's
+            # opaque LSAs and arp_table instead, see protocols/sr.py.
             for proc in self.processes:
-                if getattr(proc, "proto", "") in ("ldp", "sr"):
+                if getattr(proc, "proto", "") == "ldp":
                     proc.on_frame(net, iface, frame)
             return
         if isinstance(payload, ISIS_PDUS):
@@ -1066,6 +1101,8 @@ class Router(L3Device):
                     if getattr(proc, "proto", "") in ("bgp", "l3vpn", "vxlan"):
                         proc.on_packet(net, iface, pkt)
                 return
+            self._handle_tcp(net, iface, pkt)
+            return
         if pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):
             udp = pkt.payload
             app = udp.payload
@@ -1156,6 +1193,11 @@ class Router(L3Device):
         ):
             if pkt.proto == PROTO_ICMPV6 and isinstance(pkt.payload, Icmpv6Message):
                 self._handle_icmpv6(net, iface, pkt, pkt.payload)
+            elif pkt.proto == PROTO_UDP and isinstance(pkt.payload, UdpSegment):
+                udp = pkt.payload
+                app = udp.payload
+                if isinstance(app, DnsMessage) and udp.dst_port == 53 and app.op == "query":
+                    self._dns_serve6(net, iface, pkt, udp, app)
             return
         if pkt.dst.is_multicast or pkt.dst.is_link_local:
             return  # never forwarded off-link
@@ -1188,7 +1230,12 @@ class Router(L3Device):
             and in_iface.name == self.nptv6.outside_iface
             and pkt.dst in self.nptv6.external
         ):
-            pkt.dst = self.nptv6.to_internal(pkt.dst)
+            translated = self.nptv6.to_internal(pkt.dst)
+            if translated is None:
+                net.record_drop("nptv6_untranslatable")
+                self._send_icmpv6_error(net, pkt, icmp_type=1, code=0)
+                return
+            pkt.dst = translated
 
         resolved = self.egress_for6(pkt.dst, flow_key_v6(pkt))
         if resolved is None:
@@ -1206,7 +1253,12 @@ class Router(L3Device):
             and out.name == self.nptv6.outside_iface
             and pkt.src in self.nptv6.internal
         ):
-            pkt.src = self.nptv6.to_external(pkt.src)
+            translated = self.nptv6.to_external(pkt.src)
+            if translated is None:
+                net.record_drop("nptv6_untranslatable")
+                self._send_icmpv6_error(net, pkt, icmp_type=1, code=0)
+                return
+            pkt.src = translated
 
         if not self._acl_permits(self.acl_out.get(out.name), pkt):
             net.record_drop("acl_deny_out")
@@ -1485,6 +1537,22 @@ class Router(L3Device):
         self.nat64_inside = set(inside)
         self.nat64_outside = outside
 
+    def enable_dns64(self, prefix: IPv6Network = NAT64_WELLKNOWN_PREFIX) -> None:
+        """DNS64 resolver role (RFC 6147): an AAAA query with no real AAAA
+        but a real A gets a synthesized AAAA back, the A embedded in
+        ``prefix`` the same way :func:`_nat64_embed` does for NAT64 traffic.
+        Only the well-known /96 validates — this engine's NAT64 hop
+        (``_forward6``) only ever recognizes ``NAT64_WELLKNOWN_PREFIX``, so
+        a synthesized address outside it could never actually reach the
+        translator.
+        ponytail: a configurable Network-Specific Prefix (RFC 6052 §3.1,
+        32/40/48/56/64-bit lengths) needs NAT64 itself to accept one first —
+        add DNS64 support for those lengths alongside it.
+        """
+        if prefix != NAT64_WELLKNOWN_PREFIX:
+            raise ValueError("DNS64 here only supports the well-known /96 prefix")
+        self.dns64_prefix = prefix
+
     def _nat64_l4_out(
         self, l4: Icmpv6Message | UdpSegment | TcpSegment | Any
     ) -> tuple[str, int, IcmpMessage | UdpSegment | TcpSegment] | None:
@@ -1714,7 +1782,34 @@ class Router(L3Device):
             ),
         )
 
-    # ----- DNS server -----------------------------------------------------------------------
+    # ----- DNS server (+ DNS64, RFC 6147) -----------------------------------------------------
+    # RFC 6147 §5.1.4: a "real" AAAA in this range must be treated as though
+    # it were absent (fall through to synthesis if possible) — the mandatory
+    # default of the SHOULD-exclude list. The rest of §5.1.4 (site
+    # Pref64::/n, loopback/multicast, an operator-configured exclude list)
+    # needs config surface this slice doesn't add.
+    # ponytail: add the rest of §5.1.4 if a lab scenario needs it.
+    _DNS64_EXCLUDED_V6 = IPv6Network("::ffff:0:0/96")
+
+    def _dns_answer(self, qname: str, qtype: str) -> tuple[str | None, str]:
+        """Local-zone lookup (+ DNS64 synthesis for AAAA). Returns
+        ``(answer, rcode)``; ``rcode`` is "nxdomain" only when ``qname`` has
+        no record of *any* type — a name that exists but lacks this type is
+        NODATA: ``rcode="noerror"`` with ``answer=None`` (RFC 2308 §2.2)."""
+        qname = qname.lower()
+        rcode = "noerror" if (qname in self.dns_zone or qname in self.dns_zone6) else "nxdomain"
+        if qtype != "AAAA":
+            answer = self.dns_zone.get(qname)
+            return (str(answer) if answer else None), rcode
+        real6 = self.dns_zone6.get(qname)
+        if real6 is not None and real6 not in self._DNS64_EXCLUDED_V6:
+            return str(real6), rcode
+        if self.dns64_prefix is not None:
+            v4 = self.dns_zone.get(qname)
+            if v4 is not None:
+                return str(_nat64_embed(v4)), "noerror"
+        return None, rcode
+
     def _dns_serve(
         self,
         net: Network,
@@ -1723,7 +1818,7 @@ class Router(L3Device):
         udp: UdpSegment,
         query: DnsMessage,
     ) -> None:
-        answer = self.dns_zone.get(query.qname.lower())
+        answer, rcode = self._dns_answer(query.qname, query.qtype)
         self.send_ip(
             net,
             Ipv4Packet(
@@ -1737,7 +1832,40 @@ class Router(L3Device):
                     payload=DnsMessage(
                         op="response",
                         qname=query.qname,
-                        answer=str(answer) if answer else None,
+                        qtype=query.qtype,
+                        answer=answer,
+                        rcode=rcode,
+                        xid=query.xid,
+                    ),
+                ),
+            ),
+        )
+
+    def _dns_serve6(
+        self,
+        net: Network,
+        iface: Interface,
+        pkt: Ipv6Packet,
+        udp: UdpSegment,
+        query: DnsMessage,
+    ) -> None:
+        answer, rcode = self._dns_answer(query.qname, query.qtype)
+        self.send_ip6(
+            net,
+            Ipv6Packet(
+                src=pkt.dst,
+                dst=pkt.src,
+                proto=PROTO_UDP,
+                hop_limit=64,
+                payload=UdpSegment(
+                    src_port=53,
+                    dst_port=udp.src_port,
+                    payload=DnsMessage(
+                        op="response",
+                        qname=query.qname,
+                        qtype=query.qtype,
+                        answer=answer,
+                        rcode=rcode,
                         xid=query.xid,
                     ),
                 ),

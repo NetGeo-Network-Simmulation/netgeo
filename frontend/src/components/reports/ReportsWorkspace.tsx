@@ -133,39 +133,12 @@ export function ReportsWorkspace() {
 
   return (
     <div className="absolute inset-0 flex bg-surface" role="region" aria-label="Reports Center">
-      {/* Left: download actions. This column's own background/border-r bleed
-          to x=0 (AppShell); its content gets pl-[116px] — 16px past the
-          floating rail's x=100 right edge — so the buttons never render
-          under the rail (same convention the card grid used before this
-          layout, see theme/shell.ts). Narrow and top-aligned on purpose: the
-          less width this column and the cards column on the right both
-          claim, the more is left for the document in the middle. */}
-      <div className="flex w-[300px] shrink-0 flex-col border-r border-fg/10 bg-panel">
-        <div className="flex flex-col gap-2 pt-4 pr-4 pb-4 pl-[116px]">
-          <button
-            onClick={() => window.print()}
-            disabled={!canDownload}
-            className="flex items-center gap-2 rounded border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-          >
-            <Printer className="h-[18px] w-[18px] shrink-0" aria-hidden />
-            Download PDF
-          </button>
-          <button
-            onClick={downloadHtml}
-            disabled={!canDownload}
-            className="flex items-center gap-2 rounded border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-          >
-            <Code2 className="h-[18px] w-[18px] shrink-0" aria-hidden />
-            Download HTML
-          </button>
-          <span className="mt-2 rounded border border-fg/10 bg-recess/30 px-3 py-1.5 text-center font-mono text-[12px] text-fg/60">
-            Template: Standard
-          </span>
-        </div>
-      </div>
-
-      {/* Center: the document itself — the page's actual focal point. */}
-      <main className="ng-scroll min-w-0 flex-1 overflow-y-auto bg-recess/20 p-8">
+      {/* Center: the document itself — the page's actual focal point. Now
+          the first column after the rail (leader review 2026-09-20: the
+          Export card moved into the right column, per Surya's "atau bisa
+          dipindah ke kanan" suggestion), so it carries the pl-[116px]
+          rail-clearance inset the old left column used to own. */}
+      <main className="ng-scroll min-w-0 flex-1 overflow-y-auto bg-recess/20 pt-8 pr-8 pb-8 pl-[116px]">
         {selected === 'summary' ? (
           <SummaryPreview loading={reportQ.isLoading} error={reportQ.error} html={reportQ.data} />
         ) : (
@@ -173,21 +146,53 @@ export function ReportsWorkspace() {
         )}
       </main>
 
-      {/* Right: report type cards, one per row — a narrower rail than the
-          old 2-column grid so the document keeps most of the width. No page
-          title either — the Reports tab in TopBar's sub-nav already carries
-          this page's identity (root gets aria-label="Reports Center" above
-          instead). `p-4` matches the left column's inset so both rails start
-          their content at the same 16px offset from the corner instead of
-          the old py-6/pr-6 (24px) that made the left column read as
-          centered rather than pinned. flex-1 + min-h-0 here sizes this as a
-          SCROLL VIEWPORT (needed so 4 cards never overflow a short window),
-          not a stretch target — cards pack at the default flex-start (top)
-          with no h-full/justify-between on them or on this wrapper, so any
-          leftover height stays empty below the cards, never divided into
-          them. */}
+      {/* Right: export card + report type cards, one column — reads as
+          rail | preview | export+reports (Surya QA 2026-09-20). The Export
+          card is just the first item in the same scroll region as the
+          ReportCard list, so a short window scrolls the whole column
+          together instead of needing a second, independent scroll area. No
+          page title either — the Reports tab in TopBar's sub-nav already
+          carries this page's identity (root gets aria-label="Reports Center"
+          above instead). flex-1 + min-h-0 sizes this as a SCROLL VIEWPORT
+          (needed so export + 4 cards never overflow a short window), not a
+          stretch target — items pack at the default flex-start (top) with
+          no h-full/justify-between, so any leftover height stays empty
+          below the cards, never divided into them. */}
       <div className="flex w-[300px] shrink-0 flex-col border-l border-fg/10 bg-panel">
         <div className="ng-scroll flex min-h-0 flex-1 flex-col justify-start gap-3 overflow-y-auto p-4">
+          {/* Grouped into one card (rounded-xl border, small caps label)
+              instead of raw buttons floating on the panel background — the
+              pattern already used elsewhere (Suggested Actions in Problem
+              Center, ReportCard below). "Template: Standard" is a pill chip,
+              matching the rounded-full meta-chip language established by
+              OverlayChips/FilterChip, instead of a plain rectangular label
+              (Surya QA 2026-09-20: "floating as a bare left-aligned stack"). */}
+          <div className="rounded-xl border border-fg/10 bg-recess/20 p-3">
+            <h3 className="mb-2 px-0.5 text-[11px] font-medium uppercase tracking-wider text-fg/45">Export</h3>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => window.print()}
+                disabled={!canDownload}
+                className="flex items-center gap-2 rounded-lg border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              >
+                <Printer className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                Download PDF
+              </button>
+              <button
+                onClick={downloadHtml}
+                disabled={!canDownload}
+                className="flex items-center gap-2 rounded-lg border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              >
+                <Code2 className="h-[18px] w-[18px] shrink-0" aria-hidden />
+                Download HTML
+              </button>
+            </div>
+            <div className="mt-2.5 flex w-fit items-center gap-1.5 rounded-full border border-fg/10 bg-recess/40 px-3 py-1 font-mono text-[11px] text-fg/60">
+              <span className="h-1.5 w-1.5 rounded-full bg-fg/25" aria-hidden />
+              Template: Standard
+            </div>
+          </div>
+
           {REPORTS.map((r) => (
             <ReportCard key={r.id} report={r} active={r.id === selected} onSelect={() => r.available && setSelected(r.id)} />
           ))}

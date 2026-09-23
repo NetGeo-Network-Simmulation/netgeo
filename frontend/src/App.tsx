@@ -16,7 +16,7 @@
 import { useEffect, useRef } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AppShell } from '@/components/shell/AppShell';
-import { NativeTitleBar } from '@/components/shell/NativeTitleBar';
+import { ResizeHandles, useWindowChrome } from '@/components/shell/NativeTitleBar';
 import { LoginPage } from '@/components/LoginPage';
 import { projectsApi } from '@/api/client';
 import { useUiStore } from '@/store/uiStore';
@@ -24,14 +24,12 @@ import { useTopologyStore } from '@/store/topologyStore';
 import { useAuthStore } from '@/store/authStore';
 import { useTopologyChannel } from '@/hooks/useTopologyChannel';
 import { useCollaboration } from '@/hooks/useCollaboration';
-import { useIsNativeShell, useIsMaximized } from '@/hooks/useNativeShell';
 import { applyTheme } from '@/theme/tokens';
 import { cn } from '@/lib/cn';
 
 export default function App() {
   const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
-  const isNative = useIsNativeShell();
-  const [isMaximized] = useIsMaximized();
+  const { isNative, isMaximized, api } = useWindowChrome();
   const theme = useUiStore((s) => s.theme);
   const projectId = useUiStore((s) => s.projectId);
   const setProject = useUiStore((s) => s.setProject);
@@ -113,7 +111,7 @@ export default function App() {
         isNative && isMaximized && 'ng-native-frame--maximized',
       )}
     >
-      <NativeTitleBar />
+      {isNative && api && <ResizeHandles api={api} />}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         {isAuthenticated ? <AppShell projectName={projectName} conn={conn} /> : <LoginPage />}
       </div>

@@ -38,7 +38,7 @@ export function ModeSwitch() {
 
   return (
     <div
-      className="flex items-center rounded-md border border-fg/10 bg-fg/5 p-0.5"
+      className="flex shrink-0 items-center rounded-md border border-fg/10 bg-fg/5 p-0.5"
       role="group"
       aria-label="Lab mode"
     >
@@ -77,14 +77,21 @@ function ModeButton({
     <button
       onClick={onClick}
       title={title}
+      aria-label={label}
       aria-pressed={active}
       className={cn(
-        'flex items-center gap-1.5 rounded px-2 py-1 text-xs transition-colors',
+        'flex items-center gap-1.5 whitespace-nowrap rounded px-2 py-1 text-xs transition-colors',
         active ? 'bg-accent text-accent-fg' : 'text-fg/50 hover:text-fg/80',
       )}
     >
-      <Icon className="h-3.5 w-3.5" />
-      <span className="hidden md:inline">{label}</span>
+      <Icon className="h-3.5 w-3.5 shrink-0" />
+      {/* Icon-only below 2xl (same floor as SubNavStrip's tabs, leader
+          review 2026-09-20): at md (768px) this was showing full text at
+          every width the row actually has to survive, which is what still
+          overflowed the NATIVE window at 1280 — its 3 title-bar buttons
+          (132px) eat into the same 1280px budget the browser-mode header
+          doesn't have to pay. aria-label above keeps the accessible name. */}
+      <span className="hidden whitespace-nowrap 2xl:inline">{label}</span>
     </button>
   );
 }

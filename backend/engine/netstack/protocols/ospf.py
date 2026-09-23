@@ -53,12 +53,21 @@ LSA P-1c):
   cost into its other areas — without it, a Type-5 arriving elsewhere has
   no path to compute to the ASBR and the external route can't install
   there;
-- dead-interval neighbor expiry, LSA re-origination and route withdrawal.
+- dead-interval neighbor expiry, LSA re-origination and route withdrawal;
+- **Opaque LSAs** (RFC 5250, Type-10/area-scope only): a generic carrier
+  flooded by the same machinery as every other LSA above, storage/seq/
+  change-detection included. Used today for Segment Routing (RFC 8665, A5,
+  see ``protocols/sr.py``) via two opaque types: RI (opaque type 4, RFC 7770
+  sec 2.1.5 -- SRGB) and Extended Prefix (opaque type 7, RFC 7684 -- Prefix-
+  SID). OSPF itself is a dumb carrier here: ``originate_routing_info_lsa``/
+  ``originate_extended_prefix_lsa`` are called *by* SrProcess, not
+  spontaneously.
 
-Not modelled (documented): NSSA/stub area types and Type-7 LSAs, LSA
-aging/refresh, virtual links, authentication, OSPFv3, ExStart/Exchange/
-Loading (LSAs sync in one shot on Full), non-zero Type-5 forwarding address,
-and external route tags.
+Not modelled (documented): NSSA/stub area types and Type-7 (NSSA External)
+LSAs -- not to be confused with *opaque type* 7 above, a same-numbered but
+unrelated field, see ``OpaqueLsa``'s docstring -- LSA aging/refresh, virtual
+links, authentication, OSPFv3, ExStart/Exchange/Loading (LSAs sync in one
+shot on Full), non-zero Type-5 forwarding address, and external route tags.
 """
 from __future__ import annotations
 
@@ -236,7 +245,48 @@ class AsbrSummaryLsa:
         return AsbrSummaryLsa(self.router_id, self.seq, self.asbr_id, self.metric)
 
 
-Lsa = RouterLsa | SummaryLsa | NetworkLsa | AsExternalLsa | AsbrSummaryLsa
+@dataclass(slots=True)
+class OpaqueLsa:
+    """Generic Type-10 (area-scope) Opaque LSA (RFC 5250 sec 3/4), the carrier
+    for the Segment Routing extensions (RFC 8665, A5): Routing Information
+    (RFC 7770 sec 2.1.5, **opaque type 4** -- SRGB) and Extended Prefix
+    (RFC 7684, **opaque type 7** -- Prefix-SID). Do not confuse this with
+    "LSA Type-7" (NSSA external, RFC 3101) -- that's a different LSA *type*
+    number entirely; every opaque LSA here is LSA type 10, distinguished by
+    the ``opaque_type`` field carried *inside* it.
+
+    Real OSPF packs ``opaque_type<<24 | opaque_id`` into one 32-bit Link
+    State ID (RFC 5250 sec 3); modelled here as the two fields directly --
+    nothing in this engine parses a wire-format LS ID, so packing one would
+    only add an unpack step nobody needs.
+
+    ``tlvs`` is opaque_type-specific:
+    - type 4 (RI): ``{"sr_algorithm": [0], "srgb_base": int, "srgb_range": int}``
+      -- algorithm 0 = SPF (RFC 8665 sec 3.1, the only one this engine runs).
+    - type 7 (Extended Prefix): ``{"prefix": "a.b.c.d/nn", "sid_index": int,
+      "flags": {"N": bool, "NP": bool}}`` -- N = node-SID (sec 4.1), NP =
+      no-PHP (sec 4.2).
+    """
+
+    router_id: str
+    opaque_type: int      # 4 = Routing Information, 7 = Extended Prefix
+    opaque_id: int
+    seq: int
+    tlvs: dict = field(default_factory=dict)
+
+    @property
+    def key(self) -> str:
+        return f"opq|{self.opaque_type}|{self.opaque_id}|{self.router_id}"
+
+    @property
+    def wire_size(self) -> int:
+        return 24 + 4 * len(self.tlvs)
+
+    def copy(self) -> OpaqueLsa:
+        return OpaqueLsa(self.router_id, self.opaque_type, self.opaque_id, self.seq, dict(self.tlvs))
+
+
+Lsa = RouterLsa | SummaryLsa | NetworkLsa | AsExternalLsa | AsbrSummaryLsa | OpaqueLsa
 
 
 @dataclass(slots=True)
@@ -313,6 +363,10 @@ class OspfProcess:
         self._my_externals: dict[str, AsExternalLsa] = {}
         # asbr_id -> our originated Type-4 (ABR only, change detection)
         self._my_asbr_summaries: dict[tuple[int, str], AsbrSummaryLsa] = {}
+        # our own RI opaque LSA (SRGB), set once SR calls originate_routing_info_lsa
+        self._my_ri: OpaqueLsa | None = None
+        # prefix -> our own Extended-Prefix opaque LSA (change detection, A5)
+        self._my_ext_prefix: dict[str, OpaqueLsa] = {}
         self._seq = 0
         self._started = False
         self._spf_pending = False
@@ -862,6 +916,66 @@ class OspfProcess:
             self._my_asbr_summaries[(area, asbr)] = dead
             self._area_db(area)[dead.key] = dead
             self._flood(net, dead, area, exclude_rid=None)
+
+    # ----- Segment Routing opaque LSAs (RFC 8665, A5) -------------------------
+    def originate_routing_info_lsa(self, net: Network, srgb_base: int, srgb_range: int) -> None:
+        """RI opaque LSA (RFC 7770 sec 2.1.5, Type-10/opaque-type-4): advertises
+        this router's SR-Algorithm + SRGB (RFC 8665 sec 3.1/5.1-5.2) into every
+        area it touches. Called by a sibling SrProcess (not spontaneously --
+        OSPF itself has no notion of SR); a no-op once the SRGB stops changing,
+        same pattern as every other self-originated LSA here."""
+        tlvs = {"sr_algorithm": [0], "srgb_base": srgb_base, "srgb_range": srgb_range}
+        if self._my_ri is not None and self._my_ri.tlvs == tlvs:
+            return
+        self._seq += 1
+        lsa = OpaqueLsa(self.router_id, opaque_type=4, opaque_id=0, seq=self._seq, tlvs=tlvs)
+        self._my_ri = lsa
+        for area in self.my_areas():
+            self._area_db(area)[lsa.key] = lsa.copy()
+            self._flood(net, lsa, area, exclude_rid=None)
+
+    def originate_extended_prefix_lsa(
+        self, net: Network, prefix: str, sid_index: int, *, node: bool = True, no_php: bool = False
+    ) -> None:
+        """Extended Prefix opaque LSA (RFC 7684, Type-10/opaque-type-7): carries
+        a Prefix-SID sub-TLV (RFC 8665 sec 4.1) -- index, N-flag (node-SID) and
+        NP-flag (no-PHP, sec 4.2) -- for one of this router's own prefixes
+        (typically its loopback).
+
+        ponytail: ``opaque_id`` is fixed at 0, so only one Extended-Prefix-LSA
+        per router is representable today (this engine's SR only ever
+        advertises the loopback's node-SID). A second SR-enabled prefix on the
+        same router would collide on this LSA's key -- upgrade: hash the
+        prefix into ``opaque_id`` if that's ever needed."""
+        tlvs = {"prefix": prefix, "sid_index": sid_index, "flags": {"N": node, "NP": no_php}}
+        current = self._my_ext_prefix.get(prefix)
+        if current is not None and current.tlvs == tlvs:
+            return
+        self._seq += 1
+        lsa = OpaqueLsa(self.router_id, opaque_type=7, opaque_id=0, seq=self._seq, tlvs=tlvs)
+        self._my_ext_prefix[prefix] = lsa
+        for area in self.my_areas():
+            self._area_db(area)[lsa.key] = lsa.copy()
+            self._flood(net, lsa, area, exclude_rid=None)
+
+    def opaque_rows(self) -> list[dict]:
+        """``show ip ospf database opaque-area``: every opaque LSA in every
+        area this router touches, our own included."""
+        seen: dict[str, Lsa] = {}
+        for area in self.my_areas():
+            for lsa in self._area_db(area).values():
+                if isinstance(lsa, OpaqueLsa):
+                    seen[lsa.key] = lsa
+        return [
+            {
+                "opaque_type": lsa.opaque_type,
+                "opaque_id": lsa.opaque_id,
+                "router_id": lsa.router_id,
+                "seq": lsa.seq,
+                "tlvs": dict(lsa.tlvs),
+            }
+            for lsa in sorted(seen.values(), key=lambda l: (l.opaque_type, l.opaque_id, l.router_id))
+        ]
 
     def _flood(
         self, net: Network, lsa: Lsa, area: int, exclude_rid: str | None

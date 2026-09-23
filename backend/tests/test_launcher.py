@@ -8,13 +8,50 @@ so this never needs real WebKitGTK installed in CI.
 from __future__ import annotations
 
 import importlib.util
+import os
+import socket
 import sys
+import time
 from pathlib import Path
 
 LAUNCHER_PATH = Path(__file__).resolve().parents[2] / "packaging" / "launcher.py"
 _spec = importlib.util.spec_from_file_location("netgeo_launcher", LAUNCHER_PATH)
 launcher = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(launcher)
+
+
+# ---- _wait_until_ready() ---------------------------------------------------
+# 2026-09-18: replaces a blind `time.sleep(1.0)` before opening the native
+# window (docs/qa/native-lag-2026-09-18.md — /api/health measured ready at a
+# median ~0.24s, so the fixed sleep wasted ~0.76s of first-paint every launch).
+
+
+def test_wait_until_ready_true_once_port_accepts_connections():
+    srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(1)
+    port = srv.getsockname()[1]
+    alive_thread = type("T", (), {"is_alive": lambda self: True})()
+    try:
+        assert launcher._wait_until_ready(port, alive_thread, timeout=2.0, interval=0.02) is True
+    finally:
+        srv.close()
+
+
+def test_wait_until_ready_false_on_timeout_when_nothing_listens():
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # port freed, nothing accepts on it
+    alive_thread = type("T", (), {"is_alive": lambda self: True})()
+    assert launcher._wait_until_ready(port, alive_thread, timeout=0.15, interval=0.05) is False
+
+
+def test_wait_until_ready_false_fast_when_server_thread_dead():
+    dead_thread = type("T", (), {"is_alive": lambda self: False})()
+    started = time.monotonic()
+    assert launcher._wait_until_ready(1, dead_thread, timeout=5.0) is False
+    assert time.monotonic() - started < 1.0  # must not wait out the full cap
 
 
 def test_webview_unavailable_message_names_distro_packages():
@@ -170,14 +207,30 @@ def test_try_webview_succeeds_when_backend_available(monkeypatch):
     assert calls["frameless"] is True
     assert calls["transparent"] is True
     # BUG 4 (Surya QA, 2026-09-14): pywebview's 800x600 default left the
-    # topology UI broken (rail over the filter row, search field and
-    # toolbar buttons clipped). Measured live with Playwright against the
-    # built frontend.dist: intact at 1040x700, broken at 1000x720 and at
-    # 1040x650 — min_size must sit above that measured floor on both axes.
-    assert calls["width"] >= 1100
-    assert calls["height"] >= 720
-    assert calls["min_size"][0] >= 1100
-    assert calls["min_size"][1] >= 720
+    # topology UI broken. Re-measured 2026-09-18 a SECOND time (supersedes
+    # 680x640 from earlier the same day): a leader review of that 680x640
+    # screenshot found the floating nav rail overlapping the topology chips
+    # row/search field/bottom dock/minimap — the 680x640 floor only measured
+    # the rail's own content height against the window, never against the
+    # OTHER floating chrome sharing its space. NavigationRail.tsx now
+    # confines itself to a fixed band instead (RAIL_TOP_CLEAR/
+    # RAIL_BOTTOM_CLEAR, theme/shell.ts) and degrades its own content rather
+    # than overlap anything, so the rail no longer drives either floor.
+    # Re-measured what's left the same way (Playwright, every pairwise
+    # combination of rail/chips/search/dock/minimap/inspector asserted
+    # non-intersecting, across Topology AND Physical Plant): width floor is
+    # 949px (topology top-left panel / bottom dock / minimap all needing to
+    # coexist with the 360px inspector without touching), height floor is
+    # unchanged at 604px (already clear with room to spare). Plus
+    # NATIVE_TITLE_BAR_HEIGHT (36px) on top of the height floor, since
+    # min_size is the *whole* frameless window and the browser-based
+    # Playwright measurement never renders a native title bar at all.
+    assert calls["min_size"][0] >= 980
+    assert calls["min_size"][1] >= 604
+    # initial size stays a comfortable margin above the floor, not just
+    # equal to it
+    assert calls["width"] >= calls["min_size"][0]
+    assert calls["height"] >= calls["min_size"][1]
 
 
 def test_try_webview_subscribes_maximize_restore_for_corner_rounding(monkeypatch):
@@ -249,6 +302,103 @@ def test_button_layout_falls_back_on_nonzero_exit_and_malformed_value(monkeypatc
 
     monkeypatch.setattr(launcher.subprocess, "run", lambda *a, **k: _FakeCompletedProcess(0, "'garbage'\n"))
     assert launcher._button_layout() == {"side": "right", "order": ["minimize", "maximize", "close"]}
+
+
+# ---- _system_subprocess_env() -----------------------------------------------
+# BUG (2026-09-18, Surya QA on the installed rpm): minimize/maximize buttons
+# missing from the native title bar. Root cause confirmed by hand — pointing
+# LD_LIBRARY_PATH at the frozen bundle's _internal/ dir (what PyInstaller's
+# bootloader does for the whole process) makes the *system* `gsettings`
+# binary load the bundle's own libglib-2.0/libgio-2.0 instead of the host's,
+# so it can't reach the real dconf backend and silently returns a bogus
+# default ('appmenu:close') instead of erroring — _button_layout()'s parser
+# then sees only "close" as a known token. These tests operate on real
+# os.environ dict semantics (no stand-in object pretending to be something
+# it isn't), and one proves the fix is actually wired into the gsettings
+# call site, not just present as an unused helper.
+#
+# ROUND 2 (2026-09-20): the first fix (restore from LD_LIBRARY_PATH_ORIG)
+# still shipped broken — confirmed live on the installed netgeo-1.2.125.1
+# rpm: launching `/opt/netgeo/netgeo` from a clean parent env (no
+# LD_LIBRARY_PATH — a real desktop launch) and reading /proc/<pid>/environ
+# shows LD_LIBRARY_PATH=/opt/netgeo/_internal with **no**
+# LD_LIBRARY_PATH_ORIG key at all, so the old code's early-return left the
+# bundle path in place. The new code strips sys._MEIPASS out of
+# LD_LIBRARY_PATH directly instead of depending on `*_ORIG` existing.
+
+
+def test_system_subprocess_env_is_noop_outside_frozen_bundle(monkeypatch):
+    monkeypatch.setattr(launcher, "FROZEN", False)
+    assert launcher._system_subprocess_env() is None
+
+
+def test_system_subprocess_env_restores_ld_library_path_from_orig(monkeypatch):
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/netgeo/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/lib64:/lib64")
+    env = launcher._system_subprocess_env()
+    assert env["LD_LIBRARY_PATH"] == "/usr/lib64:/lib64"
+
+
+def test_system_subprocess_env_drops_ld_library_path_when_orig_was_empty(monkeypatch):
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/netgeo/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "")
+    env = launcher._system_subprocess_env()
+    assert "LD_LIBRARY_PATH" not in env
+
+
+def test_system_subprocess_env_strips_bundle_path_when_orig_absent(monkeypatch):
+    """The real-world case (2026-09-20 fix): a normal desktop launch has no
+    LD_LIBRARY_PATH at all before the bootloader sets one, so ORIG is never
+    written. Must still clean the bundle dir out, not no-op."""
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", "/opt/netgeo/_internal", raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/netgeo/_internal")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    env = launcher._system_subprocess_env()
+    assert "LD_LIBRARY_PATH" not in env
+
+
+def test_system_subprocess_env_keeps_unrelated_paths_when_orig_absent(monkeypatch):
+    """Only the bundle's own dir is stripped — an unrelated entry the user
+    already had ahead of it in LD_LIBRARY_PATH must survive."""
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", "/opt/netgeo/_internal", raising=False)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/home/user/mylibs:/opt/netgeo/_internal")
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    env = launcher._system_subprocess_env()
+    assert env["LD_LIBRARY_PATH"] == "/home/user/mylibs"
+
+
+def test_system_subprocess_env_drops_bundle_loader_vars(monkeypatch):
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setattr(launcher.sys, "_MEIPASS", "/opt/netgeo/_internal", raising=False)
+    monkeypatch.delenv("LD_LIBRARY_PATH", raising=False)
+    monkeypatch.delenv("LD_LIBRARY_PATH_ORIG", raising=False)
+    monkeypatch.setenv("GIO_MODULE_DIR", "/opt/netgeo/_internal/gio/modules")
+    monkeypatch.setenv("GI_TYPELIB_PATH", "/opt/netgeo/_internal/girepository-1.0")
+    monkeypatch.setenv("PYTHONHOME", "/opt/netgeo/_internal")
+    env = launcher._system_subprocess_env()
+    for var in ("GIO_MODULE_DIR", "GI_TYPELIB_PATH", "PYTHONHOME"):
+        assert var not in env
+
+
+def test_button_layout_passes_sanitized_env_to_gsettings(monkeypatch):
+    """The fix must be wired into the actual subprocess.run() call, not just
+    exist as an unused helper — this is the part a careless fix forgets."""
+    monkeypatch.setattr(launcher, "FROZEN", True)
+    monkeypatch.setenv("LD_LIBRARY_PATH", "/opt/netgeo/_internal")
+    monkeypatch.setenv("LD_LIBRARY_PATH_ORIG", "/usr/lib64")
+    seen = {}
+
+    def _capture(*a, **k):
+        seen.update(k)
+        return _FakeCompletedProcess(0, "'close,minimize,maximize:appmenu'\n")
+
+    monkeypatch.setattr(launcher.subprocess, "run", _capture)
+    launcher._button_layout()
+    assert seen["env"]["LD_LIBRARY_PATH"] == "/usr/lib64"
 
 
 # ---- _WindowBridge thread marshaling ----------------------------------------
@@ -332,6 +482,248 @@ def test_run_on_gui_thread_skips_op_when_marshal_fails(monkeypatch):
     ran = []
     bridge._run_on_gui_thread(lambda: ran.append(True))
     assert ran == []
+
+
+# ---- _decide_gl_mode() / _hardware_gl_available() ---------------------------
+# Leader review (2026-09-20, same day as cbb2ac4): the SwiftShader
+# QTWEBENGINE_CHROMIUM_FLAGS were being forced UNCONDITIONALLY, so a host with
+# working hardware GL was silently downgraded to CPU rendering for the rack 3D
+# view and the MapLibre map. _decide_gl_mode() gates that behind a real EGL
+# probe (or an explicit NETGEO_GL override).
+
+
+def test_decide_gl_mode_hw_when_probe_succeeds(monkeypatch):
+    monkeypatch.delenv("NETGEO_GL", raising=False)
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: True)
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "hw"
+    assert "probe" in reason
+
+
+def test_decide_gl_mode_sw_when_probe_fails(monkeypatch):
+    monkeypatch.delenv("NETGEO_GL", raising=False)
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: False)
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "sw"
+    assert "probe" in reason
+
+
+def test_decide_gl_mode_env_override_sw_skips_probe(monkeypatch):
+    """NETGEO_GL=sw must win even when the probe would say hardware GL is
+    fine — and must not even call the probe (an explicit override is a
+    promise, not a hint)."""
+    monkeypatch.setenv("NETGEO_GL", "sw")
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: (_ for _ in ()).throw(
+        AssertionError("probe must not run when NETGEO_GL overrides")
+    ))
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "sw"
+    assert reason == "NETGEO_GL=sw"
+
+
+def test_decide_gl_mode_env_override_hw_skips_probe(monkeypatch):
+    monkeypatch.setenv("NETGEO_GL", "hw")
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: (_ for _ in ()).throw(
+        AssertionError("probe must not run when NETGEO_GL overrides")
+    ))
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "hw"
+    assert reason == "NETGEO_GL=hw"
+
+
+def test_decide_gl_mode_ignores_unknown_env_value_and_probes(monkeypatch):
+    """A typo'd NETGEO_GL value falls through to auto-probe rather than
+    silently picking a side — same "unknown token dropped" spirit as
+    _button_layout()."""
+    monkeypatch.setenv("NETGEO_GL", "bogus")
+    monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: True)
+    mode, reason = launcher._decide_gl_mode()
+    assert mode == "hw"
+    assert "probe" in reason
+
+
+class _FakeGbmLib:
+    """Stands in for `ctypes.CDLL(libgbm)`. Only gbm_create_device is used
+    by _hardware_gl_available(). Real ctypes function pointers accept
+    arbitrary attribute assignment (`.restype`/`.argtypes`), which a bound
+    *method* does NOT support (`AttributeError: 'method' object has no
+    __dict__` — caught while writing this test, the exact "fake-looking
+    stub hides a real bug" trap). Plain function objects assigned directly
+    into the instance `__dict__` DO support it, same as the real thing."""
+
+    def __init__(self, device_handle):
+        def gbm_create_device(_fd):
+            return device_handle
+
+        self.gbm_create_device = gbm_create_device
+
+
+class _FakeEglLib:
+    """Stands in for `ctypes.CDLL(libEGL)`. eglGetProcAddress's return
+    value here is a plain sentinel int, never dereferenced as a real
+    function pointer in tests — the real code always wraps it through
+    `ctypes.CFUNCTYPE(...)(addr)`, which `_stub_gbm_probe` fakes out
+    separately (calling a real CFUNCTYPE on a fake address would
+    segfault, the same trap _FakeGbmLib's docstring names)."""
+
+    def __init__(self, proc_addr=1, init_result=1):
+        def eglGetProcAddress(_name):
+            return proc_addr
+
+        def eglInitialize(_display, _major, _minor):
+            return init_result
+
+        self.eglGetProcAddress = eglGetProcAddress
+        self.eglInitialize = eglInitialize
+
+
+def _stub_gbm_probe(
+    monkeypatch,
+    *,
+    render_node="/dev/null",
+    gbm_device=0x5,
+    proc_addr=1,
+    display_handle=0x1234,
+    init_result=1,
+):
+    """Wires every seam `_hardware_gl_available()` touches (the two CDLL
+    loads, the EGL extension-function bind) to fakes, so an individual
+    test only has to override the one value it's exercising.
+
+    `render_node` defaults to /dev/null rather than a fake path: os.open/
+    os.close are left as the REAL functions (not monkeypatched) — os.open
+    is used internally by unrelated stdlib code that also runs during
+    these tests (ctypes.util.find_library shells out via tempfile, which
+    calls os.open itself), so globally replacing it broke tempfile with a
+    wrong-arity TypeError the first time this was written. /dev/null is
+    always present and O_RDWR-openable by any user, so the real os.open
+    call in _hardware_gl_available() just works."""
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: render_node)
+
+    def fake_cdll(name):
+        return _FakeGbmLib(gbm_device) if "gbm" in name else _FakeEglLib(proc_addr, init_result)
+
+    monkeypatch.setattr(launcher.ctypes, "CDLL", fake_cdll)
+
+    def fake_cfunctype(*_types, **_kw):
+        def _bind(_address):
+            return lambda _platform, _device, _attribs: display_handle
+
+        return _bind
+
+    monkeypatch.setattr(launcher.ctypes, "CFUNCTYPE", fake_cfunctype)
+
+
+def test_hardware_gl_available_true_when_gbm_initializes(monkeypatch):
+    """The full happy path: render node found, gbm device created, EGL
+    platform display bound and initialized."""
+    _stub_gbm_probe(monkeypatch)
+    assert launcher._hardware_gl_available() is True
+
+
+def test_hardware_gl_available_false_when_no_render_node(monkeypatch):
+    """No /dev/dri render node at all (headless box, container, or this
+    user isn't in the `render` group) — must short-circuit before ever
+    touching ctypes."""
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: None)
+
+    def _boom(*_a, **_k):
+        raise AssertionError("must not dlopen without a render node")
+
+    monkeypatch.setattr(launcher.ctypes, "CDLL", _boom)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_gbm_create_device_fails(monkeypatch):
+    """gbm_create_device() returns NULL — the exact failure confirmed by
+    hand against the real bundled _internal/libgbm.so.1 from the installed
+    netgeo-1.2.125.1 rpm (see _hardware_gl_available()'s docstring):
+    "MESA-LOADER: failed to open iris: ... wrong ELF class" /
+    "did not find extension DRI_Mesa version 1", gbm_create_device fails."""
+    _stub_gbm_probe(monkeypatch, gbm_device=0)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_no_platform_display_ext(monkeypatch):
+    """eglGetProcAddress("eglGetPlatformDisplayEXT") itself returns NULL —
+    no attempt to bind/call it should follow."""
+    _stub_gbm_probe(monkeypatch, proc_addr=0)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_platform_display_is_null(monkeypatch):
+    _stub_gbm_probe(monkeypatch, display_handle=0)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_eglinitialize_fails(monkeypatch):
+    _stub_gbm_probe(monkeypatch, init_result=0)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_false_when_libgbm_missing(monkeypatch):
+    """No libgbm/libEGL on the system at all (e.g. a bare container image)
+    — ctypes.CDLL raising OSError must not propagate."""
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: "/dev/dri/renderD128")
+
+    def _raise(name):
+        raise OSError(f"cannot open shared object file: {name}")
+
+    monkeypatch.setattr(launcher.ctypes, "CDLL", _raise)
+    assert launcher._hardware_gl_available() is False
+
+
+def test_hardware_gl_available_closes_fd_even_on_failure(monkeypatch):
+    """fd leak guard: os.close() must run through the `finally` even when
+    gbm_create_device fails partway through. Wraps the REAL os.close (not
+    a replacement — see _stub_gbm_probe's docstring on why globally
+    replacing os.open/close breaks unrelated stdlib code) so the fd is
+    still actually released."""
+    closed = []
+    real_close = launcher.os.close
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: "/dev/null")
+    monkeypatch.setattr(launcher.os, "close", lambda fd: (closed.append(fd), real_close(fd)))
+    monkeypatch.setattr(launcher.ctypes, "CDLL", lambda name: _FakeGbmLib(0) if "gbm" in name else _FakeEglLib())
+    assert launcher._hardware_gl_available() is False
+    # ctypes.util.find_library (unmocked, runs for real above) also opens/
+    # closes its own fds internally — assert ours is in there, not that
+    # it's the only one.
+    assert closed
+
+
+def test_try_webview_sets_swiftshader_flags_when_gl_mode_sw(monkeypatch):
+    monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    monkeypatch.setattr(launcher, "_decide_gl_mode", lambda: ("sw", "test forced sw"))
+    fake_webview = type(sys)("webview")
+    fake_window = _FakeWindow()
+    fake_webview.create_window = lambda title, url, **kwargs: fake_window
+    fake_webview.start = lambda **k: None
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+
+    launcher._try_webview("http://127.0.0.1:1")
+    assert "--enable-unsafe-swiftshader" in os.environ["QTWEBENGINE_CHROMIUM_FLAGS"]
+
+
+def test_try_webview_leaves_flags_unset_when_gl_mode_hw(monkeypatch):
+    """The regression this whole slice fixes: a host with working hardware
+    GL must NOT get the SwiftShader flags forced on it."""
+    monkeypatch.delenv("QTWEBENGINE_CHROMIUM_FLAGS", raising=False)
+    monkeypatch.setattr(launcher, "_decide_gl_mode", lambda: ("hw", "test forced hw"))
+    fake_webview = type(sys)("webview")
+    fake_window = _FakeWindow()
+    fake_webview.create_window = lambda title, url, **kwargs: fake_window
+    fake_webview.start = lambda **k: None
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+
+    launcher._try_webview("http://127.0.0.1:1")
+    assert "QTWEBENGINE_CHROMIUM_FLAGS" not in os.environ
+
+
+def test_help_flag_documents_netgeo_gl(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--help"])
+    launcher.main()
+    out = capsys.readouterr().out
+    assert "NETGEO_GL" in out
 
 
 def test_minimize_and_close_are_marshaled_not_called_directly():

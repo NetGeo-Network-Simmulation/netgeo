@@ -21,6 +21,7 @@ from engine.netstack.routing import Router
 from engine.netstack.switching import Switch
 
 if TYPE_CHECKING:  # pragma: no cover
+    from engine.netstack.iface import Interface
     from engine.netstack.network import Network
 
 MIKROTIK_NOS = {"routeros"}
@@ -114,8 +115,14 @@ class CliSession:
             return self._cisco_show(low)
         if words[0] == "ping" and len(words) >= 2:
             return self._do_ping(words[1], count=int(words[2]) if len(words) > 2 else 4)
+        if words[0] == "nslookup" and len(words) >= 2:
+            return self._do_nslookup(words[1], words[2] if len(words) > 2 else "A")
         if words[0] in ("traceroute", "tracert") and len(words) >= 2:
             return self._do_traceroute(words[1])
+        if words[0] == "tcp" and len(words) >= 4 and words[1] == "connect":
+            return self._do_tcp_connect(words[2], words[3])
+        if words[0] == "tcp" and len(words) >= 3 and words[1] == "close":
+            return self._do_tcp_close(words[2], words[3] if len(words) >= 4 else None)
         return f"% Invalid input: {line}\n"
 
     def _cisco_config(self, line: str, words: list[str]) -> str:
@@ -161,6 +168,27 @@ class CliSession:
                 if words[1] == "access" and words[2] == "vlan" and len(words) == 4:
                     iface.access_vlan = int(words[3])
                     return ""
+            if words[0] == "shape" and len(words) >= 3 and words[1] == "average":
+                if iface.attachment is None:
+                    return "% Interface has no link attached\n"
+                try:
+                    bps = float(words[2])
+                    burst = int(words[3]) if len(words) > 3 else iface.attachment.qos.shaper_burst_bytes
+                except ValueError as exc:
+                    return f"% {exc}\n"
+                iface.attachment.qos.shaper_bps = bps
+                iface.attachment.qos.shaper_burst_bytes = burst
+                return ""
+            if line.lower() == "no shape average":
+                if iface.attachment is not None:
+                    iface.attachment.qos.shaper_bps = None
+                return ""
+        if words[0] == "tcp" and len(words) >= 3 and words[1] == "listen":
+            try:
+                dev.tcp_listen(int(words[2]))
+            except ValueError as exc:
+                return f"% {exc}\n"
+            return ""
         if words[0] == "ip" and len(words) >= 4 and words[1] == "route":
             if not isinstance(dev, Router):
                 return "% This device does not route\n"
@@ -289,11 +317,11 @@ class CliSession:
             vx = self._proc("vxlan")
             if vx is None:
                 return "% EVPN/VXLAN is not enabled\n"
-            rows = ["Type  VNI     MAC                  VTEP             Origin"]
+            rows = ["Type  VNI     MAC                  VTEP             Origin   ESI"]
             for r in vx.evpn_rows():
                 rows.append(
-                    f"T{r['type']:<4} {r['vni']:<7} {r['mac']:<20} "
-                    f"{r['vtep']:<16} {r['origin']}"
+                    f"T{r['type']:<4} {r['vni']!s:<7} {r['mac']:<20} "
+                    f"{r['vtep']:<16} {r['origin']:<8} {r['esi']}"
                 )
             return "\n".join(rows) + "\n"
         if low.startswith(("show vxlan vtep", "show nve peers")):
@@ -361,6 +389,17 @@ class CliSession:
                 rows.append(
                     f"{n['router_id']:<15} {n['state']:<7} {n.get('area', 0):<5} "
                     f"{n['ip']:<16} {n['iface']}"
+                )
+            return "\n".join(rows) + "\n"
+        if low.startswith("show ip ospf database opaque-area"):
+            proc = self._proc("ospf")
+            if proc is None:
+                return "% OSPF is not running\n"
+            rows = ["Opaque Type  Opaque ID  Advertising Router  Seq  TLVs"]
+            for o in proc.opaque_rows():
+                rows.append(
+                    f"{o['opaque_type']:<12} {o['opaque_id']:<10} {o['router_id']:<19} "
+                    f"{o['seq']:<4} {o['tlvs']}"
                 )
             return "\n".join(rows) + "\n"
         if low.startswith(("show isis neighbors", "show clns neighbors")):
@@ -454,6 +493,23 @@ class CliSession:
             return "\n".join(rows) + "\n"
         if low.startswith("show qos interface"):
             return self._show_qos_iface(low.split())
+        if low.startswith(("show dns64", "show ip dns64")):
+            if not isinstance(dev, Router):
+                return "% Not a router\n"
+            if dev.dns64_prefix is None:
+                return "DNS64: disabled\n"
+            return f"DNS64: enabled, prefix {dev.dns64_prefix}\n"
+        if low.startswith("show tcp brief") or low == "show tcp":
+            if not isinstance(dev, (Host, Router)):
+                return "% No TCP on this device\n"
+            rows = ["Local Address:Port      Remote Address:Port     State"]
+            for c in dev.tcp_conns.values():
+                retx = f" retx={c.retx_total}({c.retx_kind})" if c.retx_total else ""
+                rows.append(
+                    f"{c.local_ip!s}:{c.local_port:<10} "
+                    f"{c.remote_ip!s}:{c.remote_port:<10} {c.state}{retx}"
+                )
+            return "\n".join(rows) + "\n"
         return "% Invalid show command\n"
 
     def _show_qos_iface(self, words: list[str]) -> str:
@@ -476,20 +532,38 @@ class CliSession:
                 tx = i.counters.tx_by_class[ci]
                 dr = i.counters.drops_queue_by_class[ci]
                 rows.append(f"{i.name:<16} {state}  {cname}    {tx:<10} {dr}")
+            rows.append(f"  shaper: {self._shaper_row(i)}")
         return "\n".join(rows) + "\n"
+
+    def _shaper_row(self, i: Interface) -> str:
+        """One summary line: rate, current tokens, frames still queued, and
+        how many times this interface has had to delay a frame for tokens."""
+        qos = i.attachment.qos if i.attachment is not None else None
+        if qos is None or not qos.shaper_bps:
+            return "off"
+        tokens = i._shaper_tokens
+        tok_str = f"{int(tokens)}B" if tokens is not None else f"{qos.shaper_burst_bytes}B (full)"
+        queued = sum(len(q) for q in i._queues)
+        return (
+            f"{qos.shaper_bps:.0f}bps burst={qos.shaper_burst_bytes}B "
+            f"tokens={tok_str} queued={queued} delayed={i.counters.shaper_delays}"
+        )
 
     def _cisco_help(self) -> str:
         return (
-            "exec: enable | ping <ip|ipv6> [count] | traceroute <ip|ipv6>\n"
+            "exec: enable | ping <ip|ipv6> [count] | traceroute <ip|ipv6> |\n"
+            "      tcp connect <ip> <port> | tcp close <ip> [port]\n"
             "show: version | ip interface brief | interfaces | ip route | arp |\n"
             "      ipv6 route | ipv6 neighbors | ipv6 interface brief |\n"
             "      mac address-table | vlan | spanning-tree | ip ospf neighbor |\n"
             "      isis neighbors | isis database | ip bgp summary |\n"
-            "      ip nat translations | access-lists | dhcp binding\n"
+            "      ip nat translations | access-lists | dhcp binding | tcp brief\n"
             "config: enable; conf t; interface <name>; ip address <cidr>;\n"
             "        ipv6 address <cidr>; [no] shutdown; switchport mode access|trunk;\n"
-            "        switchport access vlan <n>; ip route <prefix> <next-hop>;\n"
-            "        ipv6 route <prefix> <next-hop> [iface]; ipv6 nd ra enable; end\n"
+            "        switchport access vlan <n>; shape average <bps> [burst-bytes];\n"
+            "        ip route <prefix> <next-hop>;\n"
+            "        ipv6 route <prefix> <next-hop> [iface]; ipv6 nd ra enable;\n"
+            "        tcp listen <port>; end\n"
         )
 
     # =========================== MikroTik-like ==================================
@@ -636,6 +710,23 @@ class CliSession:
         )
         return "\n".join(lines) + "\n"
 
+    def _do_nslookup(self, qname: str, qtype: str = "A") -> str:
+        qtype = qtype.upper()
+        if qtype not in ("A", "AAAA"):
+            return f"% unsupported query type {qtype}\n"
+        if not isinstance(self.device, Host):
+            return "% nslookup requires a host\n"
+        if self.device.dns_server is None and self.device.dns_server6 is None:
+            return "% no DNS server configured\n"
+        result: list = [None]
+        self.net.start()
+        self.device.resolve(self.net, qname, qtype=qtype, callback=result.append)
+        self.net.run_for(5.0)
+        answer = result[-1]
+        if answer is None:
+            return f"** server can't find {qname}: NXDOMAIN\n"
+        return f"Name:    {qname}\nAddress: {answer}\n"
+
     def _do_traceroute(self, target: str) -> str:
         try:
             dst = ip_address(target)
@@ -652,6 +743,34 @@ class CliSession:
             lines.append(f"  {hop['hop']:<3} {addr:<16} {rtt}")
         lines.append("Trace complete." if tr.reached else "Destination not reached.")
         return "\n".join(lines) + "\n"
+
+    def _do_tcp_connect(self, target: str, port: str) -> str:
+        try:
+            dst = ip_address(target)
+            dport = int(port)
+        except ValueError:
+            return f"% cannot resolve {target}:{port}\n"
+        try:
+            conn = self.net.tcp_connect(self.device.name, dst, dport)
+        except ValueError as exc:
+            return f"% {exc}\n"
+        reason = f" ({conn.close_reason})" if conn.close_reason else ""
+        return (
+            f"Trying {dst}:{dport} ...\n"
+            f"  state={conn.state}{reason} seq={conn.iss} ack={conn.irs}\n"
+        )
+
+    def _do_tcp_close(self, target: str, port: str | None) -> str:
+        try:
+            dst = ip_address(target)
+        except ValueError:
+            return f"% cannot resolve {target}\n"
+        try:
+            n = self.net.tcp_close(self.device.name, dst, int(port) if port else None)
+        except ValueError as exc:
+            return f"% {exc}\n"
+        suffix = f":{port}" if port else ""
+        return f"Closed {n} connection(s) to {dst}{suffix}\n"
 
     # ----- helpers -----------------------------------------------------------------
     def _proc(self, proto: str):
