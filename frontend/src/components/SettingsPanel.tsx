@@ -19,6 +19,7 @@ import {
   Package,
   Radio,
   Boxes,
+  Wifi,
 } from 'lucide-react';
 import { useUiStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
@@ -27,13 +28,21 @@ import { devicePacksApi, mapsApi, type ApiError, type DevicePack } from '@/api/c
 import { cn } from '@/lib/cn';
 import { Select } from '@/components/ui/Select';
 import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
+import {
+  type DistributionMode,
+  normalizeRemoteOrigin,
+  readRuntimeProfile,
+  readsRemoteBackend,
+  saveRuntimeProfile,
+} from '@/config/runtimeProfile';
 
 const SPEED_OPTIONS = [0.5, 1, 2, 4, 8].map((s) => ({ value: String(s), label: `${s}×` }));
 
-type Section = 'general' | 'nos' | 'devices' | 'packs' | 'account';
+type Section = 'general' | 'runtime' | 'nos' | 'devices' | 'packs' | 'account';
 
 const SECTIONS: { key: Section; label: string; icon: typeof Cpu }[] = [
   { key: 'general', label: 'General', icon: Monitor },
+  { key: 'runtime', label: 'Runtime', icon: Wifi },
   { key: 'nos', label: 'Network OS', icon: Package },
   { key: 'devices', label: 'Device Types', icon: Radio },
   { key: 'packs', label: 'Device Packs', icon: Boxes },
@@ -82,10 +91,133 @@ export function SettingsPanel() {
       {/* Content */}
       <div className="ng-scroll min-h-0 flex-1 overflow-auto p-5">
         {activeSection === 'general' && <GeneralSection />}
+        {activeSection === 'runtime' && <RuntimeSection />}
         {activeSection === 'nos' && <NosSection />}
         {activeSection === 'devices' && <DeviceTypesSection />}
         {activeSection === 'packs' && <DevicePacksSection />}
         {activeSection === 'account' && <AccountSection />}
+      </div>
+    </div>
+  );
+}
+
+const RUNTIME_MODES: {
+  mode: DistributionMode;
+  label: string;
+  description: string;
+  disabled?: boolean;
+}[] = [
+  {
+    mode: 'native-offline',
+    label: '1. Native full offline',
+    description: 'Local REST and socket. Install an MBTiles region to keep the map offline too.',
+  },
+  {
+    mode: 'native-google',
+    label: '2. Native + Google Maps',
+    description: 'Not available yet: Google Maps API and key handling have not been implemented.',
+    disabled: true,
+  },
+  {
+    mode: 'native-remote',
+    label: '3. Native + remote backend',
+    description: 'This native window uses the selected server for REST and WebSocket traffic.',
+  },
+  {
+    mode: 'headless',
+    label: '4. Headless',
+    description: 'Local REST and socket; relaunch with --no-window to use the browser UI.',
+  },
+  {
+    mode: 'full-online',
+    label: '5. Full online',
+    description: 'Use the selected server for REST and WebSocket traffic, or open it in a browser.',
+  },
+];
+
+function RuntimeSection() {
+  const [profile, setProfile] = useState(readRuntimeProfile);
+  const [error, setError] = useState<string | null>(null);
+  const remote = readsRemoteBackend(profile.mode);
+  const normalizedOrigin = normalizeRemoteOrigin(profile.remoteOrigin);
+
+  const apply = () => {
+    if (remote && !normalizedOrigin) {
+      setError('Enter an http:// or https:// server origin before applying this mode.');
+      return;
+    }
+    saveRuntimeProfile({ ...profile, remoteOrigin: normalizedOrigin ?? '' });
+    window.location.reload();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <SectionHeading>Distribution Runtime</SectionHeading>
+        <p className="mt-1 text-xs text-fg/45">
+          Choose how this client reaches NetGeo. Applying reloads the app so REST and WebSocket clients reconnect together.
+        </p>
+      </div>
+
+      <div className="space-y-2">
+        {RUNTIME_MODES.map((option) => {
+          const selected = profile.mode === option.mode;
+          return (
+            <button
+              key={option.mode}
+              type="button"
+              disabled={option.disabled}
+              onClick={() => setProfile((current) => ({ ...current, mode: option.mode }))}
+              className={cn(
+                'w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
+                selected
+                  ? 'border-accent bg-accent/10'
+                  : 'border-fg/10 bg-fg/5 hover:border-fg/25',
+                option.disabled && 'cursor-not-allowed opacity-45',
+              )}
+            >
+              <p className="text-sm font-medium text-fg/85">{option.label}</p>
+              <p className="mt-0.5 text-xs text-fg/45">{option.description}</p>
+            </button>
+          );
+        })}
+      </div>
+
+      {remote && (
+        <Row label="Remote server" description="Use the server origin only; /api and ws(s) are derived automatically.">
+          <input
+            value={profile.remoteOrigin}
+            onChange={(event) => setProfile((current) => ({ ...current, remoteOrigin: event.target.value }))}
+            placeholder="https://netgeo.example.com"
+            className={inputCls}
+          />
+        </Row>
+      )}
+
+      <div className="rounded-lg border border-fg/10 bg-fg/5 px-4 py-3 text-xs text-fg/55">
+        <span className="font-medium text-fg/80">Socket target: </span>
+        {remote && normalizedOrigin ? normalizedOrigin.replace(/^http/, 'ws') : 'local same-origin socket'}
+      </div>
+
+      {error && <p className="text-xs text-danger">{error}</p>}
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={apply}
+          className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg transition-colors hover:bg-accent-soft"
+        >
+          Apply and reconnect
+        </button>
+        {profile.mode === 'full-online' && normalizedOrigin && (
+          <button
+            type="button"
+            onClick={() => window.open(normalizedOrigin, '_blank', 'noopener,noreferrer')}
+            className="rounded-md border border-fg/10 bg-fg/5 px-3 py-1.5 text-xs text-fg/70 transition-colors hover:border-accent/50 hover:text-accent"
+          >
+            Open server in browser
+          </button>
+        )}
       </div>
     </div>
   );
