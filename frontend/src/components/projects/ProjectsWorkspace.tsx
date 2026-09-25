@@ -3,7 +3,7 @@
  * of every project + a Recently Opened table + a New project flow. Opening a
  * card selects it as the active workspace and drops into Topology.
  *
- * Reuses the existing REST surface — NO new backend:
+ * Reuses the existing REST surface:
  *  - `projectsApi.list()` for the grid (shares the ['projects'] cache with App),
  *  - `projectsApi.topology(id)` per card for real node/link counts (shares the
  *    ['topology', id] cache App already fills for the active project).
@@ -17,16 +17,22 @@
  * ponytail: counts fetch one topology per card (fine at self-hosted scale); the
  * upgrade path is a node/link count field on the /projects list payload.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ExternalLink, FolderKanban, Loader2, Network, Plus, Search } from 'lucide-react';
+import { Download, ExternalLink, FolderKanban, Loader2, MoreHorizontal, Network, Plus, Upload } from 'lucide-react';
 import { projectsApi } from '@/api/client';
 import type { Project } from '@/api/types';
 import { useUiStore } from '@/store/uiStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
+import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
 import { cn } from '@/lib/cn';
 
 const RECENT_KEY = 'netgeo.recentProjects';
+
+function errorMessage(error: unknown, fallback: string): string {
+  return typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string'
+    ? error.message : fallback;
+}
 
 function getRecent(): string[] {
   try {
@@ -74,13 +80,16 @@ export function ProjectsWorkspace() {
   const setViewMode = useUiStore((s) => s.setViewMode);
   const qc = useQueryClient();
 
-  const { data: projects, isLoading } = useQuery({
+  const { data: projects, isLoading, error: listError } = useQuery({
     queryKey: ['projects'],
     queryFn: () => projectsApi.list(),
     staleTime: 60_000,
   });
 
-  const [search, setSearch] = useState('');
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState<Project | null>(null);
+  const [busy, setBusy] = useState(false);
   const [recent, setRecent] = useState<string[]>(getRecent);
   const [creating, setCreating] = useState(false);
   const [newName, setNewName] = useState('');
@@ -101,12 +110,60 @@ export function ProjectsWorkspace() {
     },
   });
 
+  const importProject = async (file?: File) => {
+    if (!file) return;
+    setBusy(true);
+    setError('');
+    try {
+      const project = await projectsApi.importArchive(JSON.parse(await file.text()));
+      await qc.invalidateQueries({ queryKey: ['projects'] });
+      open(project.id);
+    } catch (e) {
+      setError(e instanceof SyntaxError ? 'Invalid JSON file.' : errorMessage(e, 'Import failed.'));
+    } finally {
+      setBusy(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  };
+
+  const exportProject = async (project: Project) => {
+    setError('');
+    try {
+      const archive = await projectsApi.archive(project.id);
+      const url = URL.createObjectURL(new Blob([JSON.stringify(archive, null, 2)], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `${project.name.replace(/[^a-z0-9-]+/gi, '-') || 'project'}.netgeo-archive.json`;
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (e) {
+      setError(errorMessage(e, 'Export failed.'));
+    }
+  };
+
+  const removeProject = async () => {
+    if (!deleting || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await projectsApi.remove(deleting.id);
+      const nextRecent = getRecent().filter((id) => id !== deleting.id);
+      setRecent(nextRecent);
+      localStorage.setItem(RECENT_KEY, JSON.stringify(nextRecent));
+      if (useUiStore.getState().projectId === deleting.id) setProject(null);
+      await qc.invalidateQueries({ queryKey: ['projects'] });
+      qc.removeQueries({ queryKey: ['topology', deleting.id] });
+      setDeleting(null);
+    } catch (e) {
+      setError(errorMessage(e, 'Delete failed.'));
+      setDeleting(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const list = projects ?? [];
   const byId = useMemo(() => new Map(list.map((p) => [p.id, p])), [list]);
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return q ? list.filter((p) => p.name.toLowerCase().includes(q)) : list;
-  }, [list, search]);
   const recentProjects = recent
     .map((id) => byId.get(id))
     .filter((p): p is Project => Boolean(p));
@@ -117,40 +174,27 @@ export function ProjectsWorkspace() {
           left-6 + 76px wide) — the page's own surface bleeds to x=0 (AppShell)
           but this scrolling column is real content, not a pannable canvas, so
           it needs a real gutter instead of rendering under the rail. */}
-      <div className="mx-auto w-full max-w-[1600px] pt-6 pr-6 pb-6 pl-[116px]">
-        {/* Page header */}
-        <div className="mb-8 flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <h1 className="font-display text-2xl font-bold text-fg">Projects</h1>
-            <p className="mt-1 text-sm text-fg/55">
-              Manage network topologies and simulation workspaces.
-            </p>
-          </div>
-          <div className="flex items-center gap-3">
-            <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-panel px-2.5 py-1.5">
-              <Search className="h-4 w-4 text-fg/40" aria-hidden />
-              <input
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder="Search projects…"
-                aria-label="Search projects"
-                className="w-44 bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
-              />
-            </label>
+      <div className="w-full pt-4 pr-6 pb-6 pl-[116px]">
+        <div className="glass mb-4 inline-flex flex-wrap items-center gap-2 rounded-xl border border-fg/12 p-1.5 shadow-glass">
+            <input ref={inputRef} type="file" accept=".json,application/json" className="hidden" aria-label="Import project archive" onChange={(e) => void importProject(e.target.files?.[0])} />
+            <button onClick={() => inputRef.current?.click()} disabled={busy} className="flex h-9 items-center gap-2 rounded-lg px-3 text-sm text-fg/80 hover:bg-fg/10 disabled:opacity-40">
+              <Upload className="h-4 w-4" aria-hidden /> Import project
+            </button>
             <button
               onClick={() => setCreating(true)}
-              className="flex items-center gap-2 rounded-lg bg-accent px-4 py-2 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-soft"
+              className="flex h-9 items-center gap-2 rounded-lg bg-accent px-3 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-soft"
             >
               <Plus className="h-4 w-4" aria-hidden /> New project
             </button>
-          </div>
         </div>
+
+        {(error || listError || createMut.error) && <p role="alert" className="mb-4 rounded-lg border border-danger/30 bg-danger/10 px-3 py-2 text-sm text-danger">{error || errorMessage(listError || createMut.error, 'Could not load projects.')}</p>}
 
         {isLoading ? (
           <div className="grid h-[50vh] place-items-center text-fg/50">
             <Loader2 className="h-6 w-6 animate-spin text-accent" />
           </div>
-        ) : list.length === 0 && !creating ? (
+        ) : listError ? null : list.length === 0 && !creating ? (
           <div className="relative h-[60vh]">
             <WorkspaceEmptyState
               icon={FolderKanban}
@@ -177,14 +221,9 @@ export function ProjectsWorkspace() {
                   }}
                 />
               )}
-              {filtered.map((p) => (
-                <ProjectCard key={p.id} project={p} onOpen={() => open(p.id)} />
+              {list.map((p) => (
+                <ProjectCard key={p.id} project={p} onOpen={() => open(p.id)} onExport={() => void exportProject(p)} onDelete={() => setDeleting(p)} />
               ))}
-              {filtered.length === 0 && !creating && (
-                <p className="col-span-full py-8 text-center text-sm text-fg/45">
-                  No projects match “{search}”.
-                </p>
-              )}
             </div>
 
             {recentProjects.length > 0 && (
@@ -212,27 +251,31 @@ export function ProjectsWorkspace() {
           </>
         )}
       </div>
+      {deleting && <ConfirmDialog title="Delete project?" message={`Delete “${deleting.name}” and all its saved network data? This cannot be undone.`} confirmLabel={busy ? 'Deleting…' : 'Delete project'} danger onConfirm={() => void removeProject()} onCancel={() => !busy && setDeleting(null)} />}
     </div>
   );
 }
 
-function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void }) {
+function ProjectCard({ project, onOpen, onExport, onDelete }: { project: Project; onOpen: () => void; onExport: () => void; onDelete: () => void }) {
   const counts = useCounts(project.id);
   return (
-    <button
-      onClick={onOpen}
-      aria-label={`Open ${project.name}`}
-      className="group relative flex flex-col gap-4 overflow-hidden rounded-xl border border-fg/10 bg-panel-2 p-5 text-left shadow-soft transition-colors hover:border-accent/40"
-    >
+    <div className="group relative flex flex-col gap-4 rounded-xl border border-fg/10 bg-panel-2 p-5 text-left shadow-soft transition-colors hover:border-accent/40">
       <div className="flex items-center gap-3">
         <span className="grid h-8 w-8 shrink-0 place-items-center rounded-md border border-fg/10 bg-recess/30">
           <Network className="h-4 w-4 text-accent" aria-hidden />
         </span>
-        <h3 className="truncate font-medium text-fg">{project.name}</h3>
+        <button onClick={onOpen} className="min-w-0 flex-1 truncate text-left font-medium text-fg hover:text-accent" aria-label={`Open ${project.name}`}>{project.name}</button>
+        <details className="relative">
+          <summary className="grid h-8 w-8 cursor-pointer list-none place-items-center rounded-lg text-fg/60 hover:bg-fg/10" aria-label={`Actions for ${project.name}`}><MoreHorizontal className="h-4 w-4" /></summary>
+          <div className="glass-strong absolute right-0 top-9 z-20 w-36 rounded-lg border border-fg/15 p-1 shadow-glass-lg">
+            <button onClick={onExport} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-fg hover:bg-fg/10"><Download className="h-3.5 w-3.5" /> Export</button>
+            <button onClick={onDelete} className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs text-danger hover:bg-danger/10">Delete</button>
+          </div>
+        </details>
       </div>
 
       {/* Schematic preview placeholder — no thumbnails are generated server-side. */}
-      <div className="relative grid h-28 place-items-center overflow-hidden rounded-lg border border-fg/10 bg-recess/25">
+      <button onClick={onOpen} aria-label={`Open ${project.name} workspace`} className="relative grid h-28 place-items-center overflow-hidden rounded-lg border border-fg/10 bg-recess/25">
         <Network className="h-8 w-8 text-fg/10" aria-hidden />
         <span className="absolute bottom-2 left-2 flex items-center gap-1.5 rounded border border-fg/10 bg-surface px-2 py-0.5 backdrop-blur-sm">
           <span className="h-1.5 w-1.5 rounded-full bg-success" aria-hidden />
@@ -244,14 +287,14 @@ function ProjectCard({ project, onOpen }: { project: Project; onOpen: () => void
             <ExternalLink className="h-4 w-4" aria-hidden /> Open workspace
           </span>
         </span>
-      </div>
+      </button>
 
       <div className="mt-auto grid grid-cols-3 gap-2 border-t border-fg/10 pt-3">
         <Meta label="Nodes" value={counts ? counts.nodes.toLocaleString() : '—'} />
         <Meta label="Links" value={counts ? counts.links.toLocaleString() : '—'} />
         <Meta label="Created" value={timeAgo(project.created_at)} />
       </div>
-    </button>
+    </div>
   );
 }
 

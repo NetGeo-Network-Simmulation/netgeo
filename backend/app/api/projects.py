@@ -75,6 +75,14 @@ async def get_project(project_id: str, r: Annotated[MemoryRepository, Depends(re
     return {**proj.model_dump(mode="json"), "capabilities": project_capabilities(proj.mode)}
 
 
+@router.delete("/projects/{project_id}", status_code=204)
+async def delete_project(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
+    try:
+        await r.delete_project(project_id)
+    except StoreNotFound as exc:
+        raise translate_not_found(exc) from exc
+
+
 @router.get("/projects/{project_id}/topology", response_model=Topology)
 async def get_topology(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     try:

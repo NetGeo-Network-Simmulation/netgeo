@@ -190,6 +190,24 @@ class MemoryRepository:
             self._save()
             return proj
 
+    async def delete_project(self, pid: str) -> None:
+        async with self._lock:
+            await self.get_project(pid)
+            node_ids = {n.id for n in self._nodes.values() if n.project_id == pid}
+            for attr in ("_nodes", "_links", "_scenarios", "_sites", "_racks",
+                         "_cables", "_fiber_paths", "_rf_studies", "_import_snapshots"):
+                items = getattr(self, attr)
+                for key, item in list(items.items()):
+                    if item.project_id == pid:
+                        del items[key]
+            for key, config in list(self._configs.items()):
+                if config.node_id in node_ids:
+                    del self._configs[key]
+            for node_id in node_ids:
+                self._configs_by_node.pop(node_id, None)
+            del self._projects[pid]
+            self._save()
+
     async def export_project(self, pid: str) -> dict:
         """Raw per-project entities for archival (NG-WS-03).
 
