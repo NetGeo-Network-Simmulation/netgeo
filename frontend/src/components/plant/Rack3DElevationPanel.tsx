@@ -128,7 +128,7 @@ export function Rack3DElevationPanel() {
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   // mutable view state the render loop reads every frame — deliberately not
   // React state: a 60 fps camera must not re-render the component tree.
-  const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: '' });
+  const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: '', focusY: null as number | null });
   // Real per-bay rack height in metres, keyed by rack id, from the backend's
   // `ru_height` — NOT the enclosure mesh's height (RACK_SPECS is a fixed
   // 42U shell regardless of the real rack). Camera framing (spanFor/
@@ -477,7 +477,11 @@ export function Rack3DElevationPanel() {
     // the look-at near the top of a 42U shell no matter how short the real
     // rack was, burying low-RU devices off-frame.
     const heights = Object.values(rackHeightRef.current);
-    const cy = (focusKey ? (rackHeightRef.current[focusKey] ?? 42 * U) : (heights.length ? Math.max(...heights) : 42 * U)) * 0.46;
+    const height = focusKey ? (rackHeightRef.current[focusKey] ?? 42 * U) : (heights.length ? Math.max(...heights) : 42 * U);
+    const halfView = (cam.top - cam.bottom) / 2;
+    const cy = focusKey && view.current.focusY != null
+      ? Math.max(Math.min(height - halfView * 0.75, view.current.focusY), halfView * 0.75)
+      : height * 0.46;
     const d = POV.dist, el = POV.elev;
     cam.position.set(
       cx + Math.sin(az) * Math.cos(el) * d,
@@ -534,13 +538,18 @@ export function Rack3DElevationPanel() {
 
     let raf = 0;
     let last = performance.now();
+    let wasAnimated = true;
     const loop = (now: number) => {
       raf = requestAnimationFrame(loop);
+      // Idle view: halve render submissions; gestures/camera easing still
+      // repaint within 33ms, while running cable/fan animation stays full-rate.
+      if (!view.current.anim && !wasAnimated && now - last < 1000 / 30) return;
       let dt = (now - last) / 1000;
       if (!Number.isFinite(dt) || dt < 0) dt = 0;
       last = now;
       const built = builtRef.current;
-      if (built) tick(built.registry, Math.min(0.05, dt), view.current.anim);
+      if (built && (view.current.anim || wasAnimated)) tick(built.registry, Math.min(0.05, dt), view.current.anim);
+      wasAnimated = view.current.anim;
       renderer.render(scene, cam);
     };
     raf = requestAnimationFrame(loop);
@@ -661,6 +670,7 @@ export function Rack3DElevationPanel() {
     const from = spanFor(POV.span, view.current.zoomed);
     view.current.zoomed = on;
     view.current.focusRack = (sel && builtRef.current?.registry.devices[sel]?.rackKey) || bays[0]?.key || '';
+    if (!on) view.current.focusY = null;
     const to = spanFor(POV.span, on);
     const t0 = performance.now();
     const step = () => {
@@ -836,7 +846,10 @@ export function Rack3DElevationPanel() {
       if (mode !== null || dragCtxRef.current.moveDevice.isPending) return;
       const built = builtRef.current;
       if (!built) return;
-      const devId = hitDevice(raycastFromEvent(e));
+      const hits = raycastFromEvent(e);
+      const picked = hits.find((h) => hitPort(h) != null || h.object.userData?.dev !== undefined);
+      if (picked && hitPort(picked)) return;
+      const devId = hitDevice(hits);
       if (!devId) return;
       const entry = built.registry.devices[devId];
       if (!entry) return;
@@ -900,6 +913,17 @@ export function Rack3DElevationPanel() {
       setStatus('Dibatalkan — tidak ada perubahan dikirim');
     };
 
+    const focusDevice = (devId: string) => {
+      const device = builtRef.current?.registry.devices[devId];
+      if (!device) return;
+      view.current.focusRack = device.rackKey;
+      view.current.focusY = 0.055 + (device.def.u - 1 + device.def.h / 2) * U;
+      selectDevice(devId);
+      setMode('cable');
+      setPick(null);
+      placeCamera();
+    };
+
     const onUp = (e: PointerEvent) => {
       const cand = dragRef.current;
       if (cand?.moved) {
@@ -926,6 +950,11 @@ export function Rack3DElevationPanel() {
           handlePortPick(port.dev, port.port);
           return;
         }
+        const device = hitDevice(hits);
+        if (device) {
+          focusDevice(device);
+          return;
+        }
         setStatus('Cable Mode: klik port, bukan chassis');
         return;
       }
@@ -943,8 +972,13 @@ export function Rack3DElevationPanel() {
         }
         return;
       }
+      const picked = hits.find((h) => hitPort(h) != null || h.object.userData?.dev !== undefined);
+      if (picked && hitPort(picked)) return;
       const devId = hitDevice(hits);
-      if (devId) { selectDevice(devId); return; }
+      if (devId) {
+        focusDevice(devId);
+        return;
+      }
 
       // No device under the click — an unplaced tray selection (no mesh of
       // its own to drag) places on a plain click instead (NG-PH3D P3 flow,
@@ -979,7 +1013,11 @@ export function Rack3DElevationPanel() {
     };
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') cancelDrag();
+      if (e.key === 'Escape') {
+        cancelDrag();
+        setMode(null);
+        setPick(null);
+      }
     };
     const onCancel = () => cancelDrag();
 
@@ -996,7 +1034,7 @@ export function Rack3DElevationPanel() {
       window.removeEventListener('keydown', onKeyDown);
       clearGhost();
     };
-  }, [mode, handlePortPick, handleAddDevice, selectDevice]);
+  }, [mode, handlePortPick, handleAddDevice, selectDevice, placeCamera]);
 
   const toggleMode = (id: Exclude<Mode, null>) => {
     setPick(null);

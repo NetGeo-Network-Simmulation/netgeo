@@ -239,12 +239,17 @@ function makeMaterials() {
   };
   // media jackets/boots live in their own map: one entry per MEDIA key, so a
   // lookup by media string cannot collide with a named part material.
-  const media: Record<string, { jk: THREE.MeshStandardMaterial; bt: THREE.MeshStandardMaterial }> = {};
+  const media: Record<string, { jk: THREE.MeshStandardMaterial; jkDim: THREE.MeshStandardMaterial; bt: THREE.MeshStandardMaterial }> = {};
   for (const [k, spec] of Object.entries(MEDIA)) {
+    const jacket = mat('jacket-' + k, spec.jacket, { roughness: 0.5, metalness: 0.1 });
     media[k] = {
-      jk: mat('jacket-' + k, spec.jacket, { roughness: 0.5, metalness: 0.1 }),
+      jk: jacket,
+      jkDim: jacket.clone(),
       bt: mat('boot-' + k, spec.boot, { roughness: 0.45, metalness: 0.15 }),
     };
+    media[k]!.jkDim.name = 'jacket-dim-' + k;
+    media[k]!.jkDim.transparent = true;
+    media[k]!.jkDim.opacity = 0.12;
   }
   return { ...m, media };
 }
@@ -589,6 +594,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   }
   for (const pair of Object.values(mats.media)) {
     track(pair.jk);
+    track(pair.jkDim);
     track(pair.bt);
   }
 
@@ -1775,6 +1781,8 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const geo = track(new THREE.TubeGeometry(curve as THREE.Curve<THREE.Vector3> & { getPointAt: (t: number) => THREE.Vector3 }, 140, spec.r, 8, false));
     const pair = mats.media[mediaKey]!;
     const mesh = new THREE.Mesh(geo, pair.jk);
+    mesh.userData.litMaterial = pair.jk;
+    mesh.userData.dimMaterial = pair.jkDim;
     mesh.name = 'cable-' + mediaKey + '-' + meta.name;
     mesh.userData.link = meta;
     root.add(mesh);
@@ -2248,10 +2256,7 @@ export function applyLabels(registry: Registry, on: boolean, sel: string | null)
 export function applySelection(registry: Registry, sel: string | null) {
   for (const c of registry.cables) {
     const on = !sel || (c.meta.devs && c.meta.devs.includes(sel));
-    const m = c.mesh.material as THREE.MeshStandardMaterial;
-    m.transparent = !!sel;
-    m.opacity = on ? 1 : 0.12;
-    m.needsUpdate = true;
+    c.mesh.material = on ? c.mesh.userData.litMaterial as THREE.Material : c.mesh.userData.dimMaterial as THREE.Material;
   }
 }
 

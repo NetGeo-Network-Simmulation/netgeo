@@ -202,6 +202,8 @@ export const projectsApi = {
   listPage: (params?: PageParams) => fetchPage<Project[]>('/projects', params),
   get: (id: string) => http.get<Project>(`/projects/${id}`).then((r) => r.data),
   create: (body: Partial<Project>) => http.post<Project>('/projects', body).then((r) => r.data),
+  importArchive: (archive: unknown) => http.post<Project>('/projects/import', archive).then((r) => r.data),
+  remove: (id: string) => http.delete(`/projects/${id}`).then(() => undefined),
   topology: (id: string) =>
     http.get<Topology>(`/projects/${id}/topology`).then((r) => r.data),
   /** Export the project as an NG-WS-03 archive envelope (used to capture an

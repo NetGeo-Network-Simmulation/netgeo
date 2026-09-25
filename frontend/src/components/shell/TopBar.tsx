@@ -34,25 +34,10 @@ interface TopBarProps {
   conn: ConnState;
 }
 
-/** NetGeo topology mark (logo.png): a hub node linked to three satellites,
- * in the primary accent. Inline SVG so it inherits theme + scales crisply. */
+/** Current product mark, shared with the installed app and favicon. */
 function NetGeoMark() {
   return (
-    <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-accent/15 ring-1 ring-inset ring-accent/30">
-      <svg viewBox="0 0 24 24" className="h-[18px] w-[18px] text-accent" fill="none" aria-hidden>
-        <g stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" opacity="0.9">
-          <line x1="12" y1="12" x2="12" y2="4.5" />
-          <line x1="12" y1="12" x2="5.5" y2="17.5" />
-          <line x1="12" y1="12" x2="18.5" y2="17.5" />
-        </g>
-        <g fill="currentColor">
-          <circle cx="12" cy="4.5" r="2.1" />
-          <circle cx="5.5" cy="17.5" r="2.1" />
-          <circle cx="18.5" cy="17.5" r="2.1" />
-        </g>
-        <circle cx="12" cy="12" r="2.8" fill="currentColor" />
-      </svg>
-    </span>
+    <img src="/netgeo.svg" alt="" className="h-7 w-7 shrink-0 rounded-lg" />
   );
 }
 
@@ -170,27 +155,23 @@ export function TopBar({ projectName, conn }: TopBarProps) {
       <div className="flex shrink-0 items-center gap-2 font-semibold">
         <NetGeoMark />
         <span className="hidden font-display text-sm tracking-tight sm:inline">NetGeo</span>
+        <span className="text-fg/25">/</span>
+        <span className="max-w-20 truncate text-xs font-normal text-fg/70 2xl:max-w-[160px]">{projectName}</span>
+        <span className={cn('hidden items-center gap-1 text-[11px] 2xl:inline-flex', dirty ? 'text-warning' : 'text-success')} title={dirty ? 'Unsaved local changes' : 'All changes saved'}>
+          {dirty ? <span className="h-1.5 w-1.5 rounded-full bg-warning" /> : <Check className="h-3.5 w-3.5" />}
+          {dirty ? 'Unsaved' : 'Saved'}
+        </span>
       </div>
 
       {/* Everything else: never wraps or clips (Surya 2026-09-18 — WPS-
           ribbon pattern). At comfortable widths this never visibly scrolls;
           below it, it scrolls instead of the controls disappearing off the
           right edge. */}
-      <HScrollToolbar className="flex-1 gap-2" onMouseDown={chrome.isNative ? noDrag : undefined}>
-        <span className="shrink-0 text-fg/25">/</span>
-        <span className="max-w-[160px] shrink-0 truncate text-fg/70">{projectName}</span>
-        <span
-          className={cn(
-            'hidden shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] md:inline-flex',
-            dirty ? 'text-warning' : 'text-success',
-          )}
-          title={dirty ? 'Unsaved local changes' : 'All changes saved'}
-        >
-          {dirty ? <span className="h-1.5 w-1.5 rounded-full bg-warning" /> : <Check className="h-3.5 w-3.5" />}
-          {dirty ? 'Unsaved' : 'Saved'}
-        </span>
-
+      <HScrollToolbar className="min-w-0 flex-1 gap-2" onMouseDown={chrome.isNative ? noDrag : undefined}>
         <SubNavStrip />
+      </HScrollToolbar>
+
+      <div className="flex min-w-0 shrink-0 items-center gap-1.5 whitespace-nowrap" onMouseDown={chrome.isNative ? noDrag : undefined}>
 
         {/* The most elastic item in the row (leader review 2026-09-20): was
             a fixed w-72/shrink-0, so every OTHER item had to fit around it
@@ -199,12 +180,12 @@ export function TopBar({ projectName, conn }: TopBarProps) {
             gives up width; xl+ gets its old full size back. */}
         <button
           onClick={() => openModal('command')}
-          className="flex w-28 min-w-[104px] shrink items-center gap-2 rounded-lg border border-fg/10 bg-fg/5 px-3 py-2 text-left text-xs text-fg/40 transition-colors hover:border-fg/20 hover:bg-fg/8 2xl:w-72 2xl:shrink-0"
+          className="flex h-8 w-8 items-center justify-center rounded-lg border border-fg/10 bg-fg/5 text-left text-xs text-fg/40 transition-colors hover:border-fg/20 hover:bg-fg/8 xl:w-28 xl:justify-start xl:gap-2 xl:px-3 2xl:w-64"
           aria-label="Open command palette"
         >
           <Search className="h-3.5 w-3.5 shrink-0" />
-          <span className="flex-1 truncate">Search devices, IPs, places, or run a command…</span>
-          <kbd className="hidden shrink-0 rounded border border-fg/15 px-1.5 py-0.5 font-mono text-[10px] sm:inline">⌘K</kbd>
+          <span className="hidden flex-1 truncate xl:inline">Search…</span>
+          <kbd className="hidden shrink-0 rounded border border-fg/15 px-1.5 py-0.5 font-mono text-[10px] 2xl:inline">⌘K</kbd>
         </button>
 
         <SimulationBar />
@@ -249,7 +230,7 @@ export function TopBar({ projectName, conn }: TopBarProps) {
             {clock.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </time>
         </div>
-      </HScrollToolbar>
+      </div>
 
       {/* Pinned, not scrolled: both drop their own popover below the header,
           which an `overflow-x-auto` ancestor (HScrollToolbar) would clip
