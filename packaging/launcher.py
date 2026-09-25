@@ -249,6 +249,10 @@ def _decide_gl_mode() -> tuple[str, str]:
     override = os.environ.get("NETGEO_GL", "auto")
     if override in ("hw", "sw"):
         return override, f"NETGEO_GL={override}"
+    if not sys.platform.startswith("linux"):
+        # DRM/GBM probes only describe Linux. Let Qt/Chromium choose the
+        # native graphics backend elsewhere, including D3D on Windows.
+        return "hw", "native graphics auto-selection (no Linux EGL probe)"
     if _hardware_gl_available():
         return "hw", "EGL probe succeeded"
     return "sw", "EGL probe failed (no hardware GL surface)"
@@ -631,11 +635,12 @@ def _try_webview(url: str) -> bool:
     # outright); with it, the window opens and WebEngine renders normally
     # (falls back to Chromium's --disable-gpu-compositing on its own).
     # setdefault so a machine that *does* have working GL can override back.
-    os.environ.setdefault("QT_QUICK_BACKEND", "software")
+    if sys.platform.startswith("linux"):
+        os.environ.setdefault("QT_QUICK_BACKEND", "software")
     # setdefault: never override a user who already set LIBGL_DRIVERS_PATH
     # themselves. See _dri_driver_path() for why this can't be a hardcoded
     # path (would just swap which distro it's wrong on).
-    if "LIBGL_DRIVERS_PATH" not in os.environ:
+    if sys.platform.startswith("linux") and "LIBGL_DRIVERS_PATH" not in os.environ:
         driver_path = _dri_driver_path()
         if driver_path:
             os.environ["LIBGL_DRIVERS_PATH"] = driver_path
@@ -677,6 +682,13 @@ def _try_webview(url: str) -> bool:
     else:
         print(f"[netgeo-launcher] WebGL: hardware — {gl_reason}", file=sys.stderr)
     try:
+        if os.environ.get("NETGEO_DIAGNOSTIC_LOG"):
+            # qtpy suppresses the binding's original ImportError. Preserve
+            # it for explicit diagnostics of frozen Windows builds.
+            try:
+                import PySide6.QtCore  # noqa: F401
+            except ImportError as exc:
+                print(f"[netgeo-launcher] Qt binding import: {exc}", file=sys.stderr)
         import webview
     except ImportError as exc:
         print(_webview_unavailable(exc), file=sys.stderr)
@@ -704,7 +716,10 @@ def _try_webview(url: str) -> bool:
         # pywebview's own (Wayland-broken) defaults.
         frameless=True,
         easy_drag=False,  # would else make the WHOLE window draggable, breaking map/canvas clicks
-        transparent=True,  # required for the CSS border-radius rounded corners to actually show
+        # Windows layered/translucent windows can lose WebEngine surfaces
+        # after switching from login to the composited workspace. Keep an
+        # opaque backing surface there; other platforms retain rounded corners.
+        transparent=sys.platform != "win32",
         background_color="#0F0F0E",  # theme/tokens.ts --ng-bg-0 — avoids a white flash before CSS paints
         # Surya QA, 2026-09-14: default pywebview size (800x600) left the
         # topology UI "berantakan". min_size below is re-measured 2026-09-18
@@ -754,8 +769,8 @@ def _try_webview(url: str) -> bool:
         # the QMainWindow itself (webview/platforms/qt.py) — a native Qt
         # constraint, not something this file has to re-implement or verify
         # by hand.
-        width=1440,
-        height=900,
+        width=1100 if sys.platform == "win32" else 1440,
+        height=720 if sys.platform == "win32" else 900,
         min_size=(980, 604),
     )
     bridge.bind(window)
