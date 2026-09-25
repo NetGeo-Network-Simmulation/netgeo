@@ -14,6 +14,8 @@ import sys
 import time
 from pathlib import Path
 
+import pytest
+
 LAUNCHER_PATH = Path(__file__).resolve().parents[2] / "packaging" / "launcher.py"
 _spec = importlib.util.spec_from_file_location("netgeo_launcher", LAUNCHER_PATH)
 launcher = importlib.util.module_from_spec(_spec)
@@ -133,6 +135,7 @@ def test_run_webview_in_subprocess_true_on_clean_exit(monkeypatch):
     assert launcher._run_webview_in_subprocess("http://127.0.0.1:1") is True
 
 
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX signal return code")
 def test_run_webview_in_subprocess_false_and_no_raise_on_sigabrt(monkeypatch, capsys):
     """A child that dies from a signal (the real bug: Qt SIGABRT when no
     GL/EGL/GLX/Vulkan surface is available) must not crash the parent — it
@@ -205,7 +208,7 @@ def test_try_webview_succeeds_when_backend_available(monkeypatch):
     # frameless + transparent are the 2026-09-14 decision (custom rounded
     # title bar) — keep this sharp, not just "didn't throw".
     assert calls["frameless"] is True
-    assert calls["transparent"] is True
+    assert calls["transparent"] is (sys.platform != "win32")
     # BUG 4 (Surya QA, 2026-09-14): pywebview's 800x600 default left the
     # topology UI broken. Re-measured 2026-09-18 a SECOND time (supersedes
     # 680x640 from earlier the same day): a leader review of that 680x640
@@ -493,6 +496,7 @@ def test_run_on_gui_thread_skips_op_when_marshal_fails(monkeypatch):
 
 
 def test_decide_gl_mode_hw_when_probe_succeeds(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.delenv("NETGEO_GL", raising=False)
     monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: True)
     mode, reason = launcher._decide_gl_mode()
@@ -501,6 +505,7 @@ def test_decide_gl_mode_hw_when_probe_succeeds(monkeypatch):
 
 
 def test_decide_gl_mode_sw_when_probe_fails(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.delenv("NETGEO_GL", raising=False)
     monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: False)
     mode, reason = launcher._decide_gl_mode()
@@ -535,6 +540,7 @@ def test_decide_gl_mode_ignores_unknown_env_value_and_probes(monkeypatch):
     """A typo'd NETGEO_GL value falls through to auto-probe rather than
     silently picking a side — same "unknown token dropped" spirit as
     _button_layout()."""
+    monkeypatch.setattr(sys, "platform", "linux")
     monkeypatch.setenv("NETGEO_GL", "bogus")
     monkeypatch.setattr(launcher, "_hardware_gl_available", lambda: True)
     mode, reason = launcher._decide_gl_mode()
@@ -580,7 +586,7 @@ class _FakeEglLib:
 def _stub_gbm_probe(
     monkeypatch,
     *,
-    render_node="/dev/null",
+    render_node=os.devnull,
     gbm_device=0x5,
     proc_addr=1,
     display_handle=0x1234,
@@ -681,7 +687,7 @@ def test_hardware_gl_available_closes_fd_even_on_failure(monkeypatch):
     still actually released."""
     closed = []
     real_close = launcher.os.close
-    monkeypatch.setattr(launcher, "_dri_render_node", lambda: "/dev/null")
+    monkeypatch.setattr(launcher, "_dri_render_node", lambda: os.devnull)
     monkeypatch.setattr(launcher.os, "close", lambda fd: (closed.append(fd), real_close(fd)))
     monkeypatch.setattr(launcher.ctypes, "CDLL", lambda name: _FakeGbmLib(0) if "gbm" in name else _FakeEglLib())
     assert launcher._hardware_gl_available() is False
@@ -717,6 +723,30 @@ def test_try_webview_leaves_flags_unset_when_gl_mode_hw(monkeypatch):
 
     launcher._try_webview("http://127.0.0.1:1")
     assert "QTWEBENGINE_CHROMIUM_FLAGS" not in os.environ
+
+
+def test_windows_webview_keeps_native_graphics_defaults(monkeypatch):
+    monkeypatch.setattr(sys, "platform", "win32")
+    for name in ("NETGEO_GL", "QT_QUICK_BACKEND", "QTWEBENGINE_CHROMIUM_FLAGS",
+                 "LIBGL_DRIVERS_PATH"):
+        monkeypatch.delenv(name, raising=False)
+    fake_webview = type(sys)("webview")
+    window_options = {}
+
+    def create_window(*args, **kwargs):
+        window_options.update(kwargs)
+        return _FakeWindow()
+
+    fake_webview.create_window = create_window
+    fake_webview.start = lambda **kwargs: None
+    monkeypatch.setitem(sys.modules, "webview", fake_webview)
+    assert launcher._try_webview("http://127.0.0.1:1") is True
+    assert "QT_QUICK_BACKEND" not in os.environ
+    assert "QTWEBENGINE_CHROMIUM_FLAGS" not in os.environ
+    assert "LIBGL_DRIVERS_PATH" not in os.environ
+    assert window_options["transparent"] is False
+    assert window_options["width"] == 1100
+    assert window_options["height"] == 720
 
 
 def test_help_flag_documents_netgeo_gl(monkeypatch, capsys):

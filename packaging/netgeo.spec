@@ -55,7 +55,7 @@ a = Analysis(
         "PySide6.QtWebEngineWidgets",
     ],
     hookspath=[],
-    runtime_hooks=[],
+    runtime_hooks=[str(REPO_ROOT / "packaging" / "windowed_stdio.py")],
     excludes=[],
     noarchive=False,
 )
@@ -67,7 +67,7 @@ exe = EXE(
     [],
     exclude_binaries=True,
     name="netgeo",
-    console=True,
+    console=sys.platform != "win32",
     icon=icon_path,
 )
 
