@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { loadBootAssets, getBootGeometry } from './bootAssets';
+import { chassisFamilyForDeviceSlug, loadBootAssets, getBootGeometry } from './bootAssets';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
   const file = path.resolve(__dirname, '../../../public', url.replace(/^\//, ''));
@@ -19,7 +19,7 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 }
 
 describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
-  it('loads both committed .glb files and their bounding boxes match the verified spec numbers', async () => {
+  it('loads the connector GLBs and their bounding boxes match the verified spec numbers', async () => {
     await loadBootAssets(nodeFetch);
 
     const rj45 = getBootGeometry('rj45')!;
@@ -71,6 +71,22 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     expect(qsfpSize.x).toBeCloseTo(0.02315, 2); // 22.15mm footprint width + wall
     expect(qsfpSize.y).toBeCloseTo(0.037, 2); // Datum L/K-to-PCB
     expect(qsfpSize.z).toBeCloseTo(0.01602, 2); // 15.02mm component-free height + wall
+  });
+
+  it('loads the verified CRS317 case envelope and maps only its real SKU', async () => {
+    await loadBootAssets(nodeFetch);
+    const family = chassisFamilyForDeviceSlug('mikrotik-crs317-1g-16splus-rm');
+    expect(family).toBe('chassis-mikrotik-crs317');
+    expect(chassisFamilyForDeviceSlug('generic-switch')).toBeUndefined();
+
+    const geometry = getBootGeometry(family!)!;
+    geometry.computeBoundingBox();
+    const size = new THREE.Vector3();
+    geometry.boundingBox!.getSize(size);
+    // Official MikroTik product page + hardware manual: 443 x 224 x 44 mm.
+    expect(size.x).toBeCloseTo(0.443, 3);
+    expect(size.y).toBeCloseTo(0.044, 3);
+    expect(size.z).toBeCloseTo(0.224, 3);
   });
 
   // Slice port-fxs: RJ-11 6P voice jack cage — narrower/shorter than the

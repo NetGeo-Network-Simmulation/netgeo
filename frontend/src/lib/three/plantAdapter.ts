@@ -16,6 +16,7 @@ import type { Cable, CableMedia, LinkModel, NodeKind, NodeModel, Rack, Topology 
 import type { DeviceType as CatalogEntry } from '@/api/client';
 import { frontPortFractions, frontPortList } from '@/components/rack/DeviceFaceplate';
 import { DEVICE_TYPES, resolveDeviceType, type PortType as CatalogPortType } from '@/components/rack/deviceTypes';
+import { chassisFamilyForDeviceSlug } from './bootAssets';
 import {
   devicePortWorld,
   RACK_SPECS,
@@ -184,6 +185,7 @@ function adaptRackDevices(
       generic: dt.slug.startsWith('generic-') || isUnverifiedCuratedSeed,
       bodyWidthM: dt.chassisMm ? dt.chassisMm.widthMm / 1000 : undefined,
       bodyDepthM: dt.chassisMm ? dt.chassisMm.depthMm / 1000 : undefined,
+      chassisAsset: chassisFamilyForDeviceSlug(dt.slug),
       hasLcd: dt.front.hasLcd,
     });
   }

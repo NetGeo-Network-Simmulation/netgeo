@@ -12,7 +12,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { getBootGeometry, type BootFamily, type CageFamily, type StructureFamily } from './bootAssets';
+import { getBootGeometry, type BootFamily, type CageFamily, type ChassisFamily, type StructureFamily } from './bootAssets';
 
 /* ─── Real-world geometry (EIA-310): 1U = 44.45 mm, 19" panel = 482.6 mm ─── */
 export const U = 0.04445;
@@ -147,6 +147,9 @@ export interface DeviceDef {
    *  heuristic below — never a guessed per-model number. */
   bodyWidthM?: number;
   bodyDepthM?: number;
+  /** Blender-authored verified case envelope. Undefined or not-yet-loaded
+   *  keeps the procedural body as the generic first-paint fallback. */
+  chassisAsset?: ChassisFamily;
   /** True only for deviceTypes.ts entries with `front.hasLcd` (§8.2 V(2nd) —
    *  currently just ubiquiti-usw-pro-48) — draws a small LCD touchscreen. */
   hasLcd?: boolean;
@@ -965,7 +968,11 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     chassisMat.name = 'chassis-' + def.id;
     // body is the sheet-metal box between the rack ears — narrower than the
     // 482.6mm faceplate/ears (CHASSIS_BODY_W, see its own comment above).
-    const body = box(bodyW, h, depth, chassisMat, 'chassis');
+    const chassisGeo = def.chassisAsset ? getBootGeometry(def.chassisAsset) : undefined;
+    // Cached GLB geometry is shared across scene rebuilds and therefore is
+    // deliberately not registered in this scene's disposable list.
+    const body = chassisGeo ? new THREE.Mesh(chassisGeo, chassisMat) : box(bodyW, h, depth, chassisMat, 'chassis');
+    body.name = 'chassis';
     body.position.set(0, 0, rack.d / 2 - 0.09 - depth / 2);
     body.userData.dev = def.id;
     g.add(body);
