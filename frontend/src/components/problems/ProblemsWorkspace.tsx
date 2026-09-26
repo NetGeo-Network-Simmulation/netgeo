@@ -276,25 +276,14 @@ export function ProblemsWorkspace() {
   }
 
   return (
-    <div className="absolute inset-0 flex bg-surface" role="region" aria-label="Problem Center">
-      {/* Left: problem list. This column's own background/border-r bleed to
-          x=0 (AppShell); its content gets pl-[116px] — 16px past the
-          floating rail's x=100 right edge — instead so the header controls
-          and table rows never render under the rail. No max-w cap here:
-          Surya reported the previous max-w-[1400px] leaving empty margins on
-          both sides instead of hugging the viewport edges. */}
-      <div className="flex min-w-0 flex-1 flex-col border-r border-fg/10">
-        {/* Header — no page title: the Problems tab in TopBar's sub-nav
-            already carries this page's identity, so an in-page h1 was a
-            duplicate (root gets aria-label="Problem Center" above instead). */}
-        <div className="pt-4 pr-6 pl-[116px]">
-          {/* Same mx-auto max-w-5xl box the table below uses (leader review
-              2026-09-20): the strip's background still bleeds full-width,
-              but the toolbar's own content shares the table's left/right
-              edges instead of the chips hugging the rail-inset corner while
-              the table centers narrower — one visually coherent block, not
-              two different widths. */}
-          <div className="glass inline-flex max-w-full flex-wrap items-center gap-2 rounded-xl border border-fg/12 p-1.5 shadow-glass">
+    <div
+      className="absolute inset-0 flex gap-3 bg-surface p-3 pl-[116px]"
+      role="region"
+      aria-label="Problem Center"
+    >
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-fg/15 bg-panel shadow-glass">
+        <div className="flex min-h-14 shrink-0 items-center border-b border-fg/10 px-3">
+          <div className="flex max-w-full flex-wrap items-center gap-2">
             <div className="flex items-center gap-2" role="tablist" aria-label="Filter by severity">
               <FilterChip active={filter === 'all'} onClick={() => setFilter('all')} label="All" count={counts.all} />
               <FilterChip
@@ -335,7 +324,7 @@ export function ProblemsWorkspace() {
         </div>
 
         {/* Table / empty */}
-        <div className="ng-scroll min-h-0 flex-1 overflow-auto pt-4 pr-6 pb-6 pl-[116px]">
+        <div className="ng-scroll min-h-0 flex-1 overflow-auto p-3">
           {isLoading ? (
               <p className="p-4 text-sm text-fg/40">Deriving problems…</p>
             ) : counts.all === 0 ? (
@@ -351,15 +340,11 @@ export function ProblemsWorkspace() {
             ) : visible.length === 0 ? (
               <p className="p-4 text-sm text-fg/40">No problem matches the current filter.</p>
             ) : (
-              // max-w-5xl + mx-auto: caps the table at a readable width on
-              // ultra-wide windows instead of stretching into a thin edge-
-              // to-edge slab, and table-fixed + colgroup gives each column a
-              // deliberate share instead of ragged content-driven widths
-              // (Surya QA 2026-09-20: "plain full-width slab"). The row
-              // count caption below turns the leftover space under a short
-              // list into a readable footer instead of bare emptiness.
+              // table-fixed + colgroup keeps dense engineering rows aligned;
+              // the bounded panel supplies the readable edge instead of a
+              // full-viewport slab.
               <div className="w-full">
-                <div className="overflow-hidden rounded-xl border border-fg/10">
+                <div className="overflow-hidden rounded-lg border border-fg/10">
                   <table className="w-full table-fixed border-collapse text-left">
                     <colgroup>
                       <col className="w-10" />
@@ -397,10 +382,11 @@ export function ProblemsWorkspace() {
               </div>
             )}
           </div>
-        </div>
+      </main>
 
-        {/* Right: inspector */}
-        <aside className="flex w-[360px] shrink-0 flex-col bg-panel">
+        {/* Inspector is a separate floating panel, like Maps/Config tools,
+            rather than a full-height slab fused to the table. */}
+        <aside className="flex w-72 shrink-0 flex-col overflow-hidden rounded-xl border border-fg/15 bg-panel shadow-glass lg:w-[340px]">
           {selected ? (
             <Inspector
               problem={selected}

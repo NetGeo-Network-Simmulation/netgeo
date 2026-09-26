@@ -1,10 +1,8 @@
 /**
  * ReportsWorkspace — the Reports Center (v1.2.032, clay design; re-laid-out
  * slice/ui-edge-fit per Surya's QA: "bagian reports center bisa di layout
- * ulang"). Three columns — download actions (left) · document preview
- * (center) · report type cards (right) — so the "paper" page reads as the
- * page's actual focal point instead of competing with a 4-card grid for
- * attention. It's the standing home for engineering documentation.
+ * ulang"). The document is the canvas; report and export actions live in one
+ * compact toolbar, matching Topology/Maps instead of a permanent card rail.
  *
  * Reuses the existing REST surface — NO new backend:
  *  - `fiberApi.bom(projectId)`    → Bill of Materials rows (NG-FI-04),
@@ -33,7 +31,6 @@ import {
   FileText,
   Code2,
   Printer,
-  Clock,
   Loader2,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -47,7 +44,6 @@ type ReportId = 'bom' | 'summary' | 'linkBudget' | 'rfCoverage';
 interface ReportType {
   id: ReportId;
   title: string;
-  desc: string;
   icon: LucideIcon;
   /** false → no project-level endpoint; card is disabled with `disabledHint`. */
   available: boolean;
@@ -58,21 +54,18 @@ const REPORTS: ReportType[] = [
   {
     id: 'bom',
     title: 'Bill of Materials',
-    desc: 'Hardware inventory and unit counts.',
     icon: Boxes,
     available: true,
   },
   {
     id: 'summary',
     title: 'Project Summary',
-    desc: 'High-level topology and site overview.',
     icon: FileText,
     available: true,
   },
   {
     id: 'linkBudget',
     title: 'Link Budget',
-    desc: 'Optical and RF attenuation analysis.',
     icon: LineChart,
     available: false,
     disabledHint: 'Per-path budgets live in the Fiber / FTTH workspace — no project-wide report yet.',
@@ -80,7 +73,6 @@ const REPORTS: ReportType[] = [
   {
     id: 'rfCoverage',
     title: 'RF Coverage Study',
-    desc: 'Heatmaps and signal propagation results.',
     icon: RadioTower,
     available: false,
     disabledHint: 'Coverage heatmaps live in the RF Planning workspace — no exportable report yet.',
@@ -132,112 +124,68 @@ export function ReportsWorkspace() {
   const canDownload = selected === 'summary' ? !!reportQ.data : (bomQ.data?.length ?? 0) > 0;
 
   return (
-    <div className="absolute inset-0 flex bg-surface" role="region" aria-label="Reports Center">
-      {/* Center: the document itself — the page's actual focal point. Now
-          the first column after the rail (leader review 2026-09-20: the
-          Export card moved into the right column, per Surya's "atau bisa
-          dipindah ke kanan" suggestion), so it carries the pl-[116px]
-          rail-clearance inset the old left column used to own. */}
-      <main className="ng-scroll min-w-0 flex-1 overflow-y-auto bg-recess/20 pt-8 pr-8 pb-8 pl-[116px]">
+    <div
+      className="absolute inset-0 flex flex-col gap-3 bg-surface p-3 pl-[116px]"
+      role="region"
+      aria-label="Reports Center"
+    >
+      <header className="glass-strong flex min-h-14 shrink-0 items-center gap-3 overflow-x-auto rounded-xl border border-fg/15 px-3 shadow-glass">
+        <div className="flex shrink-0 items-center gap-1 rounded-full border border-fg/10 bg-surface p-1" role="tablist" aria-label="Report type">
+          {REPORTS.map(({ id, title, icon: Icon, available, disabledHint }) => (
+            <button
+              key={id}
+              type="button"
+              role="tab"
+              aria-selected={id === selected}
+              disabled={!available}
+              title={disabledHint ?? title}
+              onClick={() => available && setSelected(id)}
+              className={cn(
+                'flex shrink-0 items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-medium transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-35',
+                id === selected
+                  ? 'bg-accent text-accent-fg'
+                  : 'text-fg/65 hover:bg-fg/8 hover:text-fg',
+              )}
+            >
+              <Icon className="h-4 w-4" aria-hidden />
+              {title}
+            </button>
+          ))}
+        </div>
+
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <span className="rounded-full border border-fg/10 bg-surface px-3 py-1.5 font-mono text-[11px] text-fg/55">
+            Standard template
+          </span>
+          <button
+            type="button"
+            onClick={() => window.print()}
+            disabled={!canDownload}
+            className="flex items-center gap-1.5 rounded-full border border-fg/10 px-3 py-1.5 text-xs font-medium text-fg/80 transition-colors hover:bg-fg/5 disabled:opacity-40"
+          >
+            <Printer className="h-4 w-4" aria-hidden />
+            PDF
+          </button>
+          <button
+            type="button"
+            onClick={downloadHtml}
+            disabled={!canDownload}
+            className="flex items-center gap-1.5 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg transition-colors hover:bg-accent-soft disabled:opacity-40"
+          >
+            <Code2 className="h-4 w-4" aria-hidden />
+            HTML
+          </button>
+        </div>
+      </header>
+
+      <main className="ng-scroll min-h-0 min-w-0 flex-1 overflow-y-auto rounded-xl border border-fg/15 bg-recess/20 p-8 shadow-glass">
         {selected === 'summary' ? (
           <SummaryPreview loading={reportQ.isLoading} error={reportQ.error} html={reportQ.data} />
         ) : (
           <BomPreview loading={bomQ.isLoading} error={bomQ.error} rows={bomQ.data ?? []} title={activeMeta.title} />
         )}
       </main>
-
-      {/* Right: export card + report type cards, one column — reads as
-          rail | preview | export+reports (Surya QA 2026-09-20). The Export
-          card is just the first item in the same scroll region as the
-          ReportCard list, so a short window scrolls the whole column
-          together instead of needing a second, independent scroll area. No
-          page title either — the Reports tab in TopBar's sub-nav already
-          carries this page's identity (root gets aria-label="Reports Center"
-          above instead). flex-1 + min-h-0 sizes this as a SCROLL VIEWPORT
-          (needed so export + 4 cards never overflow a short window), not a
-          stretch target — items pack at the default flex-start (top) with
-          no h-full/justify-between, so any leftover height stays empty
-          below the cards, never divided into them. */}
-      <div className="flex w-[300px] shrink-0 flex-col border-l border-fg/10 bg-panel">
-        <div className="ng-scroll flex min-h-0 flex-1 flex-col justify-start gap-3 overflow-y-auto p-4">
-          {/* Grouped into one card (rounded-xl border, small caps label)
-              instead of raw buttons floating on the panel background — the
-              pattern already used elsewhere (Suggested Actions in Problem
-              Center, ReportCard below). "Template: Standard" is a pill chip,
-              matching the rounded-full meta-chip language established by
-              OverlayChips/FilterChip, instead of a plain rectangular label
-              (Surya QA 2026-09-20: "floating as a bare left-aligned stack"). */}
-          <div className="rounded-xl border border-fg/10 bg-recess/20 p-3">
-            <h3 className="mb-2 px-0.5 text-[11px] font-medium uppercase tracking-wider text-fg/45">Export</h3>
-            <div className="flex flex-col gap-2">
-              <button
-                onClick={() => window.print()}
-                disabled={!canDownload}
-                className="flex items-center gap-2 rounded-lg border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-              >
-                <Printer className="h-[18px] w-[18px] shrink-0" aria-hidden />
-                Download PDF
-              </button>
-              <button
-                onClick={downloadHtml}
-                disabled={!canDownload}
-                className="flex items-center gap-2 rounded-lg border border-fg/10 px-3 py-2 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
-              >
-                <Code2 className="h-[18px] w-[18px] shrink-0" aria-hidden />
-                Download HTML
-              </button>
-            </div>
-            <div className="mt-2.5 flex w-fit items-center gap-1.5 rounded-full border border-fg/10 bg-recess/40 px-3 py-1 font-mono text-[11px] text-fg/60">
-              <span className="h-1.5 w-1.5 rounded-full bg-fg/25" aria-hidden />
-              Template: Standard
-            </div>
-          </div>
-
-          {REPORTS.map((r) => (
-            <ReportCard key={r.id} report={r} active={r.id === selected} onSelect={() => r.available && setSelected(r.id)} />
-          ))}
-        </div>
-      </div>
     </div>
-  );
-}
-
-function ReportCard({ report, active, onSelect }: { report: ReportType; active: boolean; onSelect: () => void }) {
-  const { icon: Icon } = report;
-  const disabled = !report.available;
-  return (
-    <button
-      onClick={onSelect}
-      disabled={disabled}
-      aria-pressed={active}
-      title={report.disabledHint}
-      className={cn(
-        'group flex flex-col rounded-xl border p-4 text-left transition-colors',
-        active
-          ? 'border-accent bg-accent/5'
-          : disabled
-            ? 'cursor-not-allowed border-fg/10 opacity-50'
-            : 'border-fg/10 hover:border-fg/20 hover:bg-fg/5',
-      )}
-    >
-      <div className="mb-3 flex items-start justify-between">
-        <span
-          className={cn(
-            'grid h-10 w-10 place-items-center rounded-lg border border-fg/10 bg-recess/40',
-            active ? 'text-accent' : 'text-fg/55',
-          )}
-        >
-          <Icon className="h-5 w-5" aria-hidden />
-        </span>
-        {active && <span className="mt-1 h-2 w-2 rounded-full bg-accent" aria-hidden />}
-      </div>
-      <h3 className="mb-1 text-[15px] font-medium text-fg">{report.title}</h3>
-      <p className="mb-3 text-xs leading-snug text-fg/50">{report.desc}</p>
-      <div className="mt-auto flex items-center gap-1 font-mono text-[11px] text-fg/40">
-        <Clock className="h-3.5 w-3.5" aria-hidden />
-        {disabled ? 'Not available' : 'Ready to generate'}
-      </div>
-    </button>
   );
 }
 
