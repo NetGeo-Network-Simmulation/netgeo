@@ -200,6 +200,11 @@ export function racksForSite(racks: Rack[], siteId: string | null): string[] {
   return racks.filter((r) => (r.site_id ?? null) === siteId).map((r) => r.id);
 }
 
+/** Rack creation follows the site on screen unless the user selects another. */
+export function rackSiteForView(viewSiteId: string, chosenSiteId: string | null): string {
+  return chosenSiteId ?? viewSiteId;
+}
+
 /**
  * Build the N-bay scene input from a real project. `rackIds` is the
  * left-to-right row of real racks to show (NG-PH3D P41: was a fixed

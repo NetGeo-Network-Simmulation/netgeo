@@ -50,6 +50,7 @@ import {
   dropDecision,
   ENCLOSURE_KEYS,
   frustumSpan,
+  rackSiteForView,
   racksForSite,
   resolveDropTarget,
 } from '@/lib/three/plantAdapter';
@@ -282,7 +283,9 @@ export function Rack3DElevationPanel() {
   // Create-rack controls — moved here from the deleted 2D elevation panel,
   // the only place a rack could be created before this (see slice notes).
   const [newRackName, setNewRackName] = useState('');
-  const [newRackSite, setNewRackSite] = useState('');
+  // null means follow the site currently being viewed; '' is an explicit
+  // choice to create outside a site.
+  const [newRackSite, setNewRackSite] = useState<string | null>(null);
   const [newRackU, setNewRackU] = useState(42);
   const newRackNameRef = useRef<HTMLInputElement>(null);
 
@@ -435,17 +438,15 @@ export function Rack3DElevationPanel() {
     return zoomed ? span * 0.42 : span * Math.max(1, scale);
   }, []);
 
+  const cameraMotion = useRef<{ current: { az: number; cx: number; cy: number; span: number } | null; target: { az: number; cx: number; cy: number; span: number } }>({
+    current: null, target: { az: POV.az, cx: 0, cy: 0, span: 1 },
+  });
+
   const fitCamera = useCallback(() => {
     const host = hostRef.current, cam = camRef.current;
     if (!host || !cam) return;
-    const w = host.clientWidth || 1, h = host.clientHeight || 1;
     const span = spanFor(POV.span, view.current.zoomed);
-    const aspect = w / h;
-    cam.left = -span * aspect;
-    cam.right = span * aspect;
-    cam.top = span;
-    cam.bottom = -span;
-    cam.updateProjectionMatrix();
+    cameraMotion.current.target.span = span;
     // NG-PH3D 3b LOD: this ortho camera sits at a fixed physical distance
     // (POV.dist) — "zoom" only changes the frustum half-height (`span`), so
     // that's the signal to drive fine-detail visibility from, not
@@ -478,18 +479,11 @@ export function Rack3DElevationPanel() {
     // rack was, burying low-RU devices off-frame.
     const heights = Object.values(rackHeightRef.current);
     const height = focusKey ? (rackHeightRef.current[focusKey] ?? 42 * U) : (heights.length ? Math.max(...heights) : 42 * U);
-    const halfView = (cam.top - cam.bottom) / 2;
+    const halfView = cameraMotion.current.target.span;
     const cy = focusKey && view.current.focusY != null
       ? Math.max(Math.min(height - halfView * 0.75, view.current.focusY), halfView * 0.75)
       : height * 0.46;
-    const d = POV.dist, el = POV.elev;
-    cam.position.set(
-      cx + Math.sin(az) * Math.cos(el) * d,
-      cy + Math.sin(el) * d,
-      Math.cos(az) * Math.cos(el) * d,
-    );
-    cam.up.set(0, 1, 0);
-    cam.lookAt(new THREE.Vector3(cx, cy, 0));
+    cameraMotion.current.target = { ...cameraMotion.current.target, az, cx, cy };
   }, []);
 
   /* ─── renderer lifecycle: one canvas for the panel's whole life ────────── */
@@ -547,6 +541,25 @@ export function Rack3DElevationPanel() {
       let dt = (now - last) / 1000;
       if (!Number.isFinite(dt) || dt < 0) dt = 0;
       last = now;
+      const motion = cameraMotion.current;
+      if (!motion.current) motion.current = { ...motion.target };
+      const current = motion.current;
+      const easing = 1 - Math.exp(-Math.min(dt, 0.05) * 9);
+      for (const key of ['az', 'cx', 'cy', 'span'] as const) {
+        current[key] += (motion.target[key] - current[key]) * easing;
+        if (Math.abs(current[key] - motion.target[key]) < 0.0001) current[key] = motion.target[key];
+      }
+      const aspect = (host.clientWidth || 1) / (host.clientHeight || 1);
+      cam.left = -current.span * aspect;
+      cam.right = current.span * aspect;
+      cam.top = current.span;
+      cam.bottom = -current.span;
+      cam.updateProjectionMatrix();
+      const d = POV.dist, el = POV.elev;
+      cam.position.set(current.cx + Math.sin(current.az) * Math.cos(el) * d,
+        current.cy + Math.sin(el) * d, Math.cos(current.az) * Math.cos(el) * d);
+      cam.up.set(0, 1, 0);
+      cam.lookAt(current.cx, current.cy, 0);
       const built = builtRef.current;
       if (built && (view.current.anim || wasAnimated)) tick(built.registry, Math.min(0.05, dt), view.current.anim);
       wasAnimated = view.current.anim;
@@ -574,6 +587,7 @@ export function Rack3DElevationPanel() {
       renderer.domElement.remove();
       rendererRef.current = null;
       camRef.current = null;
+      cameraMotion.current.current = null;
       if (import.meta.env.DEV) {
         delete (window as unknown as { __ngRack3dDebug?: unknown }).__ngRack3dDebug;
       }
@@ -667,29 +681,12 @@ export function Rack3DElevationPanel() {
   useEffect(() => {
     const on = mode !== null;
     if (view.current.zoomed === on) return;
-    const from = spanFor(POV.span, view.current.zoomed);
     view.current.zoomed = on;
     view.current.focusRack = (sel && builtRef.current?.registry.devices[sel]?.rackKey) || bays[0]?.key || '';
     if (!on) view.current.focusY = null;
-    const to = spanFor(POV.span, on);
-    const t0 = performance.now();
-    const step = () => {
-      const cam = camRef.current, host = hostRef.current;
-      if (!cam || !host) return;
-      const k = Math.min(1, (performance.now() - t0) / 620);
-      const e = 1 - Math.pow(1 - k, 3);
-      const span = from + (to - from) * e;
-      const aspect = (host.clientWidth || 1) / (host.clientHeight || 1);
-      cam.left = -span * aspect;
-      cam.right = span * aspect;
-      cam.top = span;
-      cam.bottom = -span;
-      cam.updateProjectionMatrix();
-      placeCamera();
-      if (k < 1) requestAnimationFrame(step);
-    };
-    step();
-  }, [mode, sel, spanFor, placeCamera]);
+    fitCamera();
+    placeCamera();
+  }, [mode, sel, fitCamera, placeCamera]);
 
   /* ─── picking ──────────────────────────────────────────────────────────── */
   const selectDevice = useCallback((id: string | null) => {
@@ -1126,7 +1123,7 @@ export function Rack3DElevationPanel() {
         />
         <Select
           aria-label="New rack site"
-          value={newRackSite}
+          value={rackSiteForView(viewSiteId, newRackSite)}
           onChange={setNewRackSite}
           className="w-24 shrink-0"
           options={[{ value: '', label: '(no site)' }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
@@ -1147,7 +1144,7 @@ export function Rack3DElevationPanel() {
               newRackNameRef.current?.focus();
               return;
             }
-            createRack.mutate({ name, siteId: newRackSite || null, ruHeight: newRackU });
+            createRack.mutate({ name, siteId: rackSiteForView(viewSiteId, newRackSite) || null, ruHeight: newRackU });
           }}
           disabled={createRack.isPending}
           className={cn(btn(false), 'shrink-0 disabled:cursor-not-allowed disabled:opacity-40')}
@@ -1163,7 +1160,7 @@ export function Rack3DElevationPanel() {
           <Select
             aria-label="Site ditampilkan"
             value={viewSiteId}
-            onChange={setViewSiteId}
+            onChange={(id) => { setViewSiteId(id); setNewRackSite(null); }}
             className="w-28"
             options={[{ value: '', label: '(no site)' }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
           />
