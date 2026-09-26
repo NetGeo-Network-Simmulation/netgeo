@@ -31,7 +31,6 @@ import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiE
 import { useUiStore } from '@/store/uiStore';
 import { useTopologyStore } from '@/store/topologyStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
-import { HScrollToolbar } from '@/components/shell/HScrollToolbar';
 import { cn } from '@/lib/cn';
 import { autoName } from '@/lib/mapDeploy';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
@@ -104,6 +103,14 @@ const RACK_SIZES = [10, 12, 18, 24, 36, 42, 48];
 
 type Mode = 'cable' | 'adddev' | null;
 type Face = 'front' | 'back';
+type CameraPose = { az: number; span: number; cx: number; cy: number };
+
+/** Null means "follow the viewed site"; an empty string is an intentional
+ *  choice of the no-site bucket. Keeping those states distinct prevents a
+ *  new rack from silently switching a populated Site A scene to no-site. */
+export function rackSiteForView(viewSiteId: string, explicitSite: string | null): string {
+  return explicitSite ?? viewSiteId;
+}
 
 /** DeviceType.icon -> NodeKind (Q1: the Add Device picker, below). Icon is
  *  supposed to double as the kind string (device_types.py `icon=kind`), but
@@ -126,6 +133,8 @@ export function Rack3DElevationPanel() {
   const builtRef = useRef<BuiltScene | null>(null);
   const camRef = useRef<THREE.OrthographicCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const cameraPoseRef = useRef<CameraPose | null>(null);
+  const cameraTweenRef = useRef(0);
   // mutable view state the render loop reads every frame — deliberately not
   // React state: a 60 fps camera must not re-render the component tree.
   const view = useRef({ az: POV.az, anim: true, doors: false, labels: false, sel: null as string | null, zoomed: false, focusRack: '', focusY: null as number | null });
@@ -282,9 +291,11 @@ export function Rack3DElevationPanel() {
   // Create-rack controls — moved here from the deleted 2D elevation panel,
   // the only place a rack could be created before this (see slice notes).
   const [newRackName, setNewRackName] = useState('');
-  const [newRackSite, setNewRackSite] = useState('');
+  const [newRackSiteOverride, setNewRackSiteOverride] = useState<string | null>(null);
+  const newRackSite = rackSiteForView(viewSiteId, newRackSiteOverride);
   const [newRackU, setNewRackU] = useState(42);
   const newRackNameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => setNewRackSiteOverride(null), [projectId]);
 
   const [face, setFace] = useState<Face>('front');
   const [mode, setMode] = useState<Mode>(null);
@@ -312,6 +323,7 @@ export function Rack3DElevationPanel() {
       physicalApi.createRack({ project_id: projectId!, name: v.name, site_id: v.siteId, ru_height: v.ruHeight }),
     onSuccess: (_data, v) => {
       setNewRackName('');
+      setNewRackSiteOverride(null);
       setError(null);
       // Show whichever site the new rack landed in — permintaan Surya: a
       // rack created for a different site than the one on screen resets the
@@ -453,18 +465,18 @@ export function Rack3DElevationPanel() {
     if (builtRef.current) applyLod(builtRef.current.registry, span);
   }, [spanFor]);
 
-  /** Place the ortho camera on the fixed 2.5D POV. az is the only thing that
-   *  turns. Works for any number of real bays (NG-PH3D P41) — the old fixed
+  /** Resolve the complete camera target for the fixed 2.5D POV. Works for
+   *  any number of real bays (NG-PH3D P41) — the old fixed
    *  A/B version required *both* named bays to exist and silently left the
    *  camera stuck wherever it last was otherwise (Surya's QA: picking the
    *  same rack into both slots, or leaving one empty, froze the camera with
    *  no error). Framing a real row of any size instead of two named slots
    *  makes that state unrepresentable. */
-  const placeCamera = useCallback((az = view.current.az) => {
+  const cameraTarget = useCallback((az = view.current.az): CameraPose | null => {
     const cam = camRef.current, built = builtRef.current;
-    if (!cam || !built) return;
+    if (!cam || !built) return null;
     const keys = Object.keys(built.registry.racks);
-    if (keys.length === 0) return; // nothing real built (shouldn't happen — buildScene only runs for >=1 bay)
+    if (keys.length === 0) return null;
     const entries = keys.map((k) => built.registry.racks[k]!);
     const focusKey = view.current.zoomed && built.registry.racks[view.current.focusRack] ? view.current.focusRack : null;
     const focus = focusKey ? built.registry.racks[focusKey]! : null;
@@ -478,19 +490,69 @@ export function Rack3DElevationPanel() {
     // rack was, burying low-RU devices off-frame.
     const heights = Object.values(rackHeightRef.current);
     const height = focusKey ? (rackHeightRef.current[focusKey] ?? 42 * U) : (heights.length ? Math.max(...heights) : 42 * U);
-    const halfView = (cam.top - cam.bottom) / 2;
+    const span = spanFor(POV.span, view.current.zoomed);
+    const halfView = span;
     const cy = focusKey && view.current.focusY != null
       ? Math.max(Math.min(height - halfView * 0.75, view.current.focusY), halfView * 0.75)
       : height * 0.46;
+    return { az, span, cx, cy };
+  }, [spanFor]);
+
+  const applyCameraPose = useCallback((pose: CameraPose) => {
+    const cam = camRef.current, host = hostRef.current;
+    if (!cam || !host) return;
+    const aspect = (host.clientWidth || 1) / (host.clientHeight || 1);
+    cam.left = -pose.span * aspect;
+    cam.right = pose.span * aspect;
+    cam.top = pose.span;
+    cam.bottom = -pose.span;
+    cam.updateProjectionMatrix();
+    if (builtRef.current) applyLod(builtRef.current.registry, pose.span);
     const d = POV.dist, el = POV.elev;
     cam.position.set(
-      cx + Math.sin(az) * Math.cos(el) * d,
-      cy + Math.sin(el) * d,
-      Math.cos(az) * Math.cos(el) * d,
+      pose.cx + Math.sin(pose.az) * Math.cos(el) * d,
+      pose.cy + Math.sin(el) * d,
+      Math.cos(pose.az) * Math.cos(el) * d,
     );
     cam.up.set(0, 1, 0);
-    cam.lookAt(new THREE.Vector3(cx, cy, 0));
+    cam.lookAt(new THREE.Vector3(pose.cx, pose.cy, 0));
+    cameraPoseRef.current = pose;
   }, []);
+
+  const placeCamera = useCallback(() => {
+    const target = cameraTarget();
+    if (target) {
+      cancelAnimationFrame(cameraTweenRef.current);
+      applyCameraPose(target);
+    }
+  }, [applyCameraPose, cameraTarget]);
+
+  /** One tween owns focus, zoom and the 180-degree front/back turn so a
+   *  second device click can redirect the in-flight motion without jumping. */
+  const tweenCamera = useCallback(() => {
+    const target = cameraTarget();
+    if (!target) return;
+    cancelAnimationFrame(cameraTweenRef.current);
+    const from = cameraPoseRef.current ?? target;
+    const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+    if (reduced) {
+      applyCameraPose(target);
+      return;
+    }
+    const started = performance.now();
+    const step = (now: number) => {
+      const k = Math.min(1, (now - started) / 360);
+      const e = k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2;
+      applyCameraPose({
+        az: from.az + (target.az - from.az) * e,
+        span: from.span + (target.span - from.span) * e,
+        cx: from.cx + (target.cx - from.cx) * e,
+        cy: from.cy + (target.cy - from.cy) * e,
+      });
+      if (k < 1) cameraTweenRef.current = requestAnimationFrame(step);
+    };
+    cameraTweenRef.current = requestAnimationFrame(step);
+  }, [applyCameraPose, cameraTarget]);
 
   /* ─── renderer lifecycle: one canvas for the panel's whole life ────────── */
   useEffect(() => {
@@ -567,6 +629,7 @@ export function Rack3DElevationPanel() {
 
     return () => {
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(cameraTweenRef.current);
       ro.disconnect();
       if (builtRef.current) disposeScene(builtRef.current);
       builtRef.current = null;
@@ -656,40 +719,17 @@ export function Rack3DElevationPanel() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewRacks.map((r) => `${r.id}:${r.ru_height}`).join(','), fitCamera, placeCamera]);
 
-  /* ─── face flip: az is the only thing about the fixed POV that turns ──── */
-  useEffect(() => {
-    view.current.az = face === 'back' ? POV.az + Math.PI : POV.az;
-    fitCamera();
-    placeCamera();
-  }, [face, fitCamera, placeCamera]);
-
-  /* ─── work zoom: only for cabling / adding, only on the worked rack ────── */
+  /* ─── one smooth transition for face, work zoom and device focus ───────── */
   useEffect(() => {
     const on = mode !== null;
-    if (view.current.zoomed === on) return;
-    const from = spanFor(POV.span, view.current.zoomed);
+    view.current.az = face === 'back' ? POV.az + Math.PI : POV.az;
     view.current.zoomed = on;
-    view.current.focusRack = (sel && builtRef.current?.registry.devices[sel]?.rackKey) || bays[0]?.key || '';
+    if (!view.current.focusRack || !builtRef.current?.registry.racks[view.current.focusRack]) {
+      view.current.focusRack = (sel && builtRef.current?.registry.devices[sel]?.rackKey) || bays[0]?.key || '';
+    }
     if (!on) view.current.focusY = null;
-    const to = spanFor(POV.span, on);
-    const t0 = performance.now();
-    const step = () => {
-      const cam = camRef.current, host = hostRef.current;
-      if (!cam || !host) return;
-      const k = Math.min(1, (performance.now() - t0) / 620);
-      const e = 1 - Math.pow(1 - k, 3);
-      const span = from + (to - from) * e;
-      const aspect = (host.clientWidth || 1) / (host.clientHeight || 1);
-      cam.left = -span * aspect;
-      cam.right = span * aspect;
-      cam.top = span;
-      cam.bottom = -span;
-      cam.updateProjectionMatrix();
-      placeCamera();
-      if (k < 1) requestAnimationFrame(step);
-    };
-    step();
-  }, [mode, sel, spanFor, placeCamera]);
+    tweenCamera();
+  }, [mode, face, sel, bays[0]?.key, tweenCamera]);
 
   /* ─── picking ──────────────────────────────────────────────────────────── */
   const selectDevice = useCallback((id: string | null) => {
@@ -921,7 +961,6 @@ export function Rack3DElevationPanel() {
       selectDevice(devId);
       setMode('cable');
       setPick(null);
-      placeCamera();
     };
 
     const onUp = (e: PointerEvent) => {
@@ -1034,7 +1073,7 @@ export function Rack3DElevationPanel() {
       window.removeEventListener('keydown', onKeyDown);
       clearGhost();
     };
-  }, [mode, handlePortPick, handleAddDevice, selectDevice, placeCamera]);
+  }, [mode, handlePortPick, handleAddDevice, selectDevice]);
 
   const toggleMode = (id: Exclude<Mode, null>) => {
     setPick(null);
@@ -1090,16 +1129,27 @@ export function Rack3DElevationPanel() {
   }
 
   return (
-    <div className="absolute inset-0 flex flex-col">
-      {/* toolbar — WPS-style: never wraps to a 2nd row (Surya 2026-09-18,
-          same pattern as TopBar/ConfigWorkspace). Select's own dropdown is
-          `absolute` (ui/Select.tsx); an overflow-x-auto ancestor clips a
-          popover vertically too (CSS2.1 11.1.1), so all 3 Selects here
-          (rack site, rack height, site viewed) stay in the fixed,
-          non-scrolling cluster up front. The Depan/Belakang/Pintu/Label/
-          Animasi/Cable/Tambah-perangkat toggles never open a popover, so
-          they're safe inside HScrollToolbar. */}
-      <div className="flex min-w-0 items-center gap-2 border-b border-fg/10 px-3 py-2">
+    <div className="absolute inset-0 overflow-hidden bg-surface">
+      {/* Canvas first, matching Topology and Maps. Controls float above it
+          instead of consuming four full-width rows and shrinking the scene. */}
+      <div ref={hostRef} className="absolute inset-0" />
+
+      {topoQ.isSuccess && viewRackIds.length === 0 && (
+        <div className="absolute inset-0">
+          <WorkspaceEmptyState
+            icon={Server}
+            title="No racks yet"
+            hint={racks.length > 0
+              ? 'This site has no racks yet — create one above, or switch Site to see another one’s racks.'
+              : 'Create a rack using the toolbar above — placed devices render as RU-accurate 3D blocks.'}
+          />
+        </div>
+      )}
+
+      <div className="pointer-events-none absolute inset-x-3 top-3 z-10 flex flex-col items-start gap-2">
+        {/* Select popovers remain outside the scrollable action strip so they
+            cannot be clipped; action-only buttons use the shared toolbar. */}
+        <div className="glass-strong pointer-events-auto flex w-fit max-w-full min-w-0 items-center gap-2 rounded-xl px-2.5 py-2 shadow-glass">
         {/* Create site / rack — moved here from the deleted 2D elevation
             panel, the only place these existed before. */}
         <button
@@ -1122,12 +1172,12 @@ export function Rack3DElevationPanel() {
           onChange={(e) => setNewRackName(e.target.value)}
           placeholder="New rack name"
           aria-label="New rack name"
-          className="w-28 shrink-0 rounded-md border border-fg/10 bg-transparent px-1.5 py-1 text-xs text-fg outline-none placeholder:text-fg/30 focus:border-accent/50"
+          className="w-28 shrink-0 rounded-lg border border-fg/10 bg-recess/30 px-2 py-1.5 text-xs text-fg outline-none placeholder:text-fg/35 focus:border-accent/50"
         />
         <Select
           aria-label="New rack site"
           value={newRackSite}
-          onChange={setNewRackSite}
+          onChange={setNewRackSiteOverride}
           className="w-24 shrink-0"
           options={[{ value: '', label: '(no site)' }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
         />
@@ -1169,7 +1219,7 @@ export function Rack3DElevationPanel() {
           />
         </div>
         <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
-        <HScrollToolbar className="flex-1 gap-2">
+        <div className="ng-scroll-hidden flex min-w-0 items-center gap-2 overflow-x-auto">
           <button type="button" className={cn(btn(face === 'front'), 'shrink-0')} onClick={() => setFace('front')}>Depan</button>
           <button type="button" className={cn(btn(face === 'back'), 'shrink-0')} onClick={() => setFace('back')}>Belakang</button>
           <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
@@ -1189,37 +1239,37 @@ export function Rack3DElevationPanel() {
           <button type="button" className={cn(btn(mode === 'adddev'), 'shrink-0')} onClick={() => toggleMode('adddev')} title="Tambah perangkat ke rak">
             <Plus className="size-3.5" /> Tambah perangkat
           </button>
-        </HScrollToolbar>
-      </div>
+        </div>
+        </div>
 
       {/* Per-rack enclosure profile, one chip per rack actually shown —
           replaces the old fixed two-slot A/B picker row. */}
       {viewRacks.length > 0 && (
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-fg/10 px-3 py-1.5">
+        <div className="glass pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-3 py-2 shadow-glass">
           {viewRacks.map((r) => rackChip(r))}
         </div>
       )}
 
       {error && (
-        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-danger/10 px-3 py-1.5 text-xs text-danger">
+        <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-danger/25 bg-panel px-3 py-2 text-xs text-danger shadow-glass">
           <AlertTriangle size={13} /> {error}
         </div>
       )}
       {topoQ.isError && (
-        <div className="flex items-center gap-1.5 border-b border-fg/10 bg-danger/10 px-3 py-1.5 text-xs text-danger">
+        <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-danger/25 bg-panel px-3 py-2 text-xs text-danger shadow-glass">
           <AlertTriangle size={13} /> Gagal memuat topologi project.
         </div>
       )}
 
       {/* NG-PH3D P3: over-length banner (GET /plant, over_length flag). */}
       {overLength.length > 0 && (
-        <div className="border-b border-amber-500/20 bg-amber-500/10 px-3 py-1.5 text-xs text-amber-300">
-          <div className="flex items-center gap-1 font-medium">
+        <div className="pointer-events-auto max-w-xl rounded-xl border border-warning/30 bg-panel px-3 py-2 text-xs text-fg/80 shadow-glass">
+          <div className="flex items-center gap-1 font-medium text-warning">
             <AlertTriangle size={13} /> Cable exceeds maximum length (link errored)
           </div>
           <ul className="mt-1 space-y-0.5 pl-5">
             {overLength.map(({ cable, media }) => (
-              <li key={cable.id} className="list-disc text-amber-200/80">
+              <li key={cable.id} className="list-disc text-fg/70">
                 {cable.label || cable.id.slice(0, 6)} — {media} @ {cable.length_m} m
               </li>
             ))}
@@ -1232,7 +1282,7 @@ export function Rack3DElevationPanel() {
           of losing it silently. Clicking one arms the "Pindahkan" bar below,
           the exact same place-a-device path P2 already shipped. */}
       {unplaced.length > 0 && (
-        <div className="flex flex-wrap items-center gap-1.5 border-b border-fg/10 px-3 py-1.5 text-xs">
+        <div className="glass pointer-events-auto flex max-w-full flex-wrap items-center gap-1.5 rounded-xl px-3 py-2 text-xs shadow-glass">
           <span className="text-fg-muted">Unplaced ({unplaced.length})</span>
           {unplaced.map((n) => (
             <button
@@ -1256,10 +1306,12 @@ export function Rack3DElevationPanel() {
           nowhere in the 2.5D elevation to click on, so list + edit their
           mount here instead of losing them silently. */}
       {projectId && (
-        <UnrackedDevicesPanel
-          projectId={projectId}
-          nodes={plantQ.data?.unracked_nodes[viewSiteId] ?? []}
-        />
+        <div className="glass pointer-events-auto max-w-xl overflow-hidden rounded-xl shadow-glass">
+          <UnrackedDevicesPanel
+            projectId={projectId}
+            nodes={plantQ.data?.unracked_nodes[viewSiteId] ?? []}
+          />
+        </div>
       )}
 
       {/* Perangkat terpilih (permintaan Surya, slice C): tidak ada lagi
@@ -1269,7 +1321,7 @@ export function Rack3DElevationPanel() {
           Node dari tray Unplaced (tanpa mesh, tak bisa di-drag) tetap pakai
           klik-untuk-tempatkan, sama seperti sebelumnya. */}
       {selNode && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-fg/10 px-3 py-1.5 text-xs">
+        <div className="glass pointer-events-auto flex max-w-xl flex-wrap items-center gap-2 rounded-xl px-3 py-2 text-xs shadow-glass">
           <Move className="size-3.5 text-fg-muted" />
           <span className="text-fg">{selNode.name}</span>
           <span className="text-fg-muted">
@@ -1279,40 +1331,29 @@ export function Rack3DElevationPanel() {
           </span>
         </div>
       )}
-
-      {/* canvas */}
-      <div ref={hostRef} className="relative min-h-0 flex-1">
-        {topoQ.isSuccess && viewRackIds.length === 0 && (
-          <WorkspaceEmptyState
-            icon={Server}
-            title="No racks yet"
-            hint={racks.length > 0
-              ? 'This site has no racks yet — create one above, or switch Site to see another one’s racks.'
-              : 'Create a rack using the toolbar above — placed devices render as RU-accurate 3D blocks.'}
-          />
-        )}
-        {devicePicker && (
-          <RackDevicePicker
-            px={devicePicker.px}
-            rackLabel={(() => {
-              const r = viewRacks.find((x) => x.id === devicePicker.rackId);
-              return r ? rackLabel(r) : devicePicker.rackId;
-            })()}
-            ruStart={devicePicker.ruStart}
-            types={pickableTypes}
-            busy={addDevice.isPending}
-            onPick={pickDeviceType}
-            onClose={() => { setDevicePicker(null); setStatus('Dibatalkan — tidak ada perubahan dikirim'); }}
-          />
-        )}
       </div>
 
+      {devicePicker && (
+        <RackDevicePicker
+          px={devicePicker.px}
+          rackLabel={(() => {
+            const r = viewRacks.find((x) => x.id === devicePicker.rackId);
+            return r ? rackLabel(r) : devicePicker.rackId;
+          })()}
+          ruStart={devicePicker.ruStart}
+          types={pickableTypes}
+          busy={addDevice.isPending}
+          onPick={pickDeviceType}
+          onClose={() => { setDevicePicker(null); setStatus('Dibatalkan — tidak ada perubahan dikirim'); }}
+        />
+      )}
+
       {/* status bar + legend */}
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 border-t border-fg/10 px-3 py-1.5 text-[11px] text-fg-muted">
+      <div className="glass pointer-events-auto absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl px-3 py-2 text-[11px] text-fg-muted shadow-glass">
         <span className="text-fg">{status}</span>
         {/* NG-PH3D P3: watts/BTU for exactly the two racks shown — same
             nodeWatts()/wattsToBtu() the 2D panel's per-site rollup uses. */}
-        <span className="flex items-center gap-1 text-amber-300/80">
+        <span className="flex items-center gap-1 text-warning/80">
           <Zap size={12} /> {shownWatts} W · {wattsToBtu(shownWatts)} BTU/hr
         </span>
         <span className="ml-auto">{deviceCount} perangkat · {links.length} kabel</span>
