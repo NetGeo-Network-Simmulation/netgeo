@@ -38,6 +38,7 @@ describe('plantAdapter — per-SKU chassis dimensions (§8.1)', () => {
     const dev = adapted.racks[0]!.devices.find((d) => d.id === 'n1')!;
     expect(dev.bodyWidthM).toBeCloseTo(0.443, 5);
     expect(dev.bodyDepthM).toBeCloseTo(0.224, 5);
+    expect(dev.chassisAsset).toBe('chassis-mikrotik-crs317');
     expect(dev.generic).toBe(false);
   });
 
