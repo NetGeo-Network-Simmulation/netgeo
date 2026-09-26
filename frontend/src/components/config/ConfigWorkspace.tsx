@@ -1,5 +1,5 @@
 /**
- * ConfigWorkspace — the Config Center (v1.2.030, clay design). Right inspector
+ * ConfigWorkspace — the Config Center. Right inspector
  * for the active project's devices; main area with three tabs: Running config · Diff ·
  * Export. It's the full-workspace sibling of the BottomDrawer's quick Config
  * tab (which stays for topology-scoped peeks).
@@ -89,10 +89,7 @@ export function ConfigWorkspace() {
       ? nodes.filter((n) => n.name.toLowerCase().includes(q) || NOS_LABEL[n.nos].toLowerCase().includes(q))
       : nodes;
   }, [nodes, search]);
-
-  // Default selection follows the (filtered) list; falls back to the first node.
-  const selected =
-    nodes.find((n) => n.id === selectedId) ?? filtered[0] ?? nodes[0] ?? null;
+  const selected = nodes.find((n) => n.id === selectedId) ?? filtered[0] ?? nodes[0] ?? null;
   const nodeId = selected?.id ?? null;
 
   const runningQ = useQuery({
@@ -138,14 +135,11 @@ export function ConfigWorkspace() {
   };
 
   return (
-    <div className="absolute inset-0 flex gap-3 bg-surface p-3 pl-[116px]">
-      {/* Main editor uses the same rounded clay panel language as Topology and
-          Maps. The navigation rail still floats over the workspace, so only
-          this in-flow content keeps the shared 116px clearance. */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-fg/10 bg-panel shadow-glass">
+    <div className="absolute inset-0 flex gap-3 bg-surface p-3 pl-[116px] font-sans">
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-fg/15 bg-panel shadow-glass">
         {/* Toolbar + tabs */}
-        <div className="flex h-14 shrink-0 items-center gap-4 border-b border-fg/10 bg-panel px-5">
-          <div className="flex h-full shrink-0 gap-5 text-xs font-medium" role="tablist" aria-label="Config views">
+        <div className="flex min-h-14 shrink-0 items-center gap-3 border-b border-fg/10 bg-panel px-3">
+          <div className="flex shrink-0 gap-1 rounded-full border border-fg/10 bg-surface p-1 text-xs font-medium" role="tablist" aria-label="Config views">
             {(['running', 'diff', 'export'] as const).map((t) => (
               <button
                 key={t}
@@ -153,10 +147,10 @@ export function ConfigWorkspace() {
                 aria-selected={tab === t}
                 onClick={() => setTab(t)}
                 className={cn(
-                  'h-full border-b-2 px-1 transition-colors',
+                  'rounded-full px-3 py-1.5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent',
                   tab === t
-                    ? 'border-accent text-accent'
-                    : 'border-transparent text-fg/55 hover:text-fg/90',
+                    ? 'bg-accent text-accent-fg'
+                    : 'text-fg/70 hover:bg-fg/10 hover:text-fg',
                 )}
               >
                 {t === 'running' ? 'Running config' : t === 'diff' ? 'Diff' : 'Export'}
@@ -181,21 +175,21 @@ export function ConfigWorkspace() {
 
           <HScrollToolbar className="flex-1 gap-3">
             {tab === 'diff' && (
-              <span className="shrink-0 rounded-lg border border-fg/10 bg-recess/30 px-3 py-1.5 text-xs text-fg/60">
+              <span className="shrink-0 rounded-full border border-fg/10 bg-surface px-3 py-1.5 text-xs text-fg/70">
                 Compare: intent vs running
               </span>
             )}
             <button
               onClick={copy}
               disabled={!copyText}
-              className="flex shrink-0 items-center gap-2 rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              className="flex shrink-0 items-center gap-2 rounded-full border border-fg/10 px-3 py-1.5 text-xs font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
             >
               {copied ? <Check className="h-4 w-4 text-success" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
               Copy
             </button>
             <button
               onClick={() => configsApi.downloadProjectConfigs(projectId, vendor || undefined)}
-              className="flex shrink-0 items-center gap-2 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-soft"
+              className="flex shrink-0 items-center gap-2 rounded-full bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg transition-colors hover:bg-accent-soft"
             >
               <Download className="h-4 w-4" aria-hidden />
               Export vendor config
@@ -204,7 +198,7 @@ export function ConfigWorkspace() {
         </div>
 
         {/* Body */}
-        <div className="min-h-0 flex-1 bg-surface/35">
+        <div className="min-h-0 flex-1 bg-panel">
           {!selected ? (
             <WorkspaceEmptyState icon={FileCode2} title="Select a device" hint="Pick a device to view its config." />
           ) : tab === 'running' ? (
@@ -240,20 +234,20 @@ export function ConfigWorkspace() {
 
       {/* Device inspector lives on the right so the editor remains the visual
           anchor and the centered NavigationRail never obscures device names. */}
-      <aside className="flex w-[296px] shrink-0 flex-col overflow-hidden rounded-xl border border-fg/10 bg-panel shadow-glass">
+      <aside className="flex w-56 shrink-0 flex-col overflow-hidden rounded-xl border border-fg/15 bg-panel shadow-glass lg:w-[296px]">
         <div className="border-b border-fg/10 p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-semibold text-fg/85">Devices</span>
-            <span className="rounded-full bg-fg/8 px-2 py-0.5 text-[10px] text-fg/50">{nodes.length}</span>
+            <span className="rounded-full bg-fg/8 px-2 py-0.5 text-[10px] text-fg/60">{nodes.length}</span>
           </div>
-          <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
-            <Search className="h-4 w-4 text-fg/40" aria-hidden />
+          <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-surface px-2.5 py-1.5 focus-within:border-accent/50">
+            <Search className="h-4 w-4 text-fg/50" aria-hidden />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Filter devices…"
-              aria-label="Search devices"
-              className="w-full bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
+              aria-label="Filter devices"
+              className="w-full bg-transparent text-xs text-fg/85 placeholder:text-fg/50 focus:outline-none"
             />
           </label>
         </div>
@@ -261,7 +255,7 @@ export function ConfigWorkspace() {
           {isLoading ? (
             <p className="p-3 text-xs text-fg/40">Loading devices…</p>
           ) : filtered.length === 0 ? (
-            <p className="p-3 text-xs text-fg/40">
+            <p className="p-3 text-xs text-fg/60">
               {nodes.length === 0 ? 'This project has no devices yet.' : `No device matches “${search}”.`}
             </p>
           ) : (
@@ -293,7 +287,7 @@ function DeviceRow({ node, active, onSelect }: { node: NodeModel; active: boolea
       )}
     >
       {active && <span className="absolute inset-y-2 right-0 w-0.5 rounded-full bg-accent" aria-hidden />}
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-fg/10 bg-recess/30">
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-fg/10 bg-surface">
         <Icon className={cn('h-[18px] w-[18px]', active ? 'text-accent' : 'text-fg/55')} aria-hidden />
       </span>
       <span className="min-w-0 flex-1">
@@ -341,7 +335,7 @@ function PaneState({
 function CodePane({ text }: { text: string }) {
   const lines = text.replace(/\n$/, '').split('\n');
   return (
-    <div className="ng-scroll h-full overflow-auto bg-recess/40 p-4 font-mono text-[12.5px] leading-relaxed">
+    <div className="ng-scroll h-full overflow-auto bg-panel p-4 font-mono text-[12.5px] leading-relaxed">
       <table className="w-full border-collapse">
         <tbody>
           {lines.map((line, i) => (
@@ -431,7 +425,7 @@ function DiffColumn({
       <div className="shrink-0 border-b border-fg/10 bg-panel px-4 py-2 font-mono text-[12px] text-fg/60">
         {title}
       </div>
-      <div className="ng-scroll flex-1 overflow-auto bg-recess/40 p-4 font-mono text-[12.5px] leading-relaxed">
+      <div className="ng-scroll flex-1 overflow-auto bg-panel p-4 font-mono text-[12.5px] leading-relaxed">
         <table className="w-full border-collapse">
           <tbody>
             {rows.map((r, i) => {
