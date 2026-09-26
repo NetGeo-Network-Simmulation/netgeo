@@ -91,6 +91,21 @@ def test_shaped_departures_spaced_by_size_over_cir():
     assert i1.counters.shaper_delays == n - 1
 
 
+def test_shaper_burst_smaller_than_frame_still_drains():
+    """Packet-mode shaping must not retry forever when Bc < frame size."""
+    net, i1, _i2, att = _pair(bandwidth_bps=1_000_000_000_000.0)
+    att.qos = QosConfig(enabled=True, shaper_bps=8_000.0, shaper_burst_bytes=100)
+
+    i1.transmit(net, _frame(1000))
+    net.run_for(2.0)
+
+    tx = [r for r in net.capture.records("link", limit=1000) if r.direction == "tx"]
+    assert len(tx) == 1
+    assert tx[0].time == pytest.approx(0.9, rel=1e-9)
+    assert i1.counters.shaper_delays == 1
+    assert not any(i1._queues)
+
+
 def test_unshaped_link_never_delays():
     """Regression: shaper_bps=None (the default) must never arm a retry —
     disabled-path parity for interfaces that don't opt into shaping."""
