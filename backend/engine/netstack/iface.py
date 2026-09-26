@@ -352,12 +352,16 @@ class Interface:
         timer, replay-safe) and drifts exactly the way the policer doesn't.
         Returns ``0.0`` when the frame may go now (tokens already consumed).
         """
+        # Packet-mode shaping must still make progress when Bc is smaller
+        # than one frame. Let this frame grow the effective bucket capacity;
+        # it first waits for the missing tokens, then drains normally.
+        capacity = max(float(burst_bytes), float(size_bytes))
         tokens = self._shaper_tokens
         if tokens is None:
             tokens = float(burst_bytes)
         else:
             elapsed = net.now - self._shaper_ts
-            tokens = min(float(burst_bytes), tokens + elapsed * (rate_bps / 8.0))
+            tokens = min(capacity, tokens + elapsed * (rate_bps / 8.0))
         self._shaper_ts = net.now
         if tokens >= size_bytes - self._TOKEN_EPSILON:
             self._shaper_tokens = max(0.0, tokens - size_bytes)
@@ -406,7 +410,10 @@ class Interface:
         pkt = frame.payload
         assert isinstance(pkt, Ipv4Packet)
         inner = getattr(pkt.payload, "wire_size", None)
-        total_len = inner if inner is not None else pkt.payload_len
+        is_fragment = pkt.more_fragments or pkt.fragment_offset > 0
+        total_len = pkt.frag_len if is_fragment else (
+            inner if inner is not None else pkt.payload_len
+        )
         max_data = ((mtu - 20) // 8) * 8
         if max_data <= 0:
             # ponytail: no lab topology configures an MTU this small; treat
@@ -417,15 +424,16 @@ class Interface:
             return
         ident = pkt.identification or net.next_frame_id()
         offset = 0
+        base_offset = pkt.fragment_offset
         while offset < total_len:
             chunk = min(max_data, total_len - offset)
             frag = replace(
                 pkt,
-                payload=pkt.payload if offset == 0 else None,
+                payload=pkt.payload if base_offset == 0 and offset == 0 else None,
                 payload_len=0,
                 identification=ident,
-                more_fragments=(offset + chunk) < total_len,
-                fragment_offset=offset,
+                more_fragments=pkt.more_fragments or (offset + chunk) < total_len,
+                fragment_offset=base_offset + offset,
                 frag_len=chunk,
             )
             self.transmit(

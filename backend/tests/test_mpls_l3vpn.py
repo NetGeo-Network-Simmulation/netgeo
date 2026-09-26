@@ -18,6 +18,7 @@ from ipaddress import IPv4Address
 
 from engine.netstack import Network
 from engine.netstack.device import Host
+from engine.netstack.frames import VpnRoute, VpnUpdate
 from engine.netstack.protocols.bgp import BgpProcess
 from engine.netstack.protocols.mpls import L3vpnProcess, LdpProcess
 from engine.netstack.protocols.ospf import OspfProcess
@@ -303,6 +304,34 @@ def test_vpnv4_import_and_isolation_of_rib():
     globals_ = {str(x.prefix) for x in pe1.routes}
     for ce_prefix in ("10.1.1.0/24", "10.1.2.0/24", "10.2.1.0/24", "10.2.2.0/24"):
         assert ce_prefix not in globals_, f"{ce_prefix} leaked to global RIB"
+
+
+def test_three_pe_updates_retain_each_senders_routes():
+    """A full snapshot from PE3 must not erase PE2's VPNv4 routes on PE1."""
+    pe1 = Router("pe1")
+    vpn = L3vpnProcess(pe1)
+    vpn.add_vrf("red", "65000:1", ["100:1"], ["100:1"])
+
+    pe2 = IPv4Address("10.255.0.2")
+    pe3 = IPv4Address("10.255.0.3")
+    vpn._on_update(pe2, VpnUpdate(routes=[VpnRoute(
+        rd="65000:2", prefix="10.2.0.0/24", rt=("100:1",),
+        next_hop=str(pe2), label=2002,
+    )]))
+    vpn._on_update(pe3, VpnUpdate(routes=[VpnRoute(
+        rd="65000:3", prefix="10.3.0.0/24", rt=("100:1",),
+        next_hop=str(pe3), label=3003,
+    )]))
+
+    routes = {str(route.prefix): route for route in pe1.vrfs["red"].routes}
+    assert routes["10.2.0.0/24"].next_hop == pe2
+    assert routes["10.3.0.0/24"].next_hop == pe3
+
+    # PE2 withdrawing its own full snapshot must leave PE3 untouched.
+    vpn._on_update(pe2, VpnUpdate())
+    routes = {str(route.prefix): route for route in pe1.vrfs["red"].routes}
+    assert "10.2.0.0/24" not in routes
+    assert routes["10.3.0.0/24"].next_hop == pe3
 
 
 # ----- data plane ---------------------------------------------------------------
