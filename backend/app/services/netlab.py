@@ -574,7 +574,8 @@ class Lab:
 
         qos dict: {"enabled": bool, "ef_min_dscp": int, "af_min_dscp": int,
                    "depth_per_class": int, "shaper_bps": float|None,
-                   "shaper_burst_bytes": int}
+                   "shaper_burst_bytes": int, "police_bps": [EF, AF, BE],
+                   "police_burst_bytes": int}
         Returns True if the attachment was found and updated.
         """
         self._record("set_link_qos", link_id=link_id, qos=qos)
@@ -590,6 +591,8 @@ class Lab:
             ef_min_dscp=int(qos.get("ef_min_dscp", 40)),
             af_min_dscp=int(qos.get("af_min_dscp", 8)),
             depth_per_class=int(qos.get("depth_per_class", 32)),
+            police_bps=tuple(qos.get("police_bps", (None, None, None))),
+            police_burst_bytes=int(qos.get("police_burst_bytes", 8192)),
             shaper_bps=float(shaper_bps) if shaper_bps is not None else None,
             shaper_burst_bytes=int(qos.get("shaper_burst_bytes", 8192)),
         )

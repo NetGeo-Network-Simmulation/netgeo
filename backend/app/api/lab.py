@@ -13,7 +13,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import Response
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.api.deps import repo, translate_not_found
 from app.exceptions.base import NotFound, SimulationError
@@ -57,6 +57,25 @@ class StepRequest(_Body):
 
 class SeekRequest(_Body):
     seq: int  # ledger cursor (0 = pristine lab)
+
+
+class LinkQosRequest(_Body):
+    enabled: bool = False
+    ef_min_dscp: int = Field(default=40, ge=0, le=63)
+    af_min_dscp: int = Field(default=8, ge=0, le=63)
+    depth_per_class: int = Field(default=32, ge=1)
+    police_bps: tuple[float | None, float | None, float | None] = (None, None, None)
+    police_burst_bytes: int = Field(default=8192, ge=0)
+    shaper_bps: float | None = Field(default=None, gt=0)
+    shaper_burst_bytes: int = Field(default=8192, ge=0)
+
+    @model_validator(mode="after")
+    def valid_rates(self):
+        if self.af_min_dscp > self.ef_min_dscp:
+            raise ValueError("af_min_dscp must not exceed ef_min_dscp")
+        if any(rate is not None and rate <= 0 for rate in self.police_bps):
+            raise ValueError("police_bps rates must be positive")
+        return self
 
 
 async def _topo(r: MemoryRepository, project_id: str):
@@ -336,6 +355,27 @@ async def lab_step(
     return await _locked(project_id, work)
 
 
+@router.put("/{project_id}/links/{link_id}/qos")
+async def lab_link_qos(
+    project_id: str,
+    link_id: str,
+    body: LinkQosRequest,
+    r: Annotated[MemoryRepository, Depends(repo)],
+):
+    """Apply a journaled QoS profile to a live simulated link."""
+    topo = await _topo(r, project_id)
+    if not any(link.id == link_id for link in topo.links):
+        raise NotFound(f"link '{link_id}' not found in project")
+
+    def work():
+        lab = _lab_for(topo)
+        if not lab.do_set_link_qos(link_id, body.model_dump()):
+            raise NotFound(f"link '{link_id}' not found in lab")
+        return {"project_id": project_id, "link_id": link_id, "qos": body.model_dump()}
+
+    return await _locked(project_id, work)
+
+
 @router.post("/{project_id}/seek")
 async def lab_seek(
     project_id: str, body: SeekRequest, r: Annotated[MemoryRepository, Depends(repo)]
@@ -481,16 +521,24 @@ async def lab_tables(
         _cls = ("EF", "AF", "BE")
         qos_rows = []
         for i in dev.interfaces.values():
-            enabled = i.attachment is not None and i.attachment.qos.enabled
+            cfg = i.attachment.qos if i.attachment is not None else None
+            enabled = cfg is not None and cfg.enabled
             qos_rows.append(
                 {
                     "iface": i.name,
                     "qos_enabled": enabled,
+                    "police_bps": cfg.police_bps if cfg else (None, None, None),
+                    "police_burst_bytes": cfg.police_burst_bytes if cfg else None,
+                    "shaper_bps": cfg.shaper_bps if cfg else None,
+                    "shaper_burst_bytes": cfg.shaper_burst_bytes if cfg else None,
+                    "drops_policed": i.counters.drops_policed,
+                    "shaper_delays": i.counters.shaper_delays,
                     "classes": [
                         {
                             "class": _cls[ci],
                             "tx_frames": i.counters.tx_by_class[ci],
                             "drops": i.counters.drops_queue_by_class[ci],
+                            "drops_policed": i.counters.drops_policed_by_class[ci],
                         }
                         for ci in range(3)
                     ],
