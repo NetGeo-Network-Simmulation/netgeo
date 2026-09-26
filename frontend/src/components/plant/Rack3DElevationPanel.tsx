@@ -24,7 +24,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Cable, DoorClosed, Move, Plus, Server, Tag, Zap } from 'lucide-react';
+import { AlertTriangle, Cable, DoorClosed, Move, Plus, Server, SlidersHorizontal, Tag, X, Zap } from 'lucide-react';
 import * as THREE from 'three';
 import type { NodeKind, Rack } from '@/api/types';
 import { deviceTypesApi, linksApi, nodesApi, physicalApi, projectsApi, type ApiError, type DeviceType } from '@/api/client';
@@ -302,6 +302,7 @@ export function Rack3DElevationPanel() {
   const [doors, setDoors] = useState(false);
   const [labels, setLabels] = useState(false);
   const [anim, setAnim] = useState(true);
+  const [enclosuresOpen, setEnclosuresOpen] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
   const selNode = useMemo(
     () => (sel ? (topoQ.data?.nodes ?? []).find((n) => n.id === sel) ?? null : null),
@@ -1092,26 +1093,6 @@ export function Rack3DElevationPanel() {
       on ? 'bg-accent/20 text-accent ring-1 ring-accent/40' : 'text-fg-muted hover:bg-fg/5 hover:text-fg'
     }`;
 
-  /** Per-rack enclosure-profile picker, one per bay actually shown — replaces
-   *  the old fixed two-slot A/B picker (NG-PH3D P41: which racks are shown
-   *  is automatic now, driven by the site selector, not manually chosen
-   *  here; this control only still lets you change *how a shown rack looks*). */
-  const rackChip = (rack: Rack) => (
-    <div key={rack.id} className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
-      <span className="max-w-[7rem] truncate text-fg" title={rack.name}>{rack.name}</span>
-      <Select
-        aria-label={`Profil enclosure untuk ${rack.name}`}
-        value={rack.enclosure_profile ?? DEFAULT_ENCLOSURE}
-        onChange={(profile) => updateEnclosure.mutate({ rackId: rack.id, profile })}
-        className="w-28"
-        options={ENCLOSURE_KEYS.filter((k) => k !== 'cpi' || rack.enclosure_profile === 'cpi').map((k) => ({
-          value: k,
-          label: RACK_SPECS[k]!.label.replace(/ \d+U.*/, ''),
-        }))}
-      />
-    </div>
-  );
-
   // NG-PH3D P4: no WebGL, no scene — a black/blank canvas here would look
   // like a crash. Say so plainly (there is no 2D fallback panel anymore).
   if (webglError) {
@@ -1220,6 +1201,17 @@ export function Rack3DElevationPanel() {
         </div>
         <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
         <div className="ng-scroll-hidden flex min-w-0 items-center gap-2 overflow-x-auto">
+          <button
+            type="button"
+            className={cn(btn(enclosuresOpen), 'shrink-0')}
+            onClick={() => setEnclosuresOpen((open) => !open)}
+            disabled={viewRacks.length === 0}
+            aria-expanded={enclosuresOpen}
+            aria-controls="rack-enclosure-panel"
+          >
+            <SlidersHorizontal className="size-3.5" /> Enclosure
+          </button>
+          <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
           <button type="button" className={cn(btn(face === 'front'), 'shrink-0')} onClick={() => setFace('front')}>Depan</button>
           <button type="button" className={cn(btn(face === 'back'), 'shrink-0')} onClick={() => setFace('back')}>Belakang</button>
           <div className="mx-1 h-5 w-px shrink-0 bg-fg/10" />
@@ -1241,14 +1233,6 @@ export function Rack3DElevationPanel() {
           </button>
         </div>
         </div>
-
-      {/* Per-rack enclosure profile, one chip per rack actually shown —
-          replaces the old fixed two-slot A/B picker row. */}
-      {viewRacks.length > 0 && (
-        <div className="glass pointer-events-auto flex max-w-full flex-wrap items-center gap-x-3 gap-y-1 rounded-xl px-3 py-2 shadow-glass">
-          {viewRacks.map((r) => rackChip(r))}
-        </div>
-      )}
 
       {error && (
         <div className="pointer-events-auto flex items-center gap-1.5 rounded-xl border border-danger/25 bg-panel px-3 py-2 text-xs text-danger shadow-glass">
@@ -1332,6 +1316,68 @@ export function Rack3DElevationPanel() {
         </div>
       )}
       </div>
+
+      {/* Enclosure choices live in an on-demand tool panel, not a row of
+          dropdowns inserted between warnings and the scene. Direct buttons
+          avoid listbox popovers covering the warning/unplaced stack. */}
+      {enclosuresOpen && viewRacks.length > 0 && (
+        <section
+          id="rack-enclosure-panel"
+          aria-label="Rack enclosure profiles"
+          className="glass-strong absolute top-[76px] right-3 z-20 flex max-h-[calc(100%-152px)] w-[340px] flex-col overflow-hidden rounded-xl border border-fg/15 shadow-glass-lg"
+        >
+          <div className="flex items-center justify-between border-b border-fg/10 px-3 py-2.5">
+            <div>
+              <h2 className="text-sm font-medium text-fg">Rack enclosures</h2>
+              <p className="text-[11px] text-fg/50">Choose a verified enclosure profile per rack.</p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setEnclosuresOpen(false)}
+              aria-label="Close enclosure panel"
+              className="grid size-8 place-items-center rounded-lg text-fg/55 transition-colors hover:bg-fg/8 hover:text-fg"
+            >
+              <X className="size-4" aria-hidden />
+            </button>
+          </div>
+          <div className="ng-scroll min-h-0 flex-1 space-y-3 overflow-y-auto p-3">
+            {viewRacks.map((rack) => {
+              const value = rack.enclosure_profile ?? DEFAULT_ENCLOSURE;
+              const options = ENCLOSURE_KEYS.filter((key) => key !== 'cpi' || value === 'cpi');
+              return (
+                <fieldset key={rack.id} className="rounded-lg border border-fg/10 bg-surface/70 p-2.5">
+                  <legend className="max-w-full truncate px-1 text-xs font-medium text-fg" title={rack.name}>
+                    {rack.name}
+                  </legend>
+                  <div className="mt-1 grid grid-cols-2 gap-1" role="group" aria-label={`Profil enclosure untuk ${rack.name}`}>
+                    {options.map((key) => {
+                      const active = key === value;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          aria-pressed={active}
+                          title={RACK_SPECS[key]!.label}
+                          disabled={updateEnclosure.isPending}
+                          onClick={() => updateEnclosure.mutate({ rackId: rack.id, profile: key })}
+                          className={cn(
+                            'truncate rounded-md border px-2 py-1.5 text-left text-[11px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:opacity-40',
+                            active
+                              ? 'border-accent bg-accent/12 text-fg'
+                              : 'border-fg/10 text-fg/60 hover:bg-fg/8 hover:text-fg',
+                          )}
+                        >
+                          {RACK_SPECS[key]!.label.replace(/ \d+U.*/, '')}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </fieldset>
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       {devicePicker && (
         <RackDevicePicker
