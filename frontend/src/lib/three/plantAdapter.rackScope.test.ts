@@ -10,13 +10,18 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { NodeModel, Rack, Topology } from '@/api/types';
-import { adaptTopology, racksForSite } from './plantAdapter';
+import { adaptTopology, rackSiteForView, racksForSite } from './plantAdapter';
 
 function rack(id: string, siteId: string | null, name = id): Rack {
   return { id, project_id: 'p1', site_id: siteId, name, ru_height: 42, enclosure_profile: null };
 }
 
 describe('racksForSite (site-scoped rack row)', () => {
+  it('creates a rack in the viewed site by default, preserving that site’s devices and cables', () => {
+    expect(rackSiteForView('site-a', null)).toBe('site-a');
+    expect(rackSiteForView('site-a', '')).toBe('');
+    expect(rackSiteForView('site-a', 'site-b')).toBe('site-b');
+  });
   it('a site with zero racks resolves to zero ids', () => {
     const racks = [rack('r1', 'site-a'), rack('r2', 'site-a')];
     expect(racksForSite(racks, 'site-b')).toEqual([]);

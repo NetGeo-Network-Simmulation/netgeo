@@ -224,6 +224,19 @@ def build_chassis_mikrotik_crs317():
     export_glb(body, 'chassis-mikrotik-crs317.glb')
 
 
+# ─── MikroTik CRS328-24P-4S+RM chassis (wave 1, V — official vendor) ────────
+# 443 x 300 x 44 mm: https://mikrotik.com/product/crs328_24p_4s_rm and
+# https://manual.mikrotik.com/hardware/crs328-24p-4s-plus-rm/.
+# Exact port positions are unpublished; the app's catalog faceplate retains
+# cable anchors. This GLB is only the dimension-verified case envelope.
+def build_chassis_mikrotik_crs328():
+    clear_scene()
+    w, d, h = 0.443, 0.300, 0.044
+    body = box('chassis-mikrotik-crs328', w, d, h, h / 2)
+    add_material(body, 'powder-coated-steel', (0.12, 0.12, 0.125))
+    export_glb(body, 'chassis-mikrotik-crs328.glb')
+
+
 # ─── RJ-11/RJ-14 (6P6C) voice/FXS jack cage shell (Sesi port-fxs) ──────────
 # 6-position modular connector is physically SMALLER than the 8-position
 # 8P8C/RJ45 above and NOT interchangeable with it (keputusan Surya
@@ -367,6 +380,7 @@ if __name__ == '__main__':
     build_sfp_cage()
     build_qsfp_cage()
     build_chassis_mikrotik_crs317()
+    build_chassis_mikrotik_crs328()
     build_rj11_cage()
     build_cabinet_outdoor()
     build_monopole()
