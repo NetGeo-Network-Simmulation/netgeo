@@ -363,7 +363,7 @@ async def test_do_set_link_qos_journaled(client):
     assert lr.status_code == 201, lr.text
     link_id = lr.json()["id"]
 
-    # Use the lab manager directly (no REST endpoint for do_set_link_qos yet)
+    # The HTTP path must reach the same journaled Lab mutation.
     from app.services.netlab import get_lab_manager
 
     # Warm up the lab via REST (ping creates it)
@@ -372,12 +372,39 @@ async def test_do_set_link_qos_journaled(client):
 
     lab = get_lab_manager().peek(pid)
     assert lab is not None
-    result = lab.do_set_link_qos(link_id, {"enabled": True, "depth_per_class": 16})
-    assert result is True
+    changed = await client.put(f"/api/lab/{pid}/links/{link_id}/qos", json={
+        "enabled": True, "depth_per_class": 16,
+        "police_bps": [8000, None, None], "shaper_bps": 16000,
+    })
+    assert changed.status_code == 200, changed.text
 
     # Confirm the attachment has QoS enabled
     att = lab.net.attachments.get(link_id)
     assert att is not None and att.qos.enabled is True and att.qos.depth_per_class == 16
+    assert att.qos.police_bps == (8000, None, None)
+    assert att.qos.shaper_bps == 16000
+
+    tables = (await client.get(f"/api/lab/{pid}/tables/h1")).json()
+    row = tables["qos"][0]
+    assert row["police_bps"] == [8000, None, None]
+    assert row["shaper_bps"] == 16000
+    assert row["drops_policed"] == 0
+    assert row["shaper_delays"] == 0
+
+    stepped = await client.post(f"/api/lab/{pid}/step", json={"events": 1})
+    assert stepped.status_code == 200, stepped.text
+    replayed = await client.post(f"/api/lab/{pid}/seek", json={"seq": stepped.json()["seq"]})
+    assert replayed.status_code == 200, replayed.text
+    replay_row = (await client.get(f"/api/lab/{pid}/tables/h1")).json()["qos"][0]
+    assert replay_row["police_bps"] == [8000, None, None]
+    assert replay_row["shaper_bps"] == 16000
+
+    invalid = await client.put(f"/api/lab/{pid}/links/{link_id}/qos", json={
+        "enabled": True, "police_bps": [0, None, None]
+    })
+    assert invalid.status_code == 422
+    missing = await client.put(f"/api/lab/{pid}/links/missing/qos", json={"enabled": True})
+    assert missing.status_code == 404
 
     # The journal must contain the set_link_qos entry
     journal_kinds = [e["kind"] for e in lab.journal]
