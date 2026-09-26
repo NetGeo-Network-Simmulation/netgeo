@@ -213,6 +213,7 @@ class L3vpnProcess:
         self._next = vpn_label_base
         self._started = False
         self._sent: dict[IPv4Address, tuple] = {}   # peer -> last snapshot sent
+        self._received: dict[IPv4Address, tuple[VpnRoute, ...]] = {}
         router.processes.append(self)
 
     # ----- configuration -----------------------------------------------------
@@ -318,19 +319,24 @@ class L3vpnProcess:
         seg = pkt.payload
         if not isinstance(seg, TcpSegment) or not isinstance(seg.payload, VpnUpdate):
             return
-        self._on_update(seg.payload)
+        self._on_update(pkt.src, seg.payload)
 
-    def _on_update(self, update: VpnUpdate) -> None:
+    def _on_update(self, sender: IPv4Address, update: VpnUpdate) -> None:
+        # Each UPDATE is a full snapshot for one PE, not for the whole VPN.
+        # Keep those snapshots separate so a later peer cannot withdraw routes
+        # learned from peers that happened to advertise earlier.
+        self._received[sender] = tuple(update.routes)
         for vrf in self.router.vrfs.values():
-            vrf.withdraw("vpnv4")   # full-snapshot replace (single remote PE/VRF)
-            for vr in update.routes:
-                if not (set(vr.rt) & vrf.rt_import):
-                    continue        # route-target import gate
-                vrf.install(Route(
-                    prefix=IPv4Network(vr.prefix),
-                    next_hop=IPv4Address(vr.next_hop),
-                    iface_name=None,
-                    source="vpnv4",
-                    metric=1,
-                    vpn_label=vr.label,
-                ))
+            vrf.withdraw("vpnv4")
+            for peer in sorted(self._received, key=int):
+                for vr in self._received[peer]:
+                    if not (set(vr.rt) & vrf.rt_import):
+                        continue        # route-target import gate
+                    vrf.install(Route(
+                        prefix=IPv4Network(vr.prefix),
+                        next_hop=IPv4Address(vr.next_hop),
+                        iface_name=None,
+                        source="vpnv4",
+                        metric=1,
+                        vpn_label=vr.label,
+                    ))
