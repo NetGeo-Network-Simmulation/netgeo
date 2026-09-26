@@ -70,6 +70,45 @@ def test_fragmentation_df0_splits_and_reassembles():
     assert req_frags[-1].layers["ipv4"]["fragment_offset"] % 8 == 0
 
 
+def test_multihop_refragmentation_preserves_original_offsets():
+    """1500 -> 700 -> 300 MTUs must re-fragment, not restart offsets."""
+    net = Network(seed=10)
+    h1 = net.add_device(Host("h1"))
+    r1 = net.add_device(Router("r1"))
+    r2 = net.add_device(Router("r2"))
+    r3 = net.add_device(Router("r3"))
+
+    net.connect("a", net.add_iface(h1, "eth0", ["10.0.1.1/24"]),
+                net.add_iface(r1, "eth0", ["10.0.1.254/24"]), mtu=1500)
+    net.connect("b", net.add_iface(r1, "eth1", ["10.0.12.1/30"]),
+                net.add_iface(r2, "eth0", ["10.0.12.2/30"]), mtu=700)
+    net.connect("c", net.add_iface(r2, "eth1", ["10.0.23.1/30"]),
+                net.add_iface(r3, "eth0", ["10.0.23.2/30"]), mtu=300)
+    h1.default_gateway = IPv4Address("10.0.1.254")
+    r1.add_static_route("10.0.23.0/30", "10.0.12.2")
+    delivered = []
+    r3._handle_icmp_to_self = lambda net, pkt: delivered.append(pkt)
+    net.start()
+
+    h1.send_ip(net, Ipv4Packet(
+        src=IPv4Address("10.0.1.1"), dst=IPv4Address("10.0.23.2"),
+        proto=PROTO_ICMP, dont_fragment=False,
+        payload=IcmpMessage(type=8, ident=10, seq=1, data_len=1400),
+    ))
+    net.run_for(5.0)
+
+    assert len(delivered) == 1
+    assert delivered[0].payload.data_len == 1400
+    final_hop = [
+        rec for rec in net.capture.records(link_id="c")
+        if rec.direction == "tx"
+        and rec.layers.get("ipv4", {}).get("dst") == "10.0.23.2"
+    ]
+    offsets = sorted(rec.layers["ipv4"]["fragment_offset"] for rec in final_hop)
+    assert offsets == [0, 280, 560, 680, 960, 1240, 1360]
+    assert sum(not rec.layers["ipv4"]["more_fragments"] for rec in final_hop) == 1
+
+
 def test_fragmentation_df1_still_dropped_with_icmp():
     # Regression: DF=1 through a router hop whose next link has a lower MTU
     # -- same topology shape as the pre-existing test_mtu_violation test.
