@@ -1,6 +1,6 @@
 /**
- * ConfigWorkspace — the Config Center (v1.2.030, clay design). Left rail of the
- * active project's devices; main area with three tabs: Running config · Diff ·
+ * ConfigWorkspace — the Config Center (v1.2.030, clay design). Right inspector
+ * for the active project's devices; main area with three tabs: Running config · Diff ·
  * Export. It's the full-workspace sibling of the BottomDrawer's quick Config
  * tab (which stays for topology-scoped peeks).
  *
@@ -138,49 +138,14 @@ export function ConfigWorkspace() {
   };
 
   return (
-    <div className="absolute inset-0 flex bg-surface">
-      {/* Device rail — bg/border-r span the full width to x=0 (AppShell bleed);
-          the inner content gets pl-[116px] instead, 16px past the floating
-          rail's x=100 right edge, so the search box and device names never
-          render under the rail. */}
-      <aside className="flex w-[280px] shrink-0 flex-col border-r border-fg/10 bg-panel">
-        <div className="border-b border-fg/10 py-3 pr-3 pl-[116px]">
-          <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
-            <Search className="h-4 w-4 text-fg/40" aria-hidden />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search devices…"
-              aria-label="Search devices"
-              className="w-full bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
-            />
-          </label>
-        </div>
-        <div className="ng-scroll flex-1 overflow-y-auto" role="listbox" aria-label="Devices">
-          {isLoading ? (
-            <p className="p-4 text-xs text-fg/40">Loading devices…</p>
-          ) : filtered.length === 0 ? (
-            <p className="p-4 text-xs text-fg/40">
-              {nodes.length === 0 ? 'This project has no devices yet.' : `No device matches “${search}”.`}
-            </p>
-          ) : (
-            filtered.map((n) => (
-              <DeviceRow
-                key={n.id}
-                node={n}
-                active={n.id === nodeId}
-                onSelect={() => setSelectedId(n.id)}
-              />
-            ))
-          )}
-        </div>
-      </aside>
-
-      {/* Main */}
-      <main className="flex min-w-0 flex-1 flex-col">
+    <div className="absolute inset-0 flex gap-3 bg-surface p-3 pl-[116px]">
+      {/* Main editor uses the same rounded clay panel language as Topology and
+          Maps. The navigation rail still floats over the workspace, so only
+          this in-flow content keeps the shared 116px clearance. */}
+      <main className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-xl border border-fg/10 bg-panel shadow-glass">
         {/* Toolbar + tabs */}
-        <div className="flex h-14 shrink-0 items-center gap-4 border-b border-fg/10 bg-panel px-6">
-          <div className="flex h-full shrink-0 gap-6 font-mono text-[12px]" role="tablist" aria-label="Config views">
+        <div className="flex h-14 shrink-0 items-center gap-4 border-b border-fg/10 bg-panel px-5">
+          <div className="flex h-full shrink-0 gap-5 text-xs font-medium" role="tablist" aria-label="Config views">
             {(['running', 'diff', 'export'] as const).map((t) => (
               <button
                 key={t}
@@ -216,21 +181,21 @@ export function ConfigWorkspace() {
 
           <HScrollToolbar className="flex-1 gap-3">
             {tab === 'diff' && (
-              <span className="shrink-0 rounded border border-fg/10 bg-recess/30 px-3 py-1.5 font-mono text-[12px] text-fg/60">
+              <span className="shrink-0 rounded-lg border border-fg/10 bg-recess/30 px-3 py-1.5 text-xs text-fg/60">
                 Compare: intent vs running
               </span>
             )}
             <button
               onClick={copy}
               disabled={!copyText}
-              className="flex shrink-0 items-center gap-2 rounded border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
+              className="flex shrink-0 items-center gap-2 rounded-lg border border-fg/10 px-4 py-1.5 text-sm font-medium text-fg/85 transition-colors hover:bg-fg/5 disabled:opacity-40"
             >
               {copied ? <Check className="h-4 w-4 text-success" aria-hidden /> : <Copy className="h-4 w-4" aria-hidden />}
               Copy
             </button>
             <button
               onClick={() => configsApi.downloadProjectConfigs(projectId, vendor || undefined)}
-              className="flex shrink-0 items-center gap-2 rounded bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-soft"
+              className="flex shrink-0 items-center gap-2 rounded-lg bg-accent px-4 py-1.5 text-sm font-medium text-accent-fg transition-colors hover:bg-accent-soft"
             >
               <Download className="h-4 w-4" aria-hidden />
               Export vendor config
@@ -239,7 +204,7 @@ export function ConfigWorkspace() {
         </div>
 
         {/* Body */}
-        <div className="min-h-0 flex-1">
+        <div className="min-h-0 flex-1 bg-surface/35">
           {!selected ? (
             <WorkspaceEmptyState icon={FileCode2} title="Select a device" hint="Pick a device to view its config." />
           ) : tab === 'running' ? (
@@ -272,6 +237,45 @@ export function ConfigWorkspace() {
           )}
         </div>
       </main>
+
+      {/* Device inspector lives on the right so the editor remains the visual
+          anchor and the centered NavigationRail never obscures device names. */}
+      <aside className="flex w-[296px] shrink-0 flex-col overflow-hidden rounded-xl border border-fg/10 bg-panel shadow-glass">
+        <div className="border-b border-fg/10 p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold text-fg/85">Devices</span>
+            <span className="rounded-full bg-fg/8 px-2 py-0.5 text-[10px] text-fg/50">{nodes.length}</span>
+          </div>
+          <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-recess/30 px-2.5 py-1.5">
+            <Search className="h-4 w-4 text-fg/40" aria-hidden />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Filter devices…"
+              aria-label="Search devices"
+              className="w-full bg-transparent text-sm text-fg/85 placeholder:text-fg/35 focus:outline-none"
+            />
+          </label>
+        </div>
+        <div className="ng-scroll flex-1 overflow-y-auto p-1.5" role="listbox" aria-label="Devices">
+          {isLoading ? (
+            <p className="p-3 text-xs text-fg/40">Loading devices…</p>
+          ) : filtered.length === 0 ? (
+            <p className="p-3 text-xs text-fg/40">
+              {nodes.length === 0 ? 'This project has no devices yet.' : `No device matches “${search}”.`}
+            </p>
+          ) : (
+            filtered.map((n) => (
+              <DeviceRow
+                key={n.id}
+                node={n}
+                active={n.id === nodeId}
+                onSelect={() => setSelectedId(n.id)}
+              />
+            ))
+          )}
+        </div>
+      </aside>
     </div>
   );
 }
@@ -284,16 +288,16 @@ function DeviceRow({ node, active, onSelect }: { node: NodeModel; active: boolea
       aria-selected={active}
       onClick={onSelect}
       className={cn(
-        'relative flex w-full items-center gap-3 py-3 pr-3 pl-[116px] text-left transition-colors',
-        active ? 'bg-fg/8' : 'hover:bg-fg/5',
+        'relative flex w-full items-center gap-3 rounded-lg px-2.5 py-2.5 text-left transition-colors',
+        active ? 'bg-accent/12' : 'hover:bg-fg/5',
       )}
     >
-      {active && <span className="absolute inset-y-0 left-0 w-1 rounded-r bg-accent" aria-hidden />}
-      <span className="grid h-8 w-8 shrink-0 place-items-center rounded border border-fg/10 bg-recess/30">
+      {active && <span className="absolute inset-y-2 right-0 w-0.5 rounded-full bg-accent" aria-hidden />}
+      <span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg border border-fg/10 bg-recess/30">
         <Icon className={cn('h-[18px] w-[18px]', active ? 'text-accent' : 'text-fg/55')} aria-hidden />
       </span>
       <span className="min-w-0 flex-1">
-        <span className={cn('block truncate font-mono text-[12px]', active ? 'text-fg' : 'text-fg/70')}>
+        <span className={cn('block truncate text-xs font-medium', active ? 'text-fg' : 'text-fg/70')}>
           {node.name}
         </span>
         <span className="mt-0.5 block truncate text-[11px] text-fg/45">
