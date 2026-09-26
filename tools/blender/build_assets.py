@@ -21,7 +21,12 @@ endpoint with the tip at that point looks flush with the port.
 
 Scope (NG-PH3D 3a, hard boundary — see briefing): only dimension-VERIFIED
 parts are modelled with real numbers. QSFP-DD/XFP/FC/ST/MPO/E2000/IEC power
-connectors stay UNVERIFIED and are deliberately not built here.
+connectors stay UNVERIFIED and are deliberately not built here. The first
+per-SKU chassis is the MikroTik CRS317-1G-16S+RM: its official product page
+and hardware manual both state 443 x 224 x 44 mm. The GLB intentionally
+contains only that verified case envelope; its front ports remain driven by
+the existing catalog/anchor renderer because their exact offsets were not
+published and must not be guessed here.
 
 Outdoor placement track (Slice 5 + 7, see tower-structure-taxonomy.md memory):
 adds the outdoor NEMA cabinet + tower structure meshes. These use a DIFFERENT
@@ -203,6 +208,22 @@ def build_qsfp_cage():
     export_glb(outer, 'cage-qsfp.glb')
 
 
+# ─── MikroTik CRS317-1G-16S+RM chassis (wave 1, V — official vendor) ───────
+# Case dimensions 443(W) x 224(D) x 44(H) mm, independently present on both
+# https://mikrotik.com/product/crs317_1g_16s_rm and the official hardware
+# manual. Port counts are also verified there (16x SFP+, 1x GbE, 1x RJ45
+# console), but exact faceplate offsets are not published, so this asset is
+# only the case envelope. rack3d.ts keeps the catalog-driven faceplate/cages
+# and generic fallback, preserving real cable anchors without inventing
+# unsourced measurements. No vendor logo, image, CAD, or mesh is imported.
+def build_chassis_mikrotik_crs317():
+    clear_scene()
+    w, d, h = 0.443, 0.224, 0.044
+    body = box('chassis-mikrotik-crs317', w, d, h, h / 2)
+    add_material(body, 'powder-coated-steel', (0.12, 0.12, 0.125))
+    export_glb(body, 'chassis-mikrotik-crs317.glb')
+
+
 # ─── RJ-11/RJ-14 (6P6C) voice/FXS jack cage shell (Sesi port-fxs) ──────────
 # 6-position modular connector is physically SMALLER than the 8-position
 # 8P8C/RJ45 above and NOT interchangeable with it (keputusan Surya
@@ -345,6 +366,7 @@ if __name__ == '__main__':
     build_lc()
     build_sfp_cage()
     build_qsfp_cage()
+    build_chassis_mikrotik_crs317()
     build_rj11_cage()
     build_cabinet_outdoor()
     build_monopole()
