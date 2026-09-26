@@ -1172,7 +1172,7 @@ export function Rack3DElevationPanel() {
           onChange={(e) => setNewRackName(e.target.value)}
           placeholder="New rack name"
           aria-label="New rack name"
-          className="w-28 shrink-0 rounded-lg border border-fg/10 bg-recess/30 px-2 py-1.5 text-xs text-fg outline-none placeholder:text-fg/35 focus:border-accent/50"
+          className="w-28 shrink-0 rounded-lg border border-fg/15 bg-panel px-2 py-1.5 text-xs text-fg outline-none placeholder:text-fg/55 focus:border-accent/50"
         />
         <Select
           aria-label="New rack site"
@@ -1213,7 +1213,7 @@ export function Rack3DElevationPanel() {
           <Select
             aria-label="Site ditampilkan"
             value={viewSiteId}
-            onChange={setViewSiteId}
+            onChange={(id) => { setViewSiteId(id); setNewRackSiteOverride(null); }}
             className="w-28"
             options={[{ value: '', label: '(no site)' }, ...sites.map((s) => ({ value: s.id, label: s.name }))]}
           />
@@ -1264,7 +1264,7 @@ export function Rack3DElevationPanel() {
       {/* NG-PH3D P3: over-length banner (GET /plant, over_length flag). */}
       {overLength.length > 0 && (
         <div className="pointer-events-auto max-w-xl rounded-xl border border-warning/30 bg-panel px-3 py-2 text-xs text-fg/80 shadow-glass">
-          <div className="flex items-center gap-1 font-medium text-warning">
+          <div className="flex items-center gap-1 font-medium text-[var(--ng-warning)]">
             <AlertTriangle size={13} /> Cable exceeds maximum length (link errored)
           </div>
           <ul className="mt-1 space-y-0.5 pl-5">
@@ -1353,7 +1353,7 @@ export function Rack3DElevationPanel() {
         <span className="text-fg">{status}</span>
         {/* NG-PH3D P3: watts/BTU for exactly the two racks shown — same
             nodeWatts()/wattsToBtu() the 2D panel's per-site rollup uses. */}
-        <span className="flex items-center gap-1 text-warning/80">
+        <span className="flex items-center gap-1 text-[var(--ng-warning)]">
           <Zap size={12} /> {shownWatts} W · {wattsToBtu(shownWatts)} BTU/hr
         </span>
         <span className="ml-auto">{deviceCount} perangkat · {links.length} kabel</span>
