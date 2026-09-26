@@ -89,6 +89,19 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     expect(size.z).toBeCloseTo(0.224, 3);
   });
 
+  it('loads the verified CRS328 case envelope with its deeper 300 mm body', async () => {
+    await loadBootAssets(nodeFetch);
+    const family = chassisFamilyForDeviceSlug('mikrotik-crs328-24p-4splus-rm');
+    expect(family).toBe('chassis-mikrotik-crs328');
+    const geometry = getBootGeometry(family!)!;
+    geometry.computeBoundingBox();
+    const size = new THREE.Vector3();
+    geometry.boundingBox!.getSize(size);
+    expect(size.x).toBeCloseTo(0.443, 3);
+    expect(size.y).toBeCloseTo(0.044, 3);
+    expect(size.z).toBeCloseTo(0.300, 3);
+  });
+
   // Slice port-fxs: RJ-11 6P voice jack cage — narrower/shorter than the
   // 8P8C rj45 cross-section above (see build_rj11_cage() in
   // tools/blender/build_assets.py for the sourced 9.85/6.60mm numbers).

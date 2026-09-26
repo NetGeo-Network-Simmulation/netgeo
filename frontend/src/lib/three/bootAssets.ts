@@ -22,7 +22,7 @@ export type BootFamily = 'rj45' | 'lc';
 export type CageFamily = 'cage-sfp' | 'cage-qsfp' | 'cage-rj11';
 export type EnclosureFamily = 'cabinet-outdoor';
 export type StructureFamily = 'tower-monopole' | 'tower-lattice4' | 'tower-lattice3';
-export type ChassisFamily = 'chassis-mikrotik-crs317';
+export type ChassisFamily = 'chassis-mikrotik-crs317' | 'chassis-mikrotik-crs328';
 export type AssetFamily = BootFamily | CageFamily | EnclosureFamily | StructureFamily | ChassisFamily;
 
 const URLS: Record<AssetFamily, string> = {
@@ -32,6 +32,7 @@ const URLS: Record<AssetFamily, string> = {
   'cage-qsfp': '/3d/cage-qsfp.glb',
   'cage-rj11': '/3d/cage-rj11.glb',
   'chassis-mikrotik-crs317': '/3d/chassis-mikrotik-crs317.glb',
+  'chassis-mikrotik-crs328': '/3d/chassis-mikrotik-crs328.glb',
   'cabinet-outdoor': '/3d/cabinet-outdoor.glb',
   'tower-monopole': '/3d/tower-monopole.glb',
   'tower-lattice4': '/3d/tower-lattice4.glb',
@@ -40,6 +41,7 @@ const URLS: Record<AssetFamily, string> = {
 
 const CHASSIS_BY_DEVICE_SLUG: Record<string, ChassisFamily> = {
   'mikrotik-crs317-1g-16splus-rm': 'chassis-mikrotik-crs317',
+  'mikrotik-crs328-24p-4splus-rm': 'chassis-mikrotik-crs328',
 };
 
 export function chassisFamilyForDeviceSlug(slug: string): ChassisFamily | undefined {
