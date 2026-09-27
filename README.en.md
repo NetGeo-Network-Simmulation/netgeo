@@ -12,7 +12,7 @@ a footnote.*
 
 [![CI](https://github.com/NetGeo-Network-Simmulation/netgeo/actions/workflows/backend.yml/badge.svg)](https://github.com/NetGeo-Network-Simmulation/netgeo/actions)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Version](https://img.shields.io/badge/version-1.2.126-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.125.2-brightgreen)
 ![Channel](https://img.shields.io/badge/channel-beta-blueviolet)
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![React](https://img.shields.io/badge/react-18-61dafb)
@@ -50,14 +50,14 @@ away").
 
 ### Download a release (fastest path)
 
-Grab the latest tag's assets from [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.126):
+Grab the latest tag's assets from [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.125.2):
 
 | Asset | Size | What it is |
 |---|---|---|
 | `NetGeo-x86_64.AppImage` | Linux | Native Qt window, no install step — `chmod +x`, run it |
-| `netgeo_1.2.126_amd64.deb` | Debian/Ubuntu | `apt` installs the Qt dependencies |
-| `netgeo-1.2.126-1.x86_64.rpm` | Fedora/RHEL | `dnf` installs the Qt dependencies |
-| `netgeo-1.2.126-setup.exe` | Windows | Native-window installer — still needs real Windows QA |
+| `netgeo_1.2.125.2_amd64.deb` | Debian/Ubuntu | `apt` installs the Qt dependencies |
+| `netgeo-1.2.125.2-1.x86_64.rpm` | Fedora/RHEL | `dnf` installs the Qt dependencies |
+| `netgeo-1.2.125.2-setup.exe` | Windows | Native-window installer — still needs real Windows QA |
 | `netgeo-linux-x86_64.tar.gz` | Linux | Onedir bundle, extract and run `netgeo` |
 
 The AppImage, exe, and tarball are all the native-window path (forms #1/#2/#3 above, minus the
@@ -69,8 +69,8 @@ declare their dependencies, so `apt`/`dnf` install the Qt/QtWebEngine runtime fo
 bundling everything itself the way the AppImage does.
 
 ```
-sudo apt install ./netgeo_1.2.126_amd64.deb    # Debian, Ubuntu
-sudo dnf install ./netgeo-1.2.126-1.x86_64.rpm # Fedora, RHEL
+sudo apt install ./netgeo_1.2.125.2_amd64.deb    # Debian, Ubuntu
+sudo dnf install ./netgeo-1.2.125.2-1.x86_64.rpm # Fedora, RHEL
 ```
 
 Uninstall anytime with `apt remove netgeo` / `dnf remove netgeo` — both only remove the files they
