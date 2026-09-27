@@ -70,6 +70,8 @@ export interface DeviceType {
   model: string;
   nos?: Nos;
   uHeight: number;
+  /** False for verified desktop/wall units displayed on a shelf. */
+  rackMounted?: boolean;
   isFullDepth?: boolean;
   /** Real chassis body width/depth in mm, ONLY for models with V or V(2nd)
    *  status in docs/design/24-DEVICE-PHYSICAL-SPEC.md §8.1. Omit when the
@@ -98,6 +100,55 @@ export interface DeviceType {
 // ─── Seed device library ──────────────────────────────────────────────────────
 
 export const DEVICE_TYPES: DeviceType[] = [
+  // MikroTik CCR2004-1G-12S+2XS
+  {
+    slug: 'mikrotik-ccr2004-1g-12s-2xs',
+    manufacturer: 'MikroTik',
+    model: 'CCR2004-1G-12S+2XS',
+    // Exact pack id selects this entry; keep it out of the no-device_type_id
+    // RouterOS heuristic so existing anonymous nodes retain CRS317 fallback.
+    nos: undefined,
+    uHeight: 1,
+    // V: official product page + brochure both state 443 x 224 x 44 mm.
+    chassisMm: { widthMm: 443, depthMm: 224 },
+    front: {
+      // Port count/order follows the official product image and brochure.
+      // Exact offsets are visual proportions, not vendor dimension claims.
+      portZones: [
+        {
+          ports: [
+            { type: 'console-rj45', count: 1 },
+            { type: 'mgmt-rj45', count: 1 },
+          ],
+          rows: 1,
+          align: 'left',
+          widthFraction: 0.12,
+        },
+        {
+          ports: [{ type: 'sfp+', count: 12 }],
+          rows: 1,
+          align: 'fill',
+        },
+        {
+          ports: [{ type: 'sfp28', count: 2 }],
+          rows: 1,
+          align: 'right',
+          widthFraction: 0.14,
+        },
+      ],
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: {
+      // V: two AC inputs and two cooling fans; the official brochure's rear
+      // image shows the dual-inlet/fan field without publishing offsets.
+      blocks: [
+        { type: 'iec-inlet', count: 2 },
+        { type: 'fan-tray', count: 2 },
+      ],
+    },
+    brand: { accent: '#E4002B', chassis: '#EFEDE6', label: 'MikroTik', badge: 'stripe' },
+  },
+
   // ── MikroTik CRS317-1G-16S+RM ──────────────────────────────────────────────
   {
     slug: 'mikrotik-crs317-1g-16splus-rm',
@@ -2009,6 +2060,7 @@ export const DEVICE_TYPES: DeviceType[] = [
     manufacturer: 'Actiontec Electronics',
     model: 'XG-99M',
     uHeight: 1, // shelf/desktop-or-wall di rak NetGeo, bukan RU vendor ("Desktop mounting & wall mounting" eksplisit, V).
+    rackMounted: false,
     // §8.1 V (PDF resmi via Wayback Machine snapshot 2024-12-03 — URL live
     // newserv.actiontec.com connection-refused saat diakses langsung, bukan
     // bukti dokumen hilang): "208mm x 150mm x 35mm(W x D x H)".
@@ -4029,6 +4081,14 @@ const PACK_PORT_TYPE_MAP: Partial<Record<string, PortType>> = {
  *  every port entry is unmappable (e.g. a radio-only device) — the caller
  *  falls back to the existing heuristic rather than drawing an empty shell. */
 function buildFromPack(pack: CatalogEntry, kind: NodeKind): DeviceType | null {
+  // An exact curated SKU carries its verified dimensions and deliberate
+  // front/rear layout. Keep those instead of rebuilding a generic 19-inch
+  // panel from counts alone. This also prevents a desktop XG-99M from being
+  // stretched to full rack width when it arrives through /device-types.
+  const packSlug = pack.id.split(':').pop()!;
+  const curated = DEVICE_TYPES.find((dt) => dt.slug === packSlug);
+  if (curated) return { ...curated, model: pack.name, uHeight: pack.physical?.ru ?? curated.uHeight };
+
   const portZones: PortZone[] = [];
   for (const p of pack.ports ?? []) {
     const type = PACK_PORT_TYPE_MAP[p.type];

@@ -147,6 +147,8 @@ export interface DeviceDef {
    *  heuristic below — never a guessed per-model number. */
   bodyWidthM?: number;
   bodyDepthM?: number;
+  /** False for a desktop/wall chassis shown on a shelf without 19-inch ears. */
+  rackMounted?: boolean;
   /** Blender-authored verified case envelope. Undefined or not-yet-loaded
    *  keeps the procedural body as the generic first-paint fallback. */
   chassisAsset?: ChassisFamily;
@@ -895,15 +897,16 @@ export function buildScene(opts: BuildOptions): BuiltScene {
    *  slice proportional to its own port count, so a device with several
    *  real port families (e.g. 48× RJ45 + 8× SFP+ uplinks) draws each family
    *  with its own connector geometry instead of one uniform block. */
-  function portLayout(def: DeviceDef) {
+  function portLayout(def: DeviceDef, panelW: number) {
     const groups = portGroupsOf(def);
     const total = groups.reduce((s, gr) => s + gr.count, 0);
     if (!total) return [] as { i: number; ptype: PortType; row: number; bank: number; x: number; y: number; w: number }[];
     const marginFor = (t: PortType) => (t === 'bay' ? 0.12 : 0.155); // room for LEDs + uplinks
-    const usableTotal = PANEL_W - Math.max(...groups.map((gr) => marginFor(gr.type)));
+    const margin = Math.min(panelW * 0.35, Math.max(...groups.map((gr) => marginFor(gr.type))));
+    const usableTotal = panelW - margin;
     const out: { i: number; ptype: PortType; row: number; bank: number; x: number; y: number; w: number }[] = [];
     let i = 0;
-    let x0 = -PANEL_W / 2 + 0.085;
+    let x0 = -panelW / 2 + Math.min(0.085, panelW * 0.2);
     for (const grp of groups) {
       const n = grp.count;
       const ptype = grp.type;
@@ -949,6 +952,11 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     // same safety margin the server heuristic above already applies.
     const depth = def.bodyDepthM != null ? Math.min(def.bodyDepthM, Math.max(0.05, rack.d - 0.18)) : heuristicDepth;
     const bodyW = def.bodyWidthM ?? CHASSIS_BODY_W;
+    // A verified desktop/wall chassis is the device itself, not a 19-inch
+    // faceplate. Width alone is not enough: some real rack chassis are narrow
+    // between their ears, so only explicit catalog evidence disables them.
+    const rackMounted = def.rackMounted !== false;
+    const panelW = rackMounted ? PANEL_W : bodyW;
     // faceplate art is dim under an ortho key light; lift the chassis tone so
     // the panel reads at 2.5D scale instead of going to mud. QA 2026-09-01:
     // the old 2.6x lift plus a very hot "faceplate-fill" key light (see
@@ -976,27 +984,30 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     body.position.set(0, 0, rack.d / 2 - 0.09 - depth / 2);
     body.userData.dev = def.id;
     g.add(body);
-    // rack ears
-    for (const sx of [-1, 1]) {
-      const ear = box(0.016, h, 0.004, chassisMat, 'rack-ear');
-      ear.position.set(sx * (PANEL_W / 2 + 0.008), 0, rack.d / 2 - 0.088);
-      ear.userData.dev = def.id;
-      g.add(ear);
+    // Rack ears only belong to real rackmount-width equipment. A desktop ONU
+    // placed on a shelf must not masquerade as a full-width faceplate.
+    if (rackMounted) {
+      for (const sx of [-1, 1]) {
+        const ear = box(0.016, h, 0.004, chassisMat, 'rack-ear');
+        ear.position.set(sx * (PANEL_W / 2 + 0.008), 0, rack.d / 2 - 0.088);
+        ear.userData.dev = def.id;
+        g.add(ear);
+      }
     }
     const faceZ = rack.d / 2 - 0.088;
     const faceMat = track(mat('face-' + def.id, 0xffffff, { roughness: 0.52, metalness: 0.28 }));
     faceMat.map = track(faceTexture(def, false));
-    const plate = box(PANEL_W - 0.006, h - 0.0018, 0.003, faceMat, 'front-plate');
+    const plate = box(panelW - 0.006, h - 0.0018, 0.003, faceMat, 'front-plate');
     plate.position.set(0, 0, faceZ - 0.0005);
     plate.userData.dev = def.id;
     g.add(plate);
     // brand accent stripe
     const stripe = box(0.006, h * 0.7, 0.003, track(mat('accent-' + def.id, def.accent, { roughness: 0.4 })), 'brand-stripe');
-    stripe.position.set(-PANEL_W / 2 + 0.014, 0, faceZ + 0.001);
+    stripe.position.set(-panelW / 2 + 0.014, 0, faceZ + 0.001);
     g.add(stripe);
     // white designation label, as on every real panel
-    const labelStrip = box(PANEL_W * 0.34, h * 0.16, 0.0025, mats.handle, 'designation-label');
-    labelStrip.position.set(-PANEL_W / 2 + 0.09 + PANEL_W * 0.17, h * 0.34, faceZ + 0.002);
+    const labelStrip = box(panelW * 0.34, h * 0.16, 0.0025, mats.handle, 'designation-label');
+    labelStrip.position.set(-panelW / 2 + 0.09 + panelW * 0.17, h * 0.34, faceZ + 0.002);
     g.add(labelStrip);
 
     // status LEDs
@@ -1004,22 +1015,22 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       const led = new THREE.Mesh(track(new THREE.CylinderGeometry(0.0022, 0.0022, 0.003, 12)), i ? mats.ledAmber : mats.ledOn);
       led.name = 'led';
       led.rotation.x = Math.PI / 2;
-      led.position.set(-PANEL_W / 2 + 0.032 + i * 0.009, h * 0.22, faceZ + 0.002);
+      led.position.set(-panelW / 2 + 0.032 + i * 0.009, h * 0.22, faceZ + 0.002);
       g.add(led);
     }
     // LCD touchscreen — a verified faceplate feature (§8.2 V(2nd)), only set
     // for ubiquiti-usw-pro-48 among the 9 curated models; a no-op otherwise.
     if (def.hasLcd) {
       const lcdBezel = box(0.05, h * 0.55, 0.003, mats.panelDark, 'lcd-bezel');
-      lcdBezel.position.set(-PANEL_W / 2 + 0.075, 0, faceZ + 0.0015);
+      lcdBezel.position.set(-panelW / 2 + 0.075, 0, faceZ + 0.0015);
       g.add(lcdBezel);
       const lcdScreen = box(0.042, h * 0.4, 0.001, mats.ledOn, 'lcd-screen');
-      lcdScreen.position.set(-PANEL_W / 2 + 0.075, 0, faceZ + 0.003);
+      lcdScreen.position.set(-panelW / 2 + 0.075, 0, faceZ + 0.003);
       g.add(lcdScreen);
       registry.fineDetail.push(lcdBezel, lcdScreen);
     }
     // ports / drive bays / duct fingers
-    const ports = portLayout(def);
+    const ports = portLayout(def, panelW);
     const portRefs: Record<number, THREE.Vector3> = {};
     for (const p of ports) {
       // aspect ratios follow the real connector families
@@ -1122,9 +1133,9 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       }
       portRefs[p.i] = new THREE.Vector3(p.x, p.y, faceZ + 0.01);
     }
-    if (def.kind === 'switch' || def.kind === 'fw' || def.kind === 'olt') {
+    if (rackMounted && (def.kind === 'switch' || def.kind === 'fw' || def.kind === 'olt')) {
       // bezel lip + louvred intake beside the port field
-      const lip = box(PANEL_W - 0.004, 0.003, 0.005, mats.bezel, 'bezel-lip');
+      const lip = box(panelW - 0.004, 0.003, 0.005, mats.bezel, 'bezel-lip');
       lip.position.set(0, h / 2 - 0.002, faceZ + 0.002);
       g.add(lip);
       const lipB = lip.clone();
@@ -1132,18 +1143,22 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       g.add(lipB);
       for (let i = 0; i < 5; i++) {
         const louvre = box(0.02, 0.0035, 0.003, mats.port, 'intake-louvre');
-        louvre.position.set(PANEL_W / 2 - 0.028, -h * 0.3 + i * (h * 0.14), faceZ + 0.001);
+        louvre.position.set(panelW / 2 - 0.028, -h * 0.3 + i * (h * 0.14), faceZ + 0.001);
         g.add(louvre);
       }
       // console + mgmt ports at the left
-      const cons = box(0.012, h * 0.3, 0.005, mats.port, 'console-port');
-      cons.position.set(-PANEL_W / 2 + 0.05, -h * 0.24, faceZ + 0.001);
-      g.add(cons);
+      // Real catalog layouts already include their console/mgmt ports.
+      // Keep this decoration only for the generic legacy path.
+      if (!def.portGroups?.length) {
+        const cons = box(0.012, h * 0.3, 0.005, mats.port, 'console-port');
+        cons.position.set(-panelW / 2 + 0.05, -h * 0.24, faceZ + 0.001);
+        g.add(cons);
+      }
     }
     if (def.kind === 'duct') {
       for (let i = 0; i < 9; i++) {
         const finger = box(0.012, h * 0.8, 0.05, mats.frame, 'duct-finger');
-        finger.position.set(-PANEL_W / 2 + 0.04 + i * 0.05, 0, faceZ + 0.026);
+        finger.position.set(-panelW / 2 + 0.04 + i * 0.05, 0, faceZ + 0.026);
         g.add(finger);
       }
     }
@@ -1151,31 +1166,31 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const rearZ = rack.d / 2 - 0.09 - depth;
     const rearMat = track(mat('rear-face-' + def.id, 0xffffff, { roughness: 0.55, metalness: 0.3 }));
     rearMat.map = track(faceTexture(def, true));
-    const rearPlate = box(PANEL_W - 0.006, h - 0.0018, 0.003, rearMat, 'rear-plate');
+    const rearPlate = box(panelW - 0.006, h - 0.0018, 0.003, rearMat, 'rear-plate');
     rearPlate.position.set(0, 0, rearZ - 0.0015);
     rearPlate.userData.dev = def.id;
     g.add(rearPlate);
-    if (def.kind === 'server' || def.kind === 'switch' || def.kind === 'olt') {
+    if (rackMounted && (def.kind === 'server' || def.kind === 'switch' || def.kind === 'olt')) {
       const psus = def.h >= 2 ? 2 : def.kind === 'server' ? 2 : 1;
       for (let i = 0; i < psus; i++) {
         const psu = box(0.096, h * (def.h >= 2 ? 0.42 : 0.76), 0.01, mats.bezel, 'psu-module');
-        psu.position.set(PANEL_W / 2 - 0.062, def.h >= 2 ? (i ? -h * 0.24 : h * 0.24) : 0, rearZ - 0.005);
+        psu.position.set(panelW / 2 - 0.062, def.h >= 2 ? (i ? -h * 0.24 : h * 0.24) : 0, rearZ - 0.005);
         psu.userData.dev = def.id;
         g.add(psu);
         // C14 inlet + retention clip
         const inlet = box(0.019, 0.014, 0.008, mats.port, 'iec-c14-inlet');
-        inlet.position.set(PANEL_W / 2 - 0.062, psu.position.y - h * 0.1, rearZ - 0.011);
+        inlet.position.set(panelW / 2 - 0.062, psu.position.y - h * 0.1, rearZ - 0.011);
         g.add(inlet);
         const clip = box(0.026, 0.0025, 0.004, mats.handle, 'psu-clip');
-        clip.position.set(PANEL_W / 2 - 0.062, psu.position.y + h * 0.22, rearZ - 0.012);
+        clip.position.set(panelW / 2 - 0.062, psu.position.y + h * 0.22, rearZ - 0.012);
         g.add(clip);
         const psuLed = new THREE.Mesh(track(new THREE.CylinderGeometry(0.0018, 0.0018, 0.003, 10)), mats.ledOn);
         psuLed.rotation.x = Math.PI / 2;
         psuLed.name = 'psu-led';
-        psuLed.position.set(PANEL_W / 2 - 0.03, psu.position.y, rearZ - 0.008);
+        psuLed.position.set(panelW / 2 - 0.03, psu.position.y, rearZ - 0.008);
         g.add(psuLed);
         const psuHandle = box(0.03, 0.006, 0.006, mats.handle, 'psu-handle');
-        psuHandle.position.set(PANEL_W / 2 - 0.062, psu.position.y - h * 0.28, rearZ - 0.012);
+        psuHandle.position.set(panelW / 2 - 0.062, psu.position.y - h * 0.28, rearZ - 0.012);
         g.add(psuHandle);
       }
       // rear mgmt/console ports + exhaust grille: 11 identical-material
@@ -1183,16 +1198,16 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // instead of 11 draw calls (NG-PH3D P4 perf budget).
       const rearVentGeos: THREE.BufferGeometry[] = [];
       for (let i = 0; i < 3; i++) {
-        rearVentGeos.push(boxGeo(0.012, h * 0.3, 0.005, -PANEL_W / 2 + 0.045 + i * 0.02, -h * 0.2, rearZ - 0.004));
+        rearVentGeos.push(boxGeo(0.012, h * 0.3, 0.005, -panelW / 2 + 0.045 + i * 0.02, -h * 0.2, rearZ - 0.004));
       }
       for (let i = 0; i < 8; i++) {
-        rearVentGeos.push(boxGeo(0.014, h * 0.5, 0.003, -PANEL_W / 2 + 0.13 + i * 0.019, h * 0.06, rearZ - 0.003));
+        rearVentGeos.push(boxGeo(0.014, h * 0.5, 0.003, -panelW / 2 + 0.13 + i * 0.019, h * 0.06, rearZ - 0.003));
       }
       g.add(mergeParts('rear-vents-merged-' + def.id, mats.port, rearVentGeos));
     }
 
     // rear fans (they spin)
-    if (def.kind === 'switch' || def.kind === 'server' || def.kind === 'olt') {
+    if (rackMounted && (def.kind === 'switch' || def.kind === 'server' || def.kind === 'olt')) {
       const fanCount = def.h >= 2 ? 4 : 2;
       for (let i = 0; i < fanCount; i++) {
         const hub = new THREE.Group();

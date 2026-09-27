@@ -3,7 +3,8 @@
  * frontend/public/3d/*.glb): cable-end boots (rj45/lc), device-faceplate
  * port cages (sfp/qsfp/rj11), the outdoor NEMA cabinet, and generic tower
  * structures (monopole/lattice — outdoor placement track, Slice 5 + 7),
- * plus the first verified per-SKU chassis envelope (MikroTik CRS317).
+ * plus verified, Blender-authored MikroTik CCR2004/CRS317/CRS328 chassis
+ * envelopes with low-poly ventilation detail.
  * Kept out of rack3d.ts so buildScene() itself never touches the network/
  * filesystem — it stays a pure, synchronous scene builder the rest of the
  * app (and every existing test) can keep calling the way it already does.
@@ -22,7 +23,10 @@ export type BootFamily = 'rj45' | 'lc';
 export type CageFamily = 'cage-sfp' | 'cage-qsfp' | 'cage-rj11';
 export type EnclosureFamily = 'cabinet-outdoor';
 export type StructureFamily = 'tower-monopole' | 'tower-lattice4' | 'tower-lattice3';
-export type ChassisFamily = 'chassis-mikrotik-crs317' | 'chassis-mikrotik-crs328';
+export type ChassisFamily =
+  | 'chassis-mikrotik-ccr2004'
+  | 'chassis-mikrotik-crs317'
+  | 'chassis-mikrotik-crs328';
 export type AssetFamily = BootFamily | CageFamily | EnclosureFamily | StructureFamily | ChassisFamily;
 
 const URLS: Record<AssetFamily, string> = {
@@ -31,6 +35,7 @@ const URLS: Record<AssetFamily, string> = {
   'cage-sfp': '/3d/cage-sfp.glb',
   'cage-qsfp': '/3d/cage-qsfp.glb',
   'cage-rj11': '/3d/cage-rj11.glb',
+  'chassis-mikrotik-ccr2004': '/3d/chassis-mikrotik-ccr2004.glb',
   'chassis-mikrotik-crs317': '/3d/chassis-mikrotik-crs317.glb',
   'chassis-mikrotik-crs328': '/3d/chassis-mikrotik-crs328.glb',
   'cabinet-outdoor': '/3d/cabinet-outdoor.glb',
@@ -40,6 +45,7 @@ const URLS: Record<AssetFamily, string> = {
 };
 
 const CHASSIS_BY_DEVICE_SLUG: Record<string, ChassisFamily> = {
+  'mikrotik-ccr2004-1g-12s-2xs': 'chassis-mikrotik-ccr2004',
   'mikrotik-crs317-1g-16splus-rm': 'chassis-mikrotik-crs317',
   'mikrotik-crs328-24p-4splus-rm': 'chassis-mikrotik-crs328',
 };
