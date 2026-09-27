@@ -33,6 +33,7 @@ import {
   applyRuntimeProfile,
   checkRemoteEngine,
   modeForEngine,
+  normalizeLocalOrigin,
   normalizeRemoteOrigin,
   readRuntimeProfile,
   readsRemoteBackend,
@@ -128,7 +129,7 @@ const RUNTIME_MODES: {
   {
     mode: 'headless',
     label: '4. Headless',
-    description: 'Local REST and socket; relaunch with --no-window to use the browser UI.',
+    description: 'Browser UI with local REST and socket; relaunch with --no-window. A separate loopback engine is optional.',
   },
   {
     mode: 'full-online',
@@ -144,13 +145,17 @@ function RuntimeSection() {
   const [checking, setChecking] = useState(false);
   const remote = readsRemoteBackend(profile.mode);
   const normalizedOrigin = normalizeRemoteOrigin(profile.remoteOrigin);
+  const local = profile.mode === 'headless';
+  const normalizedLocalOrigin = profile.localOrigin?.trim() ? normalizeLocalOrigin(profile.localOrigin) : null;
+  const engineOrigin = remote ? normalizedOrigin : local ? normalizedLocalOrigin : null;
+  const endpoint = new URL(engineOrigin ?? window.location.origin);
 
-  const verify = async () => {
+  const verify = async (origin: string) => {
     setChecking(true);
     setError(null);
     setHealth(null);
     try {
-      const version = await checkRemoteEngine(profile.remoteOrigin);
+      const version = await checkRemoteEngine(origin);
       setHealth(`NetGeo ${version} is reachable.`);
       return true;
     } catch (cause) {
@@ -166,8 +171,19 @@ function RuntimeSection() {
       setError('Enter an http:// or https:// server origin before applying this mode.');
       return;
     }
-    if (remote && !(await verify())) return;
-    applyRuntimeProfile({ ...profile, remoteOrigin: normalizedOrigin ?? '' }, () => window.location.reload());
+    if (local && profile.localOrigin?.trim() && !normalizedLocalOrigin) {
+      setError('Enter a loopback HTTP(S) address (localhost, 127.0.0.1, or [::1]) with a port from 1 to 65535.');
+      return;
+    }
+    setChecking(true);
+    setError(null);
+    try {
+      await applyRuntimeProfile({ ...profile, remoteOrigin: normalizedOrigin ?? '', localOrigin: normalizedLocalOrigin ?? '' }, () => window.location.reload());
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not reach the server.');
+    } finally {
+      setChecking(false);
+    }
   };
 
   return (
@@ -184,7 +200,7 @@ function RuntimeSection() {
         <p className="text-xs text-fg/45">Choose where simulation runs. REST and live WebSocket traffic use the same backend.</p>
         <div className="flex flex-wrap gap-2">
           {([
-            { remote: false, label: 'Local / offline', detail: 'Bundled backend' },
+            { remote: false, label: 'Local / offline', detail: 'Same origin or headless loopback' },
             { remote: true, label: 'Remote / online', detail: 'Configured server' },
           ] as const).map((choice) => (
             <label key={choice.label} className={cn('cursor-pointer rounded-lg border px-3 py-2 text-sm', remote === choice.remote ? 'border-accent bg-accent/10 text-accent' : 'border-fg/10 bg-fg/5 text-fg/70')}>
@@ -222,29 +238,43 @@ function RuntimeSection() {
       </div>
 
       {remote && (
-        <Row label="Remote server" description="Use the server origin only; /api and ws(s) are derived automatically.">
+        <Row label="Remote server origin" description="HTTP(S) host and optional port; /api and ws(s) use this same endpoint.">
           <input
             aria-label="Remote server origin"
             type="url"
             value={profile.remoteOrigin}
             onChange={(event) => { setProfile((current) => ({ ...current, remoteOrigin: event.target.value })); setError(null); setHealth(null); }}
-            placeholder="https://netgeo.example.com"
+            placeholder="https://netgeo.example.com:8443"
+            className={inputCls}
+          />
+        </Row>
+      )}
+
+      {local && (
+        <Row label="Local engine origin" description="Optional. Leave blank to use this browser's origin. Only localhost, 127.0.0.1, or [::1] is allowed.">
+          <input
+            aria-label="Local engine origin"
+            type="url"
+            value={profile.localOrigin ?? ''}
+            onChange={(event) => { setProfile((current) => ({ ...current, localOrigin: event.target.value })); setError(null); setHealth(null); }}
+            placeholder="http://127.0.0.1:8000"
             className={inputCls}
           />
         </Row>
       )}
 
       <div className="rounded-lg border border-fg/10 bg-fg/5 px-4 py-3 text-xs text-fg/55">
-        <span className="font-medium text-fg/80">Socket target: </span>
-        {remote && normalizedOrigin ? normalizedOrigin.replace(/^http/, 'ws') : 'local same-origin socket'}
+        <p><span className="font-medium text-fg/80">Engine host: </span>{endpoint.hostname}</p>
+        <p><span className="font-medium text-fg/80">Engine port: </span>{endpoint.port || (endpoint.protocol === 'https:' ? '443' : '80')}{!engineOrigin && ' (same origin)'}</p>
+        <p><span className="font-medium text-fg/80">Socket target: </span>{engineOrigin ? engineOrigin.replace(/^http/, 'ws') : 'same-origin socket'}</p>
       </div>
 
-      {remote && <p className="text-xs text-fg/45">The server must allow this app origin through CORS. A separate server may require a new login after reconnect.</p>}
+      {engineOrigin && <p className="text-xs text-fg/45">The server must allow this app origin through CORS. A separate server may require a new login after reconnect.</p>}
       {error && <p role="alert" className="text-xs text-danger">{error}</p>}
       {health && <p role="status" className="text-xs text-accent">{health}</p>}
 
       <div className="flex flex-wrap gap-2">
-        {remote && <button type="button" onClick={() => { void verify(); }} disabled={checking || !normalizedOrigin}
+        {(remote || local) && <button type="button" onClick={() => { if (engineOrigin) void verify(engineOrigin); }} disabled={checking || !engineOrigin}
           className="rounded-md border border-fg/10 bg-fg/5 px-3 py-1.5 text-xs text-fg/70 disabled:opacity-50">
           {checking ? 'Checking…' : 'Check connection'}
         </button>}
