@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { chassisFamilyForDeviceSlug, loadBootAssets, getBootGeometry } from './bootAssets';
+import { chassisFamilyForDeviceSlug, loadBootAssets, loadBrandAssets, getBootGeometry } from './bootAssets';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
   const file = path.resolve(__dirname, '../../../public', url.replace(/^\//, ''));
@@ -74,7 +74,7 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
   });
 
   it('loads the verified CRS317 case envelope and maps only its real SKU', async () => {
-    await loadBootAssets(nodeFetch);
+    await loadBrandAssets(['chassis-mikrotik-crs317'], nodeFetch);
     const family = chassisFamilyForDeviceSlug('mikrotik-crs317-1g-16splus-rm');
     expect(family).toBe('chassis-mikrotik-crs317');
     expect(chassisFamilyForDeviceSlug('generic-switch')).toBeUndefined();
@@ -90,7 +90,7 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
   });
 
   it('loads and maps the verified CCR2004 chassis used by the QA plant', async () => {
-    await loadBootAssets(nodeFetch);
+    await loadBrandAssets(['chassis-mikrotik-ccr2004'], nodeFetch);
     const family = chassisFamilyForDeviceSlug('mikrotik-ccr2004-1g-12s-2xs');
     expect(family).toBe('chassis-mikrotik-ccr2004');
     const geometry = getBootGeometry(family!)!;
@@ -106,7 +106,7 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
   });
 
   it('loads the verified CRS328 case envelope with its deeper 300 mm body', async () => {
-    await loadBootAssets(nodeFetch);
+    await loadBrandAssets(['chassis-mikrotik-crs328'], nodeFetch);
     const family = chassisFamilyForDeviceSlug('mikrotik-crs328-24p-4splus-rm');
     expect(family).toBe('chassis-mikrotik-crs328');
     const geometry = getBootGeometry(family!)!;

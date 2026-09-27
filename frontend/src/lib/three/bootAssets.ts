@@ -26,28 +26,36 @@ export type StructureFamily = 'tower-monopole' | 'tower-lattice4' | 'tower-latti
 export type ChassisFamily =
   | 'chassis-mikrotik-ccr2004'
   | 'chassis-mikrotik-crs317'
-  | 'chassis-mikrotik-crs328';
+  | 'chassis-mikrotik-crs328'
+  | 'chassis-mikrotik-rb5009-k79';
 export type AssetFamily = BootFamily | CageFamily | EnclosureFamily | StructureFamily | ChassisFamily;
 
-const URLS: Record<AssetFamily, string> = {
+const URLS: Record<Exclude<AssetFamily, ChassisFamily>, string> = {
   rj45: '/3d/boot-rj45.glb',
   lc: '/3d/boot-lc.glb',
   'cage-sfp': '/3d/cage-sfp.glb',
   'cage-qsfp': '/3d/cage-qsfp.glb',
   'cage-rj11': '/3d/cage-rj11.glb',
-  'chassis-mikrotik-ccr2004': '/3d/chassis-mikrotik-ccr2004.glb',
-  'chassis-mikrotik-crs317': '/3d/chassis-mikrotik-crs317.glb',
-  'chassis-mikrotik-crs328': '/3d/chassis-mikrotik-crs328.glb',
   'cabinet-outdoor': '/3d/cabinet-outdoor.glb',
   'tower-monopole': '/3d/tower-monopole.glb',
   'tower-lattice4': '/3d/tower-lattice4.glb',
   'tower-lattice3': '/3d/tower-lattice3.glb',
 };
 
+// Brand packs are optional. A Plant mount fetches the shared connector and
+// cabinet assets above; only a visible SKU requests its brand GLB below.
+const BRAND_URLS: Record<ChassisFamily, string> = {
+  'chassis-mikrotik-ccr2004': '/3d/chassis-mikrotik-ccr2004.glb',
+  'chassis-mikrotik-crs317': '/3d/chassis-mikrotik-crs317.glb',
+  'chassis-mikrotik-crs328': '/3d/chassis-mikrotik-crs328.glb',
+  'chassis-mikrotik-rb5009-k79': '/3d/brands/mikrotik/rb5009ug-s-in-k79.glb',
+};
+
 const CHASSIS_BY_DEVICE_SLUG: Record<string, ChassisFamily> = {
   'mikrotik-ccr2004-1g-12s-2xs': 'chassis-mikrotik-ccr2004',
   'mikrotik-crs317-1g-16splus-rm': 'chassis-mikrotik-crs317',
   'mikrotik-crs328-24p-4splus-rm': 'chassis-mikrotik-crs328',
+  'mikrotik-rb5009ug-s-in': 'chassis-mikrotik-rb5009-k79',
 };
 
 export function chassisFamilyForDeviceSlug(slug: string): ChassisFamily | undefined {
@@ -55,6 +63,9 @@ export function chassisFamilyForDeviceSlug(slug: string): ChassisFamily | undefi
 }
 
 const cache: Partial<Record<AssetFamily, THREE.BufferGeometry>> = {};
+const visualCache: Partial<Record<ChassisFamily, THREE.Group>> = {};
+const brandInflight: Partial<Record<ChassisFamily, Promise<void>>> = {};
+const unavailableBrands = new Set<ChassisFamily>();
 let inflight: Promise<void> | null = null;
 
 /** Every mesh in the loaded glTF, world-baked and merged into one geometry
@@ -79,13 +90,42 @@ export function loadBootAssets(
   if (inflight) return inflight;
   const loader = new GLTFLoader();
   inflight = (async () => {
-    for (const fam of Object.keys(URLS) as AssetFamily[]) {
+    for (const fam of Object.keys(URLS) as Exclude<AssetFamily, ChassisFamily>[]) {
       const buf = await fetchArrayBuffer(URLS[fam]);
       const gltf = await loader.parseAsync(buf, '');
       cache[fam] = mergedGeometry(gltf);
     }
   })();
   return inflight;
+}
+
+export function loadBrandAssets(
+  families: Iterable<ChassisFamily>,
+  fetchArrayBuffer: (url: string) => Promise<ArrayBuffer> = async (url) => {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
+    return response.arrayBuffer();
+  },
+): Promise<void> {
+  return Promise.all([...new Set(families)].map((fam) => {
+    if (cache[fam] || visualCache[fam] || unavailableBrands.has(fam)) return Promise.resolve();
+    if (!brandInflight[fam]) {
+      brandInflight[fam] = (async () => {
+        const gltf = await new GLTFLoader().parseAsync(await fetchArrayBuffer(BRAND_URLS[fam]), '');
+        if (fam === 'chassis-mikrotik-rb5009-k79') visualCache[fam] = gltf.scene;
+        else cache[fam] = mergedGeometry(gltf);
+      })().catch((error) => {
+        // Optional brand art never blocks the procedural chassis and ports.
+        unavailableBrands.add(fam);
+        console.warn(`Optional 3D asset unavailable: ${fam}`, error);
+      });
+    }
+    return brandInflight[fam];
+  })).then(() => undefined);
+}
+
+export function getVisualChassis(fam: ChassisFamily): THREE.Group | undefined {
+  return visualCache[fam];
 }
 
 export function getBootGeometry(fam: AssetFamily): THREE.BufferGeometry | undefined {
