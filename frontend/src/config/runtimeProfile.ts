@@ -8,6 +8,7 @@ export type DistributionMode =
 export interface RuntimeProfile {
   mode: DistributionMode;
   remoteOrigin: string;
+  localOrigin?: string;
 }
 
 const STORAGE_KEY = 'netgeo.runtime-profile';
@@ -24,11 +25,18 @@ const MODES = new Set<DistributionMode>([
 export function normalizeRemoteOrigin(value: string): string | null {
   try {
     const url = new URL(value.trim());
-    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname && !url.username && !url.password
+    return (url.protocol === 'http:' || url.protocol === 'https:') && url.hostname && url.port !== '0' && !url.username && !url.password
       ? url.origin : null;
   } catch {
     return null;
   }
+}
+
+export function normalizeLocalOrigin(value: string): string | null {
+  const origin = normalizeRemoteOrigin(value);
+  if (!origin) return null;
+  const { hostname } = new URL(origin);
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]' ? origin : null;
 }
 
 export function readsRemoteBackend(mode: DistributionMode): boolean {
@@ -68,7 +76,8 @@ export function readRuntimeProfile(): RuntimeProfile {
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<RuntimeProfile> | null;
     const mode = stored?.mode && MODES.has(stored.mode) ? stored.mode : DEFAULT_PROFILE.mode;
     const remoteOrigin = normalizeRemoteOrigin(stored?.remoteOrigin ?? '') ?? '';
-    return { mode: readsRemoteBackend(mode) && !remoteOrigin ? 'native-offline' : mode, remoteOrigin };
+    const localOrigin = normalizeLocalOrigin(stored?.localOrigin ?? '') ?? '';
+    return { mode: readsRemoteBackend(mode) && !remoteOrigin ? 'native-offline' : mode, remoteOrigin, localOrigin };
   } catch {
     return DEFAULT_PROFILE;
   }
@@ -76,29 +85,38 @@ export function readRuntimeProfile(): RuntimeProfile {
 
 export function saveRuntimeProfile(profile: RuntimeProfile): void {
   const remoteOrigin = normalizeRemoteOrigin(profile.remoteOrigin) ?? '';
+  const localOrigin = profile.localOrigin?.trim() ? normalizeLocalOrigin(profile.localOrigin) : '';
   if (readsRemoteBackend(profile.mode) && !remoteOrigin) throw new Error('A valid remote server origin is required.');
+  if (localOrigin === null) throw new Error('Local engine must use a loopback HTTP(S) address and a port from 1 to 65535.');
   localStorage.setItem(
     STORAGE_KEY,
-    JSON.stringify({ ...profile, remoteOrigin }),
+    JSON.stringify({ ...profile, remoteOrigin, localOrigin }),
   );
 }
 
-export function applyRuntimeProfile(profile: RuntimeProfile, reload: () => void): void {
+export async function applyRuntimeProfile(profile: RuntimeProfile, reload: () => void): Promise<void> {
+  const endpoint = readsRemoteBackend(profile.mode)
+    ? normalizeRemoteOrigin(profile.remoteOrigin)
+    : profile.mode === 'headless' && profile.localOrigin?.trim()
+      ? normalizeLocalOrigin(profile.localOrigin)
+      : null;
+  if (endpoint) await checkRemoteEngine(endpoint);
   saveRuntimeProfile(profile);
   reload();
 }
 
 export function runtimeApiBase(): string {
-  const profile = readRuntimeProfile();
-  return readsRemoteBackend(profile.mode) && profile.remoteOrigin
-    ? `${profile.remoteOrigin}/api`
-    : '/api';
+  const origin = runtimeEngineOrigin();
+  return origin ? `${origin}/api` : '/api';
 }
 
 export function runtimeWebSocketBase(): string | undefined {
+  const origin = runtimeEngineOrigin();
+  return origin ? origin.replace(/^http/, 'ws') : undefined;
+}
+
+export function runtimeEngineOrigin(): string | undefined {
   const profile = readRuntimeProfile();
-  if (readsRemoteBackend(profile.mode) && profile.remoteOrigin) {
-    return profile.remoteOrigin.replace(/^http/, 'ws');
-  }
-  return undefined;
+  if (readsRemoteBackend(profile.mode)) return profile.remoteOrigin || undefined;
+  return profile.mode === 'headless' ? profile.localOrigin || undefined : undefined;
 }

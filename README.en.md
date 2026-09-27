@@ -151,11 +151,15 @@ NETGEO_NO_WINDOW=1 python packaging/launcher.py   # same thing, for systemd unit
 
 ### Native runtime: local or remote sockets
 
-In the native app, open **Settings → Runtime**. Profile #1 uses local same-origin REST and
-WebSockets; profiles #3 and #5 accept a server origin such as `https://netgeo.example.com`, then
-derive `/api` and `wss://…` together and reconnect the client. The remote server must run this
+In **Settings → Runtime**, profile #1 uses same-origin REST and WebSockets on the native launcher's
+random loopback port. Profile #4 also defaults to same-origin, or can use a separate loopback engine
+such as `http://127.0.0.1:8000` (localhost, 127.0.0.1, or [::1] only). Profiles #3 and #5 accept
+a server origin with an optional port, such as `https://netgeo.example.com:8443`. Settings displays
+the host and port; `/api` and WebSockets share that endpoint. A configured endpoint is health-checked
+before it is saved and the client reloads. The remote server must run this
 release or newer so it accepts the native loopback CORS origin. Profile #2 remains disabled until
-Google Maps and API-key management exist; profile #4 still starts with `--no-window`.
+Google Maps and API-key management exist; profile #4 still starts with `--no-window`. Selecting a
+remote engine in the native UI does not yet stop its bundled backend process.
 
 ### Offline map region
 
