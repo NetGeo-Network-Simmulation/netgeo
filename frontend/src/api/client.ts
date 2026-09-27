@@ -42,7 +42,7 @@ import {
 import { getToken, notifyUnauthorized } from './token';
 import { runtimeApiBase } from '@/config/runtimeProfile';
 
-export const API_BASE = runtimeApiBase(import.meta.env.VITE_API_BASE);
+export const API_BASE = runtimeApiBase();
 
 export const http = axios.create({
   baseURL: API_BASE,
