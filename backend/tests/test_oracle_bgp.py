@@ -238,17 +238,25 @@ def _push_bgp_conf(
     container.exec_run(["vtysh", "-c", "clear bgp * out"])
 
 
-def _frr_bgp_best_nexthop(container, prefix: str, timeout: float = 20.0) -> str | None:
+def _frr_bgp_best_nexthop(
+    container, prefix: str, expected_paths: int = 2, timeout: float = 20.0
+) -> str | None:
     """The next-hop of FRR's own bestpath pick for ``prefix``, straight from
     ``show ip bgp <prefix> json``'s ``bestpath.overall`` path -- never
-    parsed off table-formatted CLI text (see module docstring)."""
+    parsed off table-formatted CLI text (see module docstring). Waits until
+    every route this comparison needs is present, so the first peer to
+    converge cannot be mistaken for FRR's final best-path decision."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         _ec, (out, _err) = container.exec_run(
             ["vtysh", "-c", f"show ip bgp {prefix} json"], demux=True
         )
         data = json.loads((out or b"").decode() or "{}")
-        for path in data.get("paths", []):
+        paths = data.get("paths", [])
+        if len(paths) < expected_paths:
+            time.sleep(1)
+            continue
+        for path in paths:
             if path.get("bestpath", {}).get("overall"):
                 nh = path.get("nexthops") or [{}]
                 return nh[0].get("ip")
