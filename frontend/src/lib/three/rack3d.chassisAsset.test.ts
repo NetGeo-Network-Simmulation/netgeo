@@ -4,7 +4,7 @@ import path from 'node:path';
 import * as THREE from 'three';
 import type { DeviceType as CatalogEntry } from '@/api/client';
 import { resolveDeviceType } from '@/components/rack/deviceTypes';
-import { chassisFamilyForDeviceSlug, loadBootAssets } from './bootAssets';
+import { chassisFamilyForDeviceSlug, loadBrandAssets } from './bootAssets';
 import { buildScene, disposeScene, type DeviceDef } from './rack3d';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
@@ -13,7 +13,10 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 }
 
-beforeAll(() => loadBootAssets(nodeFetch));
+beforeAll(() => loadBrandAssets([
+  'chassis-mikrotik-ccr2004', 'chassis-mikrotik-crs317',
+  'chassis-mikrotik-rb5009-k79',
+], nodeFetch));
 
 function build(device: DeviceDef) {
   return buildScene({
@@ -29,6 +32,42 @@ const base: DeviceDef = {
 };
 
 describe('rack3d Blender chassis envelope', () => {
+  it('resolves the RB5009 pack as a 220 mm body with a separate K-79 asset', () => {
+    const pack = {
+      id: 'routers:mikrotik-rb5009ug-s-in',
+      name: 'MikroTik RB5009UG+S+IN', category: 'router',
+      description: '', builtin: true, vendor: 'MikroTik',
+      ports: [
+        { count: 1, type: 'sfp' }, { count: 1, type: 'eth' },
+        { count: 7, type: 'eth' },
+      ],
+      physical: { ru: 1, form_factor: 'K-79 1U adapter' },
+    } satisfies CatalogEntry;
+    const resolved = resolveDeviceType('routeros', 'router', [], pack);
+    expect(resolved.chassisMm).toEqual({ widthMm: 220, depthMm: 125 });
+    expect(chassisFamilyForDeviceSlug(resolved.slug)).toBe('chassis-mikrotik-rb5009-k79');
+    expect(resolved.front.portZones.flatMap((zone) => zone.ports).reduce((n, p) => n + p.count, 0)).toBe(9);
+  });
+  it('uses the full-color RB5009 and K-79 with nine cableable anchors and no second faceplate', () => {
+    const built = build({
+      ...base, id: 'rb', model: 'RB5009UG+S+IN',
+      chassisAsset: 'chassis-mikrotik-rb5009-k79',
+      bodyWidthM: 0.220, bodyDepthM: 0.125,
+      ports: 9,
+      portGroups: [{ type: 'sfp28', count: 1 }, { type: 'rj45', count: 8 }],
+    });
+    try {
+      const chassis = built.root.getObjectByName('chassis')!;
+      const size = new THREE.Box3().setFromObject(chassis).getSize(new THREE.Vector3());
+      expect(size.x).toBeCloseTo(0.4826, 3);
+      expect(size.y).toBeCloseTo(0.04445, 3);
+      expect(Object.keys(built.registry.devices.rb!.portRefs)).toHaveLength(9);
+      expect(built.root.getObjectByName('front-plate')).toBeFalsy();
+      expect(built.root.getObjectByName('rack-ear')).toBeFalsy();
+      expect(built.root.getObjectByName('port-hit-0')?.userData.port).toBe(0);
+      expect(chassis.getObjectByName('ether1-2p5g-mouth')?.userData.dev).toBe('rb');
+    } finally { disposeScene(built); }
+  });
   it('retains curated dimensions/layout when an exact SKU arrives from the pack API', () => {
     const pack = {
       id: 'onu:actiontec-xg-99m', name: 'Actiontec XG-99M', category: 'onu',
