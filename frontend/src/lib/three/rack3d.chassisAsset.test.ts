@@ -2,7 +2,9 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
-import { loadBootAssets } from './bootAssets';
+import type { DeviceType as CatalogEntry } from '@/api/client';
+import { resolveDeviceType } from '@/components/rack/deviceTypes';
+import { chassisFamilyForDeviceSlug, loadBootAssets } from './bootAssets';
 import { buildScene, disposeScene, type DeviceDef } from './rack3d';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
@@ -27,6 +29,62 @@ const base: DeviceDef = {
 };
 
 describe('rack3d Blender chassis envelope', () => {
+  it('retains curated dimensions/layout when an exact SKU arrives from the pack API', () => {
+    const pack = {
+      id: 'onu:actiontec-xg-99m', name: 'Actiontec XG-99M', category: 'onu',
+      description: '', builtin: true, vendor: 'Actiontec Electronics',
+      ports: [{ count: 2, type: 'eth' }],
+      physical: { ru: 1, form_factor: 'desktop-or-wall-mount' },
+    } satisfies CatalogEntry;
+    const resolved = resolveDeviceType('forgeos', 'host', [], pack);
+    expect(resolved.slug).toBe('actiontec-xg-99m');
+    expect(resolved.chassisMm).toEqual({ widthMm: 208, depthMm: 150 });
+  });
+
+  it('maps the namespaced router catalog id to the curated CCR2004 chassis', () => {
+    const pack = {
+      id: 'routers:mikrotik-ccr2004-1g-12s-2xs',
+      name: 'MikroTik CCR2004-1G-12S+2XS', category: 'router',
+      description: '', builtin: true, vendor: 'MikroTik',
+      ports: [
+        { count: 1, type: 'eth' },
+        { count: 12, type: 'sfp' },
+        { count: 2, type: 'sfp28' },
+      ],
+      physical: { ru: 1, form_factor: '1U-rackmount' },
+    } satisfies CatalogEntry;
+    const resolved = resolveDeviceType('routeros', 'router', [], pack);
+    expect(resolved.slug).toBe('mikrotik-ccr2004-1g-12s-2xs');
+    expect(resolved.chassisMm).toEqual({ widthMm: 443, depthMm: 224 });
+    expect(chassisFamilyForDeviceSlug(resolved.slug)).toBe('chassis-mikrotik-ccr2004');
+  });
+
+  it('uses the cached CCR2004 GLB while keeping live catalog ports and anchors', () => {
+    const built = build({
+      ...base,
+      model: 'CCR2004-1G-12S+2XS',
+      chassisAsset: 'chassis-mikrotik-ccr2004',
+      portGroups: [
+        { type: 'rj45', count: 2 },
+        { type: 'sfp28', count: 12 },
+        { type: 'sfp28', count: 2 },
+      ],
+      ports: 16,
+    });
+    try {
+      const chassis = built.root.getObjectByName('chassis') as THREE.Mesh;
+      const size = new THREE.Vector3();
+      new THREE.Box3().setFromObject(chassis).getSize(size);
+      expect(size.x).toBeCloseTo(0.443, 3);
+      expect(size.y).toBeCloseTo(0.044, 3);
+      expect(size.z).toBeCloseTo(0.224, 3);
+      expect(Object.keys(built.registry.devices.sw1!.portRefs)).toHaveLength(16);
+      expect(built.root.getObjectByName('console-port')).toBeFalsy();
+    } finally {
+      disposeScene(built);
+    }
+  });
+
   it('uses the cached CRS317 GLB without moving the catalog-driven faceplate', () => {
     const built = build({ ...base, chassisAsset: 'chassis-mikrotik-crs317' });
     try {
@@ -51,6 +109,36 @@ describe('rack3d Blender chassis envelope', () => {
       expect(size.x).toBeCloseTo(0.443, 3);
       expect(size.y).toBeCloseTo(0.04295, 3);
       expect(size.z).toBeCloseTo(0.224, 3);
+    } finally {
+      disposeScene(built);
+    }
+  });
+
+  it('keeps a verified desktop ONU narrow and does not add 19-inch rack ears', () => {
+    const built = build({
+      ...base,
+      id: 'ont1',
+      brand: 'Actiontec',
+      model: 'XG-99M',
+      bodyWidthM: 0.208,
+      bodyDepthM: 0.15,
+      rackMounted: false,
+      portGroups: [
+        { type: 'pon', count: 1 },
+        { type: 'rj45', count: 2 },
+        { type: 'fxs', count: 2 },
+      ],
+      ports: 5,
+    });
+    try {
+      const plate = built.root.getObjectByName('front-plate') as THREE.Mesh;
+      const size = new THREE.Vector3();
+      new THREE.Box3().setFromObject(plate).getSize(size);
+      expect(size.x).toBeCloseTo(0.202, 3);
+      expect(built.root.getObjectByName('rack-ear')).toBeFalsy();
+      for (const anchor of Object.values(built.registry.devices.ont1!.portRefs)) {
+        expect(Math.abs(anchor.x)).toBeLessThan(0.104);
+      }
     } finally {
       disposeScene(built);
     }
