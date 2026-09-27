@@ -154,12 +154,16 @@ NETGEO_NO_WINDOW=1 python packaging/launcher.py   # same thing, for systemd unit
 
 ### Runtime native: socket lokal atau remote
 
-Di aplikasi native, buka **Settings → Runtime**. Profil #1 memakai REST dan WebSocket lokal
-(same-origin); profil #3 dan #5 meminta origin server `https://netgeo.example.com`, lalu klien
-menurunkan endpoint `/api` dan `wss://…` secara otomatis dan menyambungkannya ulang bersama-sama.
+Di **Settings → Runtime**, profil #1 memakai REST dan WebSocket same-origin pada port acak
+launcher native. Profil #4 juga memakai same-origin secara default, atau dapat memakai engine
+loopback terpisah seperti `http://127.0.0.1:8000` (hanya localhost/127.0.0.1/[::1]). Profil #3
+dan #5 menerima origin server dengan port opsional, misalnya `https://netgeo.example.com:8443`.
+Host dan port ditampilkan di Settings; `/api` dan WebSocket memakai endpoint yang sama. Endpoint
+yang dikonfigurasi diperiksa kesehatannya sebelum disimpan dan klien dimuat ulang.
 Server remote harus menjalankan NetGeo versi ini atau lebih baru agar CORS loopback native diterima.
 Profil #2 tetap dinonaktifkan sampai integrasi Google Maps dan pengelolaan API key tersedia; profil
-#4 tetap harus dimulai lewat `--no-window`.
+#4 tetap harus dimulai lewat `--no-window`. Profil remote di UI belum menghentikan backend bundled
+yang diluncurkan oleh aplikasi native.
 
 ### Region peta offline
 

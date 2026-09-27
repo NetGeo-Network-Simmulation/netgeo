@@ -36,7 +36,7 @@ class Settings(BaseSettings):
     # Native packages serve their frontend from a random loopback port. This
     # narrowly permits that origin to call an explicitly configured remote
     # backend; it does not allow arbitrary network origins.
-    NATIVE_CORS_ORIGIN_REGEX: str = r"^https?://(127\.0\.0\.1|localhost):\d+$"
+    NATIVE_CORS_ORIGIN_REGEX: str = r"^https?://(127\.0\.0\.1|localhost|\[::1\]):\d+$"
 
     # URLs
     FRONTEND_URL: str = "http://localhost:5173"
