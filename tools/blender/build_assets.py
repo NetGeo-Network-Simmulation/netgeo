@@ -228,6 +228,48 @@ def front_legend(name, label, x, z, size=0.003):
     obj.data.materials.append(mat)
 
 
+def top_legend(name, label, x, y, size=0.007):
+    bpy.ops.object.text_add(location=(x, y, 0.0072))
+    obj = bpy.context.object
+    obj.name = name
+    obj.data.body = label
+    obj.data.size = size
+    bpy.ops.object.convert(target='MESH')
+    mat = bpy.data.materials.get('silk-grey')
+    if mat is None:
+        mat = bpy.data.materials.new('silk-grey')
+        mat.diffuse_color = (0.54, 0.57, 0.59, 1)
+    obj.data.materials.append(mat)
+
+
+def pierced_k79_plate(name, dims, centre, holes):
+    """One formed metal plate with genuine through-slots in its front face."""
+    plate = painted_box(name, dims, centre, 'k79-black-steel',
+                        (0.095, 0.102, 0.113), 0.52)
+    for x, z, width, height in holes:
+        radius = height / 2
+        half = (width-height)/2
+        tools = []
+        if width > height:
+            tools.append(cube_at('slot-core', width-height, 0.009, height,
+                                 x, centre[1], z))
+        for end in ((-1, 1) if width > height else (0,)):
+            bpy.ops.mesh.primitive_cylinder_add(vertices=16, radius=radius,
+                                                depth=0.009,
+                                                location=(x+end*half, centre[1], z),
+                                                rotation=(math.pi/2, 0, 0))
+            tools.append(bpy.context.object)
+        for tool in tools:
+            bpy.context.view_layer.objects.active = plate
+            mod = plate.modifiers.new('punched-slot', 'BOOLEAN')
+            mod.operation = 'DIFFERENCE'
+            mod.solver = 'EXACT'
+            mod.object = tool
+            bpy.ops.object.modifier_apply(modifier=mod.name)
+            bpy.data.objects.remove(tool, do_unlink=True)
+    return plate
+
+
 def export_visual_glb(filename):
     """Keep separate mesh materials: a merged, recoloured geometry loses them."""
     bpy.ops.object.select_all(action='DESELECT')
@@ -258,7 +300,7 @@ def build_rb5009_k79():
     """
     clear_scene()
     black = (0.056, 0.061, 0.067)
-    charcoal = (0.12, 0.13, 0.14)
+    charcoal = (0.10, 0.11, 0.12)
     rim = (0.33, 0.35, 0.36)
     gold = (0.56, 0.39, 0.16)
     blue = (0.018, 0.30, 0.58)
@@ -273,21 +315,34 @@ def build_rb5009_k79():
                     (x, 0.020, 0.009), 'heatsink-ribs', charcoal, 0.52)
         painted_box(f'heatsink-rear-{i}', (0.0033, 0.0021, 0.013),
                     (x, 0.0614, 0), 'heatsink-ribs', charcoal, 0.52)
-    # K-79: distinct left/right formed steel ears and short device rails.
-    # It is not a stretched device faceplate. Screw/hole cues are proportional.
+    top_legend('mikrotik-top-mark', 'MikroTik', -0.094, -0.048)
+    top_legend('rb5009-top-mark', 'RB5009', -0.094, -0.057, 0.0035)
+    # K-79: pierced outer rack wings, narrower stepped inner tabs, folds and
+    # long side carriers. Openings are real voids rather than square black art.
+    # Their pitch/shape is proportional to the official image, not measured.
     for sign, side in ((-1, 'left'), (1, 'right')):
-        painted_box(f'k79-{side}-ear', (0.1243, 0.0025, 0.04445),
-                    (sign * 0.17915, -0.0624, 0), 'k79-black-steel', charcoal, 0.55)
-        painted_box(f'k79-{side}-return', (0.003, 0.075, 0.018),
-                    (sign * 0.1115, -0.022, 0), 'k79-black-steel', charcoal, 0.55)
-        for x in (0.135, 0.226):
-            for z in (-0.015, 0.015):
-                painted_box(f'k79-{side}-screw-recess-{x}-{z}',
-                            (0.010, 0.0007, 0.008), (sign*x, -0.0641, z),
-                            'recess-black', (0.009, 0.010, 0.012))
-                painted_box(f'k79-{side}-screw-{x}-{z}',
-                            (0.003, 0.0008, 0.003), (sign*x, -0.0646, z),
-                            'screw-steel', rim, 0.7)
+        pierced_k79_plate(f'k79-{side}-ear', (0.090, 0.0025, 0.04445),
+                          (sign*0.1963, -0.063, 0),
+                          [(sign*x, z, 0.013, 0.007)
+                           for x in (0.159, 0.229) for z in (-0.015, 0.015)] +
+                          [(sign*x, z, 0.0045, 0.0045)
+                           for x in (0.186, 0.210) for z in (-0.008, 0.008)])
+        pierced_k79_plate(f'k79-{side}-adapter-tab', (0.040, 0.0025, 0.030),
+                          (sign*0.1313, -0.063, 0),
+                          [(sign*0.136, 0, 0.014, 0.006)])
+        for z in (-0.020, 0.020):
+            painted_box(f'k79-{side}-fold-{z}', (0.075, 0.012, 0.002),
+                        (sign*0.197, -0.055, z), 'k79-fold-dark', charcoal, 0.55)
+        painted_box(f'k79-{side}-side-carrier', (0.0025, 0.078, 0.016),
+                    (sign*0.1112, -0.015, 0), 'k79-black-steel',
+                    (0.095, 0.102, 0.113), 0.52)
+        for z in (-0.012, 0.012):
+            painted_box(f'k79-{side}-interconnect-rail-{z}',
+                        (0.026, 0.054, 0.002), (sign*0.123, -0.013, z),
+                        'k79-fold-dark', charcoal, 0.55)
+        for y in (-0.046, 0.010):
+            painted_box(f'k79-{side}-side-fastener-{y}', (0.001, 0.006, 0.006),
+                        (sign*0.113, y, 0), 'screw-steel', rim, 0.7)
     # Left-to-right front order visible on MikroTik's RB5009/K-79 image:
     # DC jack, SFP+, USB-A, 2.5G RJ45, then Ethernet 2-8.
     front_y = -0.0630
@@ -301,6 +356,10 @@ def build_rb5009_k79():
     socket('dc-input', -0.100, 0.007, 0.008, gold, 'contact-gold')
     socket('sfpplus-1', -0.083, 0.014, 0.010, charcoal, 'heatsink-ribs')
     socket('usb-a-3', -0.061, 0.012, 0.007, blue, 'usb-blue')
+    painted_box('sfpplus-cage-lip', (0.015, 0.001, 0.001),
+                (-0.083, front_y-0.0022, 0.0055), 'socket-nickel', rim, 0.5)
+    painted_box('usb-a-blue-tongue', (0.009, 0.0008, 0.002),
+                (-0.061, front_y-0.0023, -0.0015), 'usb-blue', blue)
     front_legend('label-dc', 'DC', -0.100, -0.009, 0.0022)
     front_legend('label-sfp', 'SFP+', -0.083, -0.009, 0.0022)
     front_legend('label-usb', 'USB', -0.061, -0.009, 0.0022)
@@ -308,6 +367,10 @@ def build_rb5009_k79():
         x = -0.039 + n * 0.0193
         speed = '2p5g' if n == 0 else '1g'
         socket(f'ether{n+1}-{speed}', x, 0.014, 0.012, gold, 'contact-gold')
+        for pin in range(6):
+            painted_box(f'ether{n+1}-contact-{pin}', (0.0008, 0.0007, 0.002),
+                        (x-0.0045+pin*0.0018, front_y-0.0022, -0.001),
+                        'contact-gold', gold, 0.6)
         painted_box(f'ether{n+1}-link-led', (0.002, 0.0007, 0.001),
                     (x-0.005, front_y-0.002, 0.008), 'led-green',
                     (0.05, 0.55, 0.22))
