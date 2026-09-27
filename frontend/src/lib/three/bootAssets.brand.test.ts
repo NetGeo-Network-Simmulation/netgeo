@@ -31,6 +31,11 @@ describe('optional device brand assets', () => {
     const caseSize = new THREE.Box3().setFromObject(caseMesh).getSize(new THREE.Vector3());
     expect(caseSize.x).toBeCloseTo(0.220, 3);
     expect(caseSize.z).toBeCloseTo(0.125, 3);
+    const bodyEnvelope = new THREE.Box3().setFromObject(caseMesh);
+    for (let i = 0; i < 21; i++) {
+      bodyEnvelope.union(new THREE.Box3().setFromObject(scene.getObjectByName(`heatsink-top-${i}`)!));
+    }
+    expect(bodyEnvelope.getSize(new THREE.Vector3()).y).toBeCloseTo(0.022, 3);
     const names: string[] = [];
     const materials = new Set<string>();
     scene.traverse((obj) => {
@@ -47,6 +52,12 @@ describe('optional device brand assets', () => {
     expect(names).toContain('k79-left-ear');
     expect(names).toContain('k79-right-ear');
     expect(names.filter((name) => name.startsWith('heatsink-top-'))).toHaveLength(21);
+    const ear = scene.getObjectByName('k79-left-ear') as THREE.Mesh;
+    const ray = new THREE.Raycaster(new THREE.Vector3(-0.229, 0.015, 0.1),
+      new THREE.Vector3(0, 0, -1));
+    expect(ray.intersectObject(ear).length).toBe(0); // punched rack slot
+    ray.set(new THREE.Vector3(-0.200, 0, 0.1), new THREE.Vector3(0, 0, -1));
+    expect(ray.intersectObject(ear).length).toBeGreaterThan(0);
     expect(materials.size).toBeGreaterThanOrEqual(5);
   });
   it('keeps optional brand failures out of the critical scene load', async () => {
