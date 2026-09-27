@@ -12,7 +12,7 @@ bukan selisih yang kami maklumi.*
 
 [![CI](https://github.com/NetGeo-Network-Simmulation/netgeo/actions/workflows/backend.yml/badge.svg)](https://github.com/NetGeo-Network-Simmulation/netgeo/actions)
 ![License](https://img.shields.io/badge/license-Apache--2.0-blue)
-![Version](https://img.shields.io/badge/version-1.2.126-brightgreen)
+![Version](https://img.shields.io/badge/version-1.2.125.2-brightgreen)
 ![Channel](https://img.shields.io/badge/channel-beta-blueviolet)
 ![Python](https://img.shields.io/badge/python-3.12+-blue)
 ![React](https://img.shields.io/badge/react-18-61dafb)
@@ -51,14 +51,14 @@ membawa runtime Qt sendiri. Itu bukan bug yang perlu "dioptimasi".
 
 ### Unduh rilis (jalur tercepat)
 
-Ambil aset dari tag terbaru di [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.126):
+Ambil aset dari tag terbaru di [Releases](https://github.com/NetGeo-Network-Simmulation/netgeo/releases/tag/v1.2.125.2):
 
 | Aset | Ukuran | Apa isinya |
 |---|---|---|
 | `NetGeo-x86_64.AppImage` | Linux | Window Qt native, tanpa langkah instalasi — `chmod +x`, jalankan |
-| `netgeo_1.2.126_amd64.deb` | Debian/Ubuntu | `apt` yang pasang dependensi Qt |
-| `netgeo-1.2.126-1.x86_64.rpm` | Fedora/RHEL | `dnf` yang pasang dependensi Qt |
-| `netgeo-1.2.126-setup.exe` | Windows | Installer window native — tetap perlu QA di Windows asli |
+| `netgeo_1.2.125.2_amd64.deb` | Debian/Ubuntu | `apt` yang pasang dependensi Qt |
+| `netgeo-1.2.125.2-1.x86_64.rpm` | Fedora/RHEL | `dnf` yang pasang dependensi Qt |
+| `netgeo-1.2.125.2-setup.exe` | Windows | Installer window native — tetap perlu QA di Windows asli |
 | `netgeo-linux-x86_64.tar.gz` | Linux | Bundle onedir, extract lalu jalankan `netgeo` |
 
 Ketiganya (AppImage, exe, tarball) sama-sama lewat jalur window native (bentuk #1/#2/#3 di atas,
@@ -70,8 +70,8 @@ mendaftarkan dependensinya, jadi `apt`/`dnf` yang pasang runtime Qt/QtWebEngine 
 bukan kamu yang bawa semuanya sendiri seperti AppImage.
 
 ```
-sudo apt install ./netgeo_1.2.126_amd64.deb    # Debian, Ubuntu
-sudo dnf install ./netgeo-1.2.126-1.x86_64.rpm # Fedora, RHEL
+sudo apt install ./netgeo_1.2.125.2_amd64.deb    # Debian, Ubuntu
+sudo dnf install ./netgeo-1.2.125.2-1.x86_64.rpm # Fedora, RHEL
 ```
 
 Copot lewat `apt remove netgeo` / `dnf remove netgeo` kapan saja — keduanya cuma menghapus file
