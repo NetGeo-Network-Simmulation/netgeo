@@ -12,7 +12,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { getBootGeometry, type BootFamily, type CageFamily, type ChassisFamily, type StructureFamily } from './bootAssets';
+import { getBootGeometry, getVisualChassis, type BootFamily, type CageFamily, type ChassisFamily, type StructureFamily } from './bootAssets';
 
 /* ─── Real-world geometry (EIA-310): 1U = 44.45 mm, 19" panel = 482.6 mm ─── */
 export const U = 0.04445;
@@ -977,13 +977,41 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     // body is the sheet-metal box between the rack ears — narrower than the
     // 482.6mm faceplate/ears (CHASSIS_BODY_W, see its own comment above).
     const chassisGeo = def.chassisAsset ? getBootGeometry(def.chassisAsset) : undefined;
+    const visualChassis = def.chassisAsset ? getVisualChassis(def.chassisAsset) : undefined;
     // Cached GLB geometry is shared across scene rebuilds and therefore is
     // deliberately not registered in this scene's disposable list.
-    const body = chassisGeo ? new THREE.Mesh(chassisGeo, chassisMat) : box(bodyW, h, depth, chassisMat, 'chassis');
+    const body = visualChassis ? visualChassis.clone(true)
+      : chassisGeo ? new THREE.Mesh(chassisGeo, chassisMat) : box(bodyW, h, depth, chassisMat, 'chassis');
     body.name = 'chassis';
     body.position.set(0, 0, rack.d / 2 - 0.09 - depth / 2);
     body.userData.dev = def.id;
+    if (visualChassis) body.traverse((part) => { part.userData.dev = def.id; });
     g.add(body);
+    if (visualChassis && def.chassisAsset === 'chassis-mikrotik-rb5009-k79') {
+      // The Blender model owns all visible ports, metal and bracket. Its
+      // decorative sockets never create logical ports; transparent hit meshes
+      // at the same front locations carry the catalog ordinal for raycasting.
+      // Pitch is proportional to the vendor image, not a measured drawing.
+      const faceZ = rack.d / 2 - 0.088;
+      const portRefs: Record<number, THREE.Vector3> = {};
+      const xs = [-0.083, -0.039, -0.0197, -0.0004, 0.0189,
+        0.0382, 0.0575, 0.0768, 0.0961];
+      const proxyMat = track(new THREE.MeshBasicMaterial({
+        transparent: true, opacity: 0, depthWrite: false,
+      }));
+      for (let i = 0; i < Math.min(def.ports, xs.length); i++) {
+        const x = xs[i]!;
+        const proxy = box(0.016, 0.014, 0.002, proxyMat, 'port-hit-' + i);
+        proxy.position.set(x, 0, faceZ + 0.003);
+        proxy.userData.dev = def.id;
+        proxy.userData.port = i;
+        g.add(proxy);
+        portRefs[i] = new THREE.Vector3(x, 0, faceZ + 0.01);
+      }
+      g.position.y = devY;
+      registry.devices[def.id] = { def, group: g, rackKey, portRefs, faceZ };
+      return g;
+    }
     // Rack ears only belong to real rackmount-width equipment. A desktop ONU
     // placed on a shelf must not masquerade as a full-width faceplate.
     if (rackMounted) {
