@@ -30,10 +30,12 @@ import { Select } from '@/components/ui/Select';
 import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
 import {
   type DistributionMode,
+  applyRuntimeProfile,
+  checkRemoteEngine,
+  modeForEngine,
   normalizeRemoteOrigin,
   readRuntimeProfile,
   readsRemoteBackend,
-  saveRuntimeProfile,
 } from '@/config/runtimeProfile';
 
 const SPEED_OPTIONS = [0.5, 1, 2, 4, 8].map((s) => ({ value: String(s), label: `${s}×` }));
@@ -138,16 +140,34 @@ const RUNTIME_MODES: {
 function RuntimeSection() {
   const [profile, setProfile] = useState(readRuntimeProfile);
   const [error, setError] = useState<string | null>(null);
+  const [health, setHealth] = useState<string | null>(null);
+  const [checking, setChecking] = useState(false);
   const remote = readsRemoteBackend(profile.mode);
   const normalizedOrigin = normalizeRemoteOrigin(profile.remoteOrigin);
 
-  const apply = () => {
+  const verify = async () => {
+    setChecking(true);
+    setError(null);
+    setHealth(null);
+    try {
+      const version = await checkRemoteEngine(profile.remoteOrigin);
+      setHealth(`NetGeo ${version} is reachable.`);
+      return true;
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not reach the server. Check its address and CORS settings.');
+      return false;
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  const apply = async () => {
     if (remote && !normalizedOrigin) {
       setError('Enter an http:// or https:// server origin before applying this mode.');
       return;
     }
-    saveRuntimeProfile({ ...profile, remoteOrigin: normalizedOrigin ?? '' });
-    window.location.reload();
+    if (remote && !(await verify())) return;
+    applyRuntimeProfile({ ...profile, remoteOrigin: normalizedOrigin ?? '' }, () => window.location.reload());
   };
 
   return (
@@ -159,6 +179,23 @@ function RuntimeSection() {
         </p>
       </div>
 
+      <fieldset className="space-y-2">
+        <legend className="text-sm font-medium text-fg/85">Engine execution</legend>
+        <p className="text-xs text-fg/45">Choose where simulation runs. REST and live WebSocket traffic use the same backend.</p>
+        <div className="flex flex-wrap gap-2">
+          {([
+            { remote: false, label: 'Local / offline', detail: 'Bundled backend' },
+            { remote: true, label: 'Remote / online', detail: 'Configured server' },
+          ] as const).map((choice) => (
+            <label key={choice.label} className={cn('cursor-pointer rounded-lg border px-3 py-2 text-sm', remote === choice.remote ? 'border-accent bg-accent/10 text-accent' : 'border-fg/10 bg-fg/5 text-fg/70')}>
+              <input type="radio" name="engine-execution" className="mr-2 accent-accent" checked={remote === choice.remote}
+                onChange={() => { setProfile((current) => ({ ...current, mode: modeForEngine(current.mode, choice.remote) })); setError(null); setHealth(null); }} />
+              {choice.label}<span className="ml-2 text-xs text-fg/45">{choice.detail}</span>
+            </label>
+          ))}
+        </div>
+      </fieldset>
+
       <div className="space-y-2">
         {RUNTIME_MODES.map((option) => {
           const selected = profile.mode === option.mode;
@@ -167,7 +204,8 @@ function RuntimeSection() {
               key={option.mode}
               type="button"
               disabled={option.disabled}
-              onClick={() => setProfile((current) => ({ ...current, mode: option.mode }))}
+              onClick={() => { setProfile((current) => ({ ...current, mode: option.mode })); setError(null); setHealth(null); }}
+              aria-pressed={selected}
               className={cn(
                 'w-full rounded-lg border px-3 py-2.5 text-left transition-colors',
                 selected
@@ -186,8 +224,10 @@ function RuntimeSection() {
       {remote && (
         <Row label="Remote server" description="Use the server origin only; /api and ws(s) are derived automatically.">
           <input
+            aria-label="Remote server origin"
+            type="url"
             value={profile.remoteOrigin}
-            onChange={(event) => setProfile((current) => ({ ...current, remoteOrigin: event.target.value }))}
+            onChange={(event) => { setProfile((current) => ({ ...current, remoteOrigin: event.target.value })); setError(null); setHealth(null); }}
             placeholder="https://netgeo.example.com"
             className={inputCls}
           />
@@ -199,12 +239,19 @@ function RuntimeSection() {
         {remote && normalizedOrigin ? normalizedOrigin.replace(/^http/, 'ws') : 'local same-origin socket'}
       </div>
 
-      {error && <p className="text-xs text-danger">{error}</p>}
+      {remote && <p className="text-xs text-fg/45">The server must allow this app origin through CORS. A separate server may require a new login after reconnect.</p>}
+      {error && <p role="alert" className="text-xs text-danger">{error}</p>}
+      {health && <p role="status" className="text-xs text-accent">{health}</p>}
 
       <div className="flex flex-wrap gap-2">
+        {remote && <button type="button" onClick={() => { void verify(); }} disabled={checking || !normalizedOrigin}
+          className="rounded-md border border-fg/10 bg-fg/5 px-3 py-1.5 text-xs text-fg/70 disabled:opacity-50">
+          {checking ? 'Checking…' : 'Check connection'}
+        </button>}
         <button
           type="button"
-          onClick={apply}
+          onClick={() => { void apply(); }}
+          disabled={checking}
           className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-accent-fg transition-colors hover:bg-accent-soft"
         >
           Apply and reconnect
