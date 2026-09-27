@@ -34,7 +34,7 @@ import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { cn } from '@/lib/cn';
 import { autoName } from '@/lib/mapDeploy';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
-import { loadBootAssets } from '@/lib/three/bootAssets';
+import { loadBootAssets, loadBrandAssets } from '@/lib/three/bootAssets';
 import { mountElevationM, structureSpecFor } from '@/lib/three/outdoorPlacement';
 import { RackDevicePicker } from './RackDevicePicker';
 import { UnrackedDevicesPanel } from './UnrackedDevicesPanel';
@@ -266,6 +266,17 @@ export function Rack3DElevationPanel() {
     () => (topoQ.data ? adaptTopology(topoQ.data, viewRackIds, deviceTypesById) : null),
     [topoQ.data, viewRackIds, deviceTypesById],
   );
+  useEffect(() => {
+    if (!adapted) return;
+    const families = adapted.racks.flatMap((rack) =>
+      rack.devices.flatMap((device) => device.chassisAsset ? [device.chassisAsset] : []));
+    if (!families.length) return;
+    let live = true;
+    loadBrandAssets(families)
+      .then(() => { if (live) setAssetsLoaded((loaded) => !loaded); })
+      .catch(() => {});
+    return () => { live = false; };
+  }, [adapted]);
 
   // Cable Mode / Add-device / move all write straight to the backend (P2) —
   // the scene shows exactly `adapted`, nothing session-only layered on top.

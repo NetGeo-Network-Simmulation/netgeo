@@ -40,6 +40,7 @@ authored with its vertical extent along local Z (base at Z=0), so the same
 import bpy
 import os
 import math
+import sys
 from mathutils import Vector
 
 OUT_DIR = os.path.normpath(os.path.join(os.path.dirname(bpy.data.filepath or __file__), '..', '..', 'frontend', 'public', '3d'))
@@ -192,6 +193,157 @@ def export_glb(obj, filename):
         export_yup=True,
     )
     print('wrote', path)
+
+
+def painted_box(name, dims, centre, material, rgb, metallic=0.0):
+    """Small material-preserving visual part; positions use Blender X/Y/Z."""
+    obj = cube_at(name, *dims, *centre)
+    mat = bpy.data.materials.get(material)
+    if mat is None:
+        mat = bpy.data.materials.new(material)
+        mat.diffuse_color = (*rgb, 1)
+        mat.use_nodes = True
+        bsdf = mat.node_tree.nodes.get('Principled BSDF')
+        bsdf.inputs['Base Color'].default_value = (*rgb, 1)
+        bsdf.inputs['Metallic'].default_value = metallic
+        bsdf.inputs['Roughness'].default_value = 0.38 if metallic else 0.65
+    obj.data.materials.append(mat)
+    return obj
+
+
+def front_legend(name, label, x, z, size=0.003):
+    """Embossed front lettering, converted to mesh for glTF portability."""
+    bpy.ops.object.text_add(location=(x, -0.0655, z), rotation=(math.pi / 2, 0, 0))
+    obj = bpy.context.object
+    obj.name = name
+    obj.data.body = label
+    obj.data.size = size
+    obj.data.align_x = 'CENTER'
+    obj.data.extrude = 0.00003
+    bpy.ops.object.convert(target='MESH')
+    mat = bpy.data.materials.get('silk-grey')
+    if mat is None:
+        mat = bpy.data.materials.new('silk-grey')
+        mat.diffuse_color = (0.54, 0.57, 0.59, 1)
+    obj.data.materials.append(mat)
+
+
+def export_visual_glb(filename):
+    """Keep separate mesh materials: a merged, recoloured geometry loses them."""
+    bpy.ops.object.select_all(action='DESELECT')
+    for obj in bpy.context.scene.objects:
+        if obj.type == 'MESH':
+            obj.select_set(True)
+    os.makedirs(OUT_DIR, exist_ok=True)
+    path = os.path.join(OUT_DIR, filename)
+    bpy.ops.export_scene.gltf(filepath=path, use_selection=True,
+                              export_format='GLB', export_apply=True, export_yup=True)
+    print('wrote', path)
+
+
+def build_rb5009_k79():
+    """RB5009UG+S+IN with its K-79 1U adapter, authored entirely in Blender.
+
+    Sourced: RB5009 outer 220x125x22 mm and port TYPES/COUNTS from
+    https://mikrotik.com/product/rb5009ug_s_in ; K-79 supports up to four
+    units/1U from https://mikrotik.com/product/rb5009_mount and its assembly
+    PDF https://cdn.mikrotik.com/web-assets/product_files/K79_230513.pdf .
+    482.6 mm rack face width and 44.45 mm 1U height are EIA-310 nominal.
+    All offsets, hole sizes, grille/fin pitch, port pitch, and metal thickness
+    are PROPORTIONAL art cues from the official product imagery, not claims of
+    vendor dimensions. The GLB has NO logical ports: rack3d's catalog anchors
+    remain the only cable/picking targets.
+
+    Blender -Y is the front; glTF export converts it to three.js +Z.
+    """
+    clear_scene()
+    black = (0.056, 0.061, 0.067)
+    charcoal = (0.12, 0.13, 0.14)
+    rim = (0.33, 0.35, 0.36)
+    gold = (0.56, 0.39, 0.16)
+    blue = (0.018, 0.30, 0.58)
+    # Exact device envelope; smaller inserts never extend its bounds.
+    painted_box('rb5009-anodized-chassis', (0.220, 0.125, 0.018),
+                (0, 0, -0.002), 'black-anodized-aluminium', black, 0.65)
+    # Top/rear passive heat sink ribs. These sit on the silhouette, inset so
+    # the 220x125x22 mm measured envelope remains exact.
+    for i in range(21):
+        x = -0.103 + i * 0.0103
+        painted_box(f'heatsink-top-{i}', (0.0033, 0.073, 0.004),
+                    (x, 0.020, 0.009), 'heatsink-ribs', charcoal, 0.52)
+        painted_box(f'heatsink-rear-{i}', (0.0033, 0.0021, 0.013),
+                    (x, 0.0614, 0), 'heatsink-ribs', charcoal, 0.52)
+    # K-79: distinct left/right formed steel ears and short device rails.
+    # It is not a stretched device faceplate. Screw/hole cues are proportional.
+    for sign, side in ((-1, 'left'), (1, 'right')):
+        painted_box(f'k79-{side}-ear', (0.1243, 0.0025, 0.04445),
+                    (sign * 0.17915, -0.0624, 0), 'k79-black-steel', charcoal, 0.55)
+        painted_box(f'k79-{side}-return', (0.003, 0.075, 0.018),
+                    (sign * 0.1115, -0.022, 0), 'k79-black-steel', charcoal, 0.55)
+        for x in (0.135, 0.226):
+            for z in (-0.015, 0.015):
+                painted_box(f'k79-{side}-screw-recess-{x}-{z}',
+                            (0.010, 0.0007, 0.008), (sign*x, -0.0641, z),
+                            'recess-black', (0.009, 0.010, 0.012))
+                painted_box(f'k79-{side}-screw-{x}-{z}',
+                            (0.003, 0.0008, 0.003), (sign*x, -0.0646, z),
+                            'screw-steel', rim, 0.7)
+    # Left-to-right front order visible on MikroTik's RB5009/K-79 image:
+    # DC jack, SFP+, USB-A, 2.5G RJ45, then Ethernet 2-8.
+    front_y = -0.0630
+    def socket(name, x, width, height, insert, insert_name):
+        painted_box(name+'-bezel', (width+0.002, 0.0014, height+0.002),
+                    (x, front_y, 0), 'socket-nickel', rim, 0.5)
+        painted_box(name+'-mouth', (width, 0.0016, height),
+                    (x, front_y-0.0009, 0), 'socket-shadow', (0.005, 0.006, 0.008))
+        painted_box(name+'-insert', (width*0.66, 0.0006, height*0.19),
+                    (x, front_y-0.0020, -height*0.27), insert_name, insert)
+    socket('dc-input', -0.100, 0.007, 0.008, gold, 'contact-gold')
+    socket('sfpplus-1', -0.083, 0.014, 0.010, charcoal, 'heatsink-ribs')
+    socket('usb-a-3', -0.061, 0.012, 0.007, blue, 'usb-blue')
+    front_legend('label-dc', 'DC', -0.100, -0.009, 0.0022)
+    front_legend('label-sfp', 'SFP+', -0.083, -0.009, 0.0022)
+    front_legend('label-usb', 'USB', -0.061, -0.009, 0.0022)
+    for n in range(8):
+        x = -0.039 + n * 0.0193
+        speed = '2p5g' if n == 0 else '1g'
+        socket(f'ether{n+1}-{speed}', x, 0.014, 0.012, gold, 'contact-gold')
+        painted_box(f'ether{n+1}-link-led', (0.002, 0.0007, 0.001),
+                    (x-0.005, front_y-0.002, 0.008), 'led-green',
+                    (0.05, 0.55, 0.22))
+        front_legend(f'label-ether{n+1}', '2.5G' if n == 0 else str(n+1),
+                     x, -0.009, 0.0022)
+    # Third powering option is a side 2-pin terminal, separate from the
+    # front DC jack and never represented as a network interface.
+    painted_box('side-2pin-terminal', (0.001, 0.010, 0.008),
+                (0.1095, 0.030, -0.001), 'terminal-green', (0.10, 0.27, 0.13))
+    painted_box('front-power-led', (0.002, 0.0007, 0.001),
+                (-0.107, front_y-0.002, 0.008), 'led-green', (0.05, 0.55, 0.22))
+    export_visual_glb('brands/mikrotik/rb5009ug-s-in-k79.glb')
+
+
+def render_rb5009_preview():
+    """Optional local QA render, never bundled in the app."""
+    scene = bpy.context.scene
+    scene.render.engine = 'CYCLES'
+    scene.cycles.samples = 24
+    scene.render.resolution_x, scene.render.resolution_y = 1500, 700
+    scene.render.resolution_percentage = 100
+    scene.world.color = (0.025, 0.025, 0.025)
+    bpy.ops.object.camera_add(location=(0.51, -0.55, 0.35))
+    camera = bpy.context.object
+    direction = Vector((0, 0, 0)) - camera.location
+    camera.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
+    camera.data.type = 'ORTHO'
+    camera.data.ortho_scale = 0.63
+    scene.camera = camera
+    bpy.ops.object.light_add(type='AREA', location=(0, -0.3, 0.55))
+    bpy.context.object.data.energy = 8
+    bpy.context.object.data.shape = 'RECTANGLE'
+    bpy.context.object.data.size = 0.7
+    bpy.context.object.data.size_y = 0.4
+    scene.render.filepath = '/tmp/netgeo-rb5009-k79-preview.png'
+    bpy.ops.render.render(write_still=True)
 
 
 # ─── RJ45 plug + boot (§2.a "RJ45 — DIKOREKSI Sesi 1b", V(2nd)) ────────────
@@ -456,6 +608,9 @@ if __name__ == '__main__':
     build_chassis_mikrotik_ccr2004()
     build_chassis_mikrotik_crs317()
     build_chassis_mikrotik_crs328()
+    build_rb5009_k79()
+    if '--preview-rb5009' in sys.argv:
+        render_rb5009_preview()
     build_rj11_cage()
     build_cabinet_outdoor()
     build_monopole()

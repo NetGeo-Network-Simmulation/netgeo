@@ -185,6 +185,33 @@
       "datasheet_note": "CCR2004: ISP budget edge; full table butuh RAM cukup (RouterOSv7)."
     },
     {
+      "id": "mikrotik-rb5009ug-s-in",
+      "display_name": "MikroTik RB5009UG+S+IN",
+      "vendor": "MikroTik",
+      "vendor_options": ["MikroTik"],
+      "kind": "router",
+      "subcategory": "edge",
+      "tags": ["compact", "homelab", "k-79", "2.5g"],
+      "icon": { "name": "router-edge", "emoji": "🛜" },
+      "nos": ["routeros", "forgeos"],
+      "default_mode": "sim",
+      "emulation": { "available": false },
+      "ports": [
+        { "pattern": "sfp-sfpplus{n}", "count": 1, "type": "sfp", "speed_mbps": 10000 },
+        { "pattern": "ether1", "count": 1, "type": "eth", "speed_mbps": 2500 },
+        { "pattern": "ether2", "count": 1, "type": "eth", "speed_mbps": 1000 },
+        { "pattern": "ether3", "count": 1, "type": "eth", "speed_mbps": 1000 },
+        { "pattern": "ether4", "count": 1, "type": "eth", "speed_mbps": 1000 },
+        { "pattern": "ether5", "count": 1, "type": "eth", "speed_mbps": 1000 },
+        { "pattern": "ether6", "count": 1, "type": "eth", "speed_mbps": 1000 },
+        { "pattern": "ether7", "count": 1, "type": "eth", "speed_mbps": 1000 },
+        { "pattern": "ether8", "count": 1, "type": "eth", "speed_mbps": 1000 }
+      ],
+      "power": { "max_w": 25, "feed": "DC/PoE" },
+      "physical": { "ru": 1, "form_factor": "K-79 1U adapter; device body 220x125x22mm" },
+      "datasheet_note": "RB5009 body 220x125x22mm, 7x1G + 1x2.5G + 1xSFP+ and USB-A: https://mikrotik.com/product/rb5009ug_s_in (V). K-79 supports up to four units in 1U: https://mikrotik.com/product/rb5009_mount and https://cdn.mikrotik.com/web-assets/product_files/K79_230513.pdf (V). Bracket thickness, holes and port pitch are proportional visual art, not measured dimensions."
+    },
+    {
       "id": "cisco-isr4331-access",
       "display_name": "Cisco ISR 4331 (IOS-XE)",
       "vendor": "Cisco",

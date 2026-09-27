@@ -21,7 +21,7 @@ from app.api import device_types as dt
 # just needs to stay in sync so the parametrized test below is meaningful).
 _REAL_PACKS = {
     "olt": 11,
-    "routers": 12,
+    "routers": 13,
     "switches": 16,
     "firewalls": 11,
     "onu": 11,
@@ -63,6 +63,14 @@ def test_real_olt_pack_is_enabled_by_default_and_merges_into_device_types():
     assert huawei.power_watts_idle == 1200
     assert huawei.power_watts_max == 3000
     assert huawei.snmp_oids == dt._IF_MIB_OIDS
+
+
+def test_rb5009_pack_has_nine_network_ports_and_k79_mount():
+    rb = next(d for d in dt._load_enabled_pack_devices()
+              if d.id == "routers:mikrotik-rb5009ug-s-in")
+    assert sum(port["count"] for port in rb.ports) == 9
+    assert [port["speed_mbps"] for port in rb.ports] == [10000, 2500] + [1000] * 7
+    assert "K-79" in rb.physical["form_factor"]
 
 
 @pytest.mark.parametrize("pack_id,expected_count", sorted(_REAL_PACKS.items()))

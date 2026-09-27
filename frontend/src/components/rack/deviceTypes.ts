@@ -100,6 +100,30 @@ export interface DeviceType {
 // ─── Seed device library ──────────────────────────────────────────────────────
 
 export const DEVICE_TYPES: DeviceType[] = [
+  {
+    slug: 'mikrotik-rb5009ug-s-in',
+    manufacturer: 'MikroTik',
+    model: 'RB5009UG+S+IN',
+    // Select by exact pack id. Anonymous RouterOS nodes retain the existing
+    // rack switch fallback instead of pretending to be this small router.
+    nos: undefined,
+    uHeight: 1, rackMounted: true,
+    // Verified device body only; K-79 is a separate 482.6 mm visual accessory.
+    chassisMm: { widthMm: 220, depthMm: 125 },
+    front: {
+      // USB-A and DC are visual service/power sockets, not cableable network
+      // interfaces. Network order follows the official front image; exact
+      // pitch is proportional because MikroTik publishes no face drawing.
+      portZones: [
+        { ports: [{ type: 'sfp+', count: 1 }], rows: 1, align: 'left' },
+        { ports: [{ type: 'rj45', count: 1, label: '2.5G' }], rows: 1, align: 'left' },
+        { ports: [{ type: 'rj45', count: 7 }], rows: 1, align: 'left' },
+      ],
+      leds: [{ label: 'PWR', color: 'green', position: 'left' }],
+    },
+    rear: { blocks: [] },
+    brand: { accent: '#E4002B', chassis: '#101113', label: 'MikroTik', badge: 'stripe' },
+  },
   // MikroTik CCR2004-1G-12S+2XS
   {
     slug: 'mikrotik-ccr2004-1g-12s-2xs',
