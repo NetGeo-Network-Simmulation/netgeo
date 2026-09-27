@@ -41,8 +41,8 @@ Vite mem-*proxy* `/api` dan `/ws` ke backend FastAPI (default
 `http://localhost:8000`, lihat `vite.config.ts`). Jadi browser cukup bicara ke
 **satu origin** → tidak ada masalah CORS di dev dan paritas dengan prod.
 
-Override via `.env.local` (lihat `.env.example`):
-`VITE_BACKEND_ORIGIN`, `VITE_API_BASE`, `VITE_WS_BASE`.
+Override backend dev proxy via `.env.local` (lihat `.env.example`):
+`VITE_BACKEND_ORIGIN`. Untuk server terpisah, pilih Remote / online di Settings → Runtime.
 
 Skrip lain: `npm run build` (tsc + vite build), `npm run preview`,
 `npm run typecheck`, `npm run lint`.
