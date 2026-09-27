@@ -43,7 +43,18 @@ export function modeForEngine(mode: DistributionMode, remote: boolean): Distribu
 export async function checkRemoteEngine(origin: string): Promise<string> {
   const normalized = normalizeRemoteOrigin(origin);
   if (!normalized) throw new Error('Enter a valid http:// or https:// server origin.');
-  const response = await fetch(`${normalized}/api/health`, { signal: AbortSignal.timeout(5000) });
+  let response: Response;
+  try {
+    response = await fetch(`${normalized}/api/health`, { signal: AbortSignal.timeout(5000) });
+  } catch (cause) {
+    if (cause instanceof Error && cause.name === 'TimeoutError') {
+      throw new Error('Server did not respond within 5 seconds. Check its address and network connection.');
+    }
+    throw new Error('Could not reach the server. Check its address, HTTPS compatibility, and whether it allows this app origin through CORS.');
+  }
+  if (response.status === 401 || response.status === 403) {
+    throw new Error('Server denied the health check. Check its authentication or proxy configuration.');
+  }
   if (!response.ok) throw new Error(`Server health check failed (${response.status}).`);
   const health = await response.json() as { status?: string; app?: string; version?: string };
   if (health.status !== 'ok' || health.app !== 'NetGeo') {
@@ -77,17 +88,17 @@ export function applyRuntimeProfile(profile: RuntimeProfile, reload: () => void)
   reload();
 }
 
-export function runtimeApiBase(defaultBase: string | undefined): string {
+export function runtimeApiBase(): string {
   const profile = readRuntimeProfile();
   return readsRemoteBackend(profile.mode) && profile.remoteOrigin
     ? `${profile.remoteOrigin}/api`
-    : (defaultBase ?? '/api');
+    : '/api';
 }
 
-export function runtimeWebSocketBase(defaultBase: string | undefined): string | undefined {
+export function runtimeWebSocketBase(): string | undefined {
   const profile = readRuntimeProfile();
   if (readsRemoteBackend(profile.mode) && profile.remoteOrigin) {
     return profile.remoteOrigin.replace(/^http/, 'ws');
   }
-  return defaultBase;
+  return undefined;
 }
