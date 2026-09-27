@@ -89,6 +89,22 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     expect(size.z).toBeCloseTo(0.224, 3);
   });
 
+  it('loads and maps the verified CCR2004 chassis used by the QA plant', async () => {
+    await loadBootAssets(nodeFetch);
+    const family = chassisFamilyForDeviceSlug('mikrotik-ccr2004-1g-12s-2xs');
+    expect(family).toBe('chassis-mikrotik-ccr2004');
+    const geometry = getBootGeometry(family!)!;
+    geometry.computeBoundingBox();
+    const size = new THREE.Vector3();
+    geometry.boundingBox!.getSize(size);
+    // Official product page + brochure: 443 x 224 x 44 mm.
+    expect(size.x).toBeCloseTo(0.443, 3);
+    expect(size.y).toBeCloseTo(0.044, 3);
+    expect(size.z).toBeCloseTo(0.224, 3);
+    // Vent booleans make this more than the old plain 12-triangle cube.
+    expect(geometry.getAttribute('position').count).toBeGreaterThan(24);
+  });
+
   it('loads the verified CRS328 case envelope with its deeper 300 mm body', async () => {
     await loadBootAssets(nodeFetch);
     const family = chassisFamilyForDeviceSlug('mikrotik-crs328-24p-4splus-rm');

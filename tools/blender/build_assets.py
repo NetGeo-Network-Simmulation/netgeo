@@ -19,14 +19,15 @@ the connector's TIP (the face that seats into a port); the body/boot extend
 in -Z (-> -Y post-export) from there, so an instance placed at a cable's
 endpoint with the tip at that point looks flush with the port.
 
-Scope (NG-PH3D 3a, hard boundary — see briefing): only dimension-VERIFIED
-parts are modelled with real numbers. QSFP-DD/XFP/FC/ST/MPO/E2000/IEC power
-connectors stay UNVERIFIED and are deliberately not built here. The first
-per-SKU chassis is the MikroTik CRS317-1G-16S+RM: its official product page
-and hardware manual both state 443 x 224 x 44 mm. The GLB intentionally
-contains only that verified case envelope; its front ports remain driven by
-the existing catalog/anchor renderer because their exact offsets were not
-published and must not be guessed here.
+Scope (NG-PH3D 3a + wave-1 face pass): only dimension-VERIFIED parts are
+modelled with real numbers. QSFP-DD/XFP/FC/ST/MPO/E2000/IEC power connectors
+stay UNVERIFIED and are deliberately not built here. MikroTik's official
+product pages/brochures verify the outer dimensions and port counts for the
+CCR2004-1G-12S+2XS, CRS317-1G-16S+RM and CRS328-24P-4S+RM. Their precise
+vent/faceplate offsets are not published, so the ventilation pattern below is
+only a visual-proportion cue from official product imagery. Front ports remain
+catalog/anchor geometry in rack3d.ts: that keeps cable picking exact and avoids
+duplicating a decorative Blender port field over the live port instances.
 
 Outdoor placement track (Slice 5 + 7, see tower-structure-taxonomy.md memory):
 adds the outdoor NEMA cabinet + tower structure meshes. These use a DIFFERENT
@@ -76,6 +77,65 @@ def box(name, sx, sy, sz, cz):
     obj.location = (0, 0, cz - sz / 2)
     bpy.ops.object.transform_apply(location=True, scale=True)
     return obj
+
+
+def cube_at(name, sx, sy, sz, x=0.0, y=0.0, z=0.0):
+    """Axis-aligned box centred at an explicit point."""
+    bpy.ops.mesh.primitive_cube_add(size=1, location=(x, y, z))
+    obj = bpy.context.object
+    obj.name = name
+    obj.scale = (sx, sy, sz)
+    bpy.ops.object.transform_apply(location=True, scale=True)
+    return obj
+
+
+def cut_chassis_vents(body, name, w, d, h, top_rows, side_rows):
+    """Cut a low-poly ventilation pattern without changing the verified envelope.
+
+    Counts/spacing are representative proportions from the vendor's official
+    product imagery, not dimension claims. All cutters are joined and applied
+    in one Boolean so the committed GLB remains a single cached geometry.
+    """
+    cutters = []
+    top_pitch = min(0.012, max(0.007, (w * 0.42) / max(1, top_rows)))
+    for row_y in (-d * 0.24, d * 0.24):
+        for i in range(top_rows):
+            x = (i - (top_rows - 1) / 2) * top_pitch
+            cutters.append(cube_at(
+                f'{name}-top-vent-{len(cutters)}',
+                top_pitch * 0.46, min(0.055, d * 0.22), 0.004,
+                x, row_y, h / 2,
+            ))
+    for side in (-1, 1):
+        for i in range(side_rows):
+            y = (i - (side_rows - 1) / 2) * min(0.018, d * 0.08)
+            cutters.append(cube_at(
+                f'{name}-side-vent-{side}-{i}',
+                0.004, min(0.011, d * 0.05), h * 0.16,
+                side * w / 2, y, 0,
+            ))
+    cutter = join(cutters, f'{name}-vent-cutters')
+    mod = body.modifiers.new('vent-cutouts', 'BOOLEAN')
+    mod.operation = 'DIFFERENCE'
+    mod.solver = 'EXACT'
+    mod.object = cutter
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.modifier_apply(modifier=mod.name)
+    bpy.data.objects.remove(cutter, do_unlink=True)
+
+
+def build_mikrotik_chassis(name, filename, w, d, h, top_rows, side_rows):
+    """Verified case envelope plus non-dimensional ventilation cues."""
+    clear_scene()
+    body = box(name, w, d, h, h / 2)
+    bevel = body.modifiers.new('sheet-metal-edge', 'BEVEL')
+    bevel.width = 0.0012
+    bevel.segments = 2
+    bpy.context.view_layer.objects.active = body
+    bpy.ops.object.modifier_apply(modifier=bevel.name)
+    cut_chassis_vents(body, name, w, d, h, top_rows, side_rows)
+    add_material(body, 'warm-powder-coated-steel', (0.73, 0.72, 0.69))
+    export_glb(body, filename)
 
 
 def frustum(name, r_top, r_bottom, sz, cz, sides=8):
@@ -208,33 +268,47 @@ def build_qsfp_cage():
     export_glb(outer, 'cage-qsfp.glb')
 
 
+# ─── MikroTik CCR2004-1G-12S+2XS chassis (wave 1, V — official vendor) ────
+def build_chassis_mikrotik_ccr2004():
+    """Official 443 x 224 x 44 mm envelope + representative vent pattern.
+
+    Source: https://mikrotik.com/product/ccr2004_1g_12s_2xs and official
+    brochure https://cdn.mikrotik.com/web-assets/product_files/
+    CCR2004-1G-12S2XS_230155.pdf. The brochure also verifies the visible
+    12x SFP+, 2x SFP28, dual AC and two-fan character; exact offsets are not
+    published and remain catalog/visual proportions in rack3d.ts.
+    """
+    build_mikrotik_chassis(
+        'chassis-mikrotik-ccr2004', 'chassis-mikrotik-ccr2004.glb',
+        0.443, 0.224, 0.044, top_rows=13, side_rows=7,
+    )
+
+
 # ─── MikroTik CRS317-1G-16S+RM chassis (wave 1, V — official vendor) ───────
 # Case dimensions 443(W) x 224(D) x 44(H) mm, independently present on both
 # https://mikrotik.com/product/crs317_1g_16s_rm and the official hardware
 # manual. Port counts are also verified there (16x SFP+, 1x GbE, 1x RJ45
-# console), but exact faceplate offsets are not published, so this asset is
-# only the case envelope. rack3d.ts keeps the catalog-driven faceplate/cages
-# and generic fallback, preserving real cable anchors without inventing
-# unsourced measurements. No vendor logo, image, CAD, or mesh is imported.
+# console). The official image is used only for ventilation proportions;
+# rack3d.ts keeps the catalog-driven faceplate/cages and cable anchors. No
+# vendor logo, image, CAD, texture, or mesh is imported.
 def build_chassis_mikrotik_crs317():
-    clear_scene()
-    w, d, h = 0.443, 0.224, 0.044
-    body = box('chassis-mikrotik-crs317', w, d, h, h / 2)
-    add_material(body, 'powder-coated-steel', (0.12, 0.12, 0.125))
-    export_glb(body, 'chassis-mikrotik-crs317.glb')
+    build_mikrotik_chassis(
+        'chassis-mikrotik-crs317', 'chassis-mikrotik-crs317.glb',
+        0.443, 0.224, 0.044, top_rows=16, side_rows=8,
+    )
 
 
 # ─── MikroTik CRS328-24P-4S+RM chassis (wave 1, V — official vendor) ────────
 # 443 x 300 x 44 mm: https://mikrotik.com/product/crs328_24p_4s_rm and
 # https://manual.mikrotik.com/hardware/crs328-24p-4s-plus-rm/.
-# Exact port positions are unpublished; the app's catalog faceplate retains
-# cable anchors. This GLB is only the dimension-verified case envelope.
+# Official imagery verifies three RJ45 blocks, four SFP+ cages and the white
+# case. Exact offsets are unpublished; the app's catalog faceplate retains
+# the visual proportions and live cable anchors, without duplicate GLB ports.
 def build_chassis_mikrotik_crs328():
-    clear_scene()
-    w, d, h = 0.443, 0.300, 0.044
-    body = box('chassis-mikrotik-crs328', w, d, h, h / 2)
-    add_material(body, 'powder-coated-steel', (0.12, 0.12, 0.125))
-    export_glb(body, 'chassis-mikrotik-crs328.glb')
+    build_mikrotik_chassis(
+        'chassis-mikrotik-crs328', 'chassis-mikrotik-crs328.glb',
+        0.443, 0.300, 0.044, top_rows=18, side_rows=10,
+    )
 
 
 # ─── RJ-11/RJ-14 (6P6C) voice/FXS jack cage shell (Sesi port-fxs) ──────────
@@ -379,6 +453,7 @@ if __name__ == '__main__':
     build_lc()
     build_sfp_cage()
     build_qsfp_cage()
+    build_chassis_mikrotik_ccr2004()
     build_chassis_mikrotik_crs317()
     build_chassis_mikrotik_crs328()
     build_rj11_cage()
