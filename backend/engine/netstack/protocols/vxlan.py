@@ -151,7 +151,18 @@ class VxlanProcess:
         # interval instead of needing an explicit restart.
         if self.router.powered_on:
             self._advertise(net)
-        _schedule(net, self.interval, self.router.node_id, lambda: self._tick(net))
+        _schedule(net, self._tick_interval(), self.router.node_id, lambda: self._tick(net))
+
+    def _tick_interval(self) -> float:
+        bgp = self._bgp()
+        if bgp is None:
+            return self.interval
+        refreshes = [
+            peer.hold_time / 3.0
+            for peer in bgp.peers.values()
+            if peer.remote_asn == bgp.asn and peer.hold_time > 0
+        ]
+        return min([self.interval, *refreshes])
 
     def _bgp(self):
         for p in self.router.processes:
@@ -193,13 +204,16 @@ class VxlanProcess:
         routes = self._local_routes()
         snap = tuple((r.route_type, r.vni, r.mac, r.esi) for r in routes)
         for ip, peer in bgp.peers.items():
-            if peer.remote_asn != bgp.asn:
+            if peer.remote_asn != bgp.asn or peer.admin_down or peer.state != "established":
                 continue  # EVPN exchange follows the iBGP peer topology
             # ponytail: loopback-sourced side-channel (see module docstring).
             if self.router.egress_for(ip) is None:
                 continue  # loopback not reachable yet (IGP still converging)
-            refresh = max(peer.hold_time / 3.0, self.interval)
-            if self._sent.get(ip) == snap and net.now - self._sent_at.get(ip, 0.0) < refresh:
+            refresh = peer.hold_time / 3.0 if peer.hold_time > 0 else None
+            if (
+                self._sent.get(ip) == snap
+                and (refresh is None or net.now - self._sent_at.get(ip, 0.0) < refresh)
+            ):
                 continue
             self._sent[ip] = snap
             self._sent_at[ip] = net.now
@@ -222,6 +236,10 @@ class VxlanProcess:
     def on_packet(self, net: Network, iface: Interface, pkt: Ipv4Packet) -> None:
         seg = pkt.payload
         if not isinstance(seg, TcpSegment) or not isinstance(seg.payload, EvpnUpdate):
+            return
+        bgp = self._bgp()
+        peer = bgp.peers.get(pkt.src) if bgp is not None else None
+        if peer is None or peer.admin_down or peer.state != "established":
             return
         self._on_update(pkt.src, seg.payload, net)
 
