@@ -510,7 +510,10 @@ class BgpProcess:
     def _send(self, net: Network, peer: _Peer, msg, flags: str = "PSH") -> bool:
         route = self.router.egress_for(peer.ip)
         src_ip = route[0].ip.ip if route and route[0].ip else None
-        if peer.remote_asn == self.asn:
+        directly_connected = bool(
+            route and any(peer.ip in address.network for address in route[0].ips)
+        )
+        if peer.remote_asn == self.asn and not directly_connected:
             try:
                 router_id = IPv4Address(self.router_id)
             except ValueError:
