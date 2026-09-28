@@ -336,11 +336,15 @@ def _unit_vtep(ip: str, *, esi: str = SHARED_ESI) -> tuple[Network, VxlanProcess
 
 
 def test_df_election_orders_pe_ips_then_uses_modulo():
-    _net, vx = _unit_vtep("10.255.0.2")
+    net, vx = _unit_vtep("10.255.0.2")
     vx.remote_es[SHARED_ESI] = {
         IPv4Address("10.255.0.3"),
         IPv4Address("10.255.0.1"),
     }
+    vx._sync_df_elections(net)
+
+    assert vx.df_vtep(SHARED_ESI, 10) is None
+    net.run_for(3.1)
 
     # Numeric order is .1/.2/.3. Ethernet tag 10 elects ordinal 1; tag 11
     # elects ordinal 2 (RFC 7432 sec 8.5 service carving).
@@ -351,6 +355,8 @@ def test_df_election_orders_pe_ips_then_uses_modulo():
 def test_non_df_drops_overlay_bum_toward_multihomed_segment(monkeypatch):
     net, vx = _unit_vtep("10.255.0.2")
     vx.remote_es[SHARED_ESI] = {IPv4Address("10.255.0.1")}
+    vx._sync_df_elections(net)
+    net.run_for(3.1)
     sent: list[str] = []
     monkeypatch.setattr(
         Interface,
@@ -367,6 +373,86 @@ def test_non_df_drops_overlay_bum_toward_multihomed_segment(monkeypatch):
 
     # Tag 10 modulo two candidates elects .1; local .2 is non-DF.
     assert sent == []
+
+
+def test_overlay_bum_split_horizon_never_returns_to_source_es(monkeypatch):
+    net, vx = _unit_vtep("10.255.0.2")
+    vx._sync_df_elections(net)
+    net.run_for(3.1)
+    assert vx.df_vtep(SHARED_ESI, 10) == vx.vtep_ip
+    sent: list[str] = []
+    monkeypatch.setattr(
+        Interface,
+        "transmit",
+        lambda self, _net, _frame: sent.append(self.qualified_name),
+    )
+    inner = EthernetFrame(
+        src_mac="02:00:00:00:00:01",
+        dst_mac="ff:ff:ff:ff:ff:ff",
+    )
+    outer = Ipv4Packet(src=IPv4Address("10.255.0.1"), dst=vx.vtep_ip, proto=17)
+
+    vx.on_overlay(
+        net,
+        outer,
+        VxlanPacket(vni=10, inner=inner, ingress_esi=SHARED_ESI),
+    )
+
+    assert sent == []
+
+
+def test_local_origin_bum_also_obeys_df(monkeypatch):
+    net, vx = _unit_vtep("10.255.0.2", esi=ESI_SINGLE_HOMED)
+    access = net.add_iface(vx.router, "eth2")
+    ce2 = net.add_device(Host("ce2"))
+    net.connect("ce2-link", access, net.add_iface(ce2, "eth0"))
+    vx.bind_access("eth2", 10, esi=SHARED_ESI)
+    vx.remote_es[SHARED_ESI] = {IPv4Address("10.255.0.1")}
+    vx._sync_df_elections(net)
+    net.run_for(3.1)
+    sent: list[str] = []
+    monkeypatch.setattr(
+        Interface,
+        "transmit",
+        lambda self, _net, _frame: sent.append(self.qualified_name),
+    )
+
+    vx._flood(
+        net,
+        10,
+        "eth1",
+        EthernetFrame(
+            src_mac="02:00:00:00:00:01",
+            dst_mac="ff:ff:ff:ff:ff:ff",
+        ),
+    )
+
+    assert sent == []
+
+
+def test_df_membership_change_waits_three_second_epoch():
+    net, vx = _unit_vtep("10.255.0.2")
+    vx.remote_es[SHARED_ESI] = {IPv4Address("10.255.0.1")}
+    vx._sync_df_elections(net)
+
+    net.run_for(2.9)
+    assert vx.df_vtep(SHARED_ESI, 10) is None
+    net.run_for(0.2)
+    assert vx.df_vtep(SHARED_ESI, 10) == IPv4Address("10.255.0.1")
+
+
+def test_remote_alias_never_overwrites_locally_learned_mac():
+    _net, vx = _unit_vtep("10.255.0.9")
+    pe1 = IPv4Address("10.255.0.1")
+    mac = "02:00:00:00:00:aa"
+    key = (10, mac)
+    vx.mac_vni[key] = "eth1"
+    vx._on_update(pe1, EvpnUpdate(routes=[
+        EvpnRoute(2, 10, str(pe1), mac=mac),
+    ]))
+
+    assert vx.remote_mac_paths[key] == {pe1}
+    assert vx.mac_vni[key] == "eth1"
 
 
 def test_aliasing_uses_macless_pe_with_both_ad_routes():
@@ -433,3 +519,121 @@ def test_ad_withdrawal_repoints_stale_mac_route_to_surviving_alias():
         EvpnRoute(2, 10, str(pe1), mac=mac, esi=SHARED_ESI),
     ]))
     assert vx.remote_mac_paths[(10, mac)] == {pe2}
+
+
+def _dual_homed_lab() -> Network:
+    """Three VTEPs: leaf1/leaf2 share a real CE segment; leaf3 is remote."""
+    net = Network(seed=23)
+    leaves = [net.add_device(Router(f"leaf{i}")) for i in (1, 2, 3)]
+    spine = net.add_device(Router("spine"))
+    for index, leaf in enumerate(leaves, 1):
+        subnet = 10 + index
+        net.connect(
+            f"u{index}",
+            net.add_iface(leaf, "eth0", [f"10.0.{subnet}.1/30"]),
+            net.add_iface(spine, f"eth{index}", [f"10.0.{subnet}.2/30"]),
+        )
+        net.add_iface(leaf, "lo0", [f"10.255.0.{index}/32"])
+
+    ce = net.add_device(Switch("dual-ce", stp_enabled=False))
+    net.connect("ce-l1", net.add_iface(leaves[0], "eth2"), net.add_iface(ce, "eth0"))
+    net.connect("ce-l2", net.add_iface(leaves[1], "eth2"), net.add_iface(ce, "eth1"))
+    remote = net.add_device(Host("remote"))
+    net.connect(
+        "remote-l3",
+        net.add_iface(leaves[2], "eth2"),
+        net.add_iface(remote, "eth0", ["10.0.0.3/24"]),
+    )
+
+    for index, leaf in enumerate(leaves, 1):
+        OspfProcess(
+            leaf,
+            router_id=f"10.255.0.{index}",
+            hello_interval=1.0,
+            ifaces=["eth0", "lo0"],
+        )
+    OspfProcess(
+        spine,
+        router_id="10.255.0.254",
+        hello_interval=1.0,
+        ifaces=["eth1", "eth2", "eth3"],
+    )
+    for index, leaf in enumerate(leaves, 1):
+        bgp = BgpProcess(
+            leaf,
+            asn=65000,
+            router_id=f"10.255.0.{index}",
+            keepalive_interval=1.0,
+            hold_time=6.0,
+        )
+        for peer_index in (1, 2, 3):
+            if peer_index != index:
+                bgp.add_neighbor(f"10.255.0.{peer_index}", 65000)
+
+    for leaf in leaves[:2]:
+        vx = VxlanProcess(leaf, interval=1.0)
+        vx.bind_access("eth2", 10, esi=SHARED_ESI)
+    vx3 = VxlanProcess(leaves[2], interval=1.0)
+    vx3.bind_access("eth2", 10)
+    net.start()
+    net.run(until=30.0)
+    return net
+
+
+def test_dual_homed_ce_power_cycle_withdraws_and_readvertises_all_routes():
+    net = _dual_homed_lab()
+    v1, v2 = _vxlan(net, "leaf1"), _vxlan(net, "leaf2")
+    leaf1_ip = IPv4Address("10.255.0.1")
+    ce_mac = "02:00:00:00:00:99"
+    mac_key = (10, ce_mac)
+    v1.on_access_frame(
+        net,
+        net.devices["leaf1"].interfaces["eth2"],
+        EthernetFrame(src_mac=ce_mac, dst_mac="ff:ff:ff:ff:ff:ff"),
+    )
+    net.run_for(3.0)
+    assert v1.df_vtep(SHARED_ESI, 10) == leaf1_ip
+    assert v2.df_vtep(SHARED_ESI, 10) == leaf1_ip
+    assert mac_key in v2.remote_mac_paths
+
+    net.set_device_power("leaf1", False)
+    net.run_for(10.0)  # six-second hold expiry + three-second DF epoch
+    assert leaf1_ip not in v2.remote_es.get(SHARED_ESI, set())
+    assert leaf1_ip not in v2.remote_ad.get((SHARED_ESI, 0), set())
+    assert leaf1_ip not in v2.remote_vteps.get(10, set())
+    assert leaf1_ip not in v2._remote_type2
+    assert mac_key not in v2.remote_mac_paths
+    assert leaf1_ip not in v2._sent
+    assert v2.df_vtep(SHARED_ESI, 10) == IPv4Address("10.255.0.2")
+
+    net.set_device_power("leaf1", True)
+    net.run_for(15.0)
+    assert leaf1_ip in v2.remote_es.get(SHARED_ESI, set())
+    assert leaf1_ip in v2.remote_ad.get((SHARED_ESI, 0), set())
+    assert leaf1_ip in v2.remote_vteps.get(10, set())
+    assert mac_key in v2.remote_mac_paths
+    assert v1.df_vtep(SHARED_ESI, 10) == leaf1_ip
+    assert v2.df_vtep(SHARED_ESI, 10) == leaf1_ip
+
+
+def test_dual_homed_ce_has_exactly_one_df_for_overlay_bum(monkeypatch):
+    net = _dual_homed_lab()
+    v1, v2 = _vxlan(net, "leaf1"), _vxlan(net, "leaf2")
+    sent: list[str] = []
+    monkeypatch.setattr(
+        Interface,
+        "transmit",
+        lambda self, _net, _frame: sent.append(self.qualified_name),
+    )
+    inner = EthernetFrame(
+        src_mac="02:00:00:00:00:03",
+        dst_mac="ff:ff:ff:ff:ff:ff",
+    )
+    for vx in (v1, v2):
+        vx.on_overlay(
+            net,
+            Ipv4Packet(src=IPv4Address("10.255.0.3"), dst=vx.vtep_ip, proto=17),
+            VxlanPacket(vni=10, inner=inner.clone()),
+        )
+
+    assert sent == ["leaf1:eth2"]

@@ -627,6 +627,9 @@ class VxlanPacket:
 
     vni: int
     inner: Any = None       # inner EthernetFrame
+    # RFC 7432 split-horizon metadata. Real EVPN carries an ESI label; the
+    # simulator keeps the equivalent ESI directly on the tunnel packet.
+    ingress_esi: str = ""
 
     @property
     def wire_size(self) -> int:
@@ -636,7 +639,7 @@ class VxlanPacket:
     def copy(self) -> VxlanPacket:
         import copy
 
-        return VxlanPacket(self.vni, copy.deepcopy(self.inner))
+        return VxlanPacket(self.vni, copy.deepcopy(self.inner), self.ingress_esi)
 
     def summary(self) -> str:
         tail = self.inner.summary() if self.inner is not None else "-"
