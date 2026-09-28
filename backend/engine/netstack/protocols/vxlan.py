@@ -60,6 +60,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 # RFC 7432 sec 5: ESI 0 (all-zero, 10 octets) means "not multi-homed".
 ESI_SINGLE_HOMED = "00:00:00:00:00:00:00:00:00:00"
+DF_ELECTION_WAIT = 3.0
 
 
 def normalize_esi(value: str) -> str:
@@ -102,7 +103,12 @@ class VxlanProcess:
         # changes can rebuild aliased next-hop sets without waiting for MACs.
         self._remote_type2: dict[IPv4Address, dict[tuple[int, str], str]] = {}
         self.remote_mac_paths: dict[tuple[int, str], set[IPv4Address]] = {}
+        self._df_members: dict[str, tuple[IPv4Address, ...]] = {}
+        self._df_pending: dict[str, tuple[IPv4Address, ...]] = {}
+        self._df_seq: dict[str, int] = {}
         self._sent: dict[IPv4Address, tuple] = {}    # peer -> last snapshot sent
+        self._sent_at: dict[IPv4Address, float] = {}
+        self._rx_seq: dict[IPv4Address, int] = {}
         self._started = False
         router.processes.append(self)
 
@@ -136,6 +142,7 @@ class VxlanProcess:
             return
         self._started = True
         self.vtep_ip = self._own_loopback_ip()
+        self._sync_df_elections(net)
         self._tick(net)
 
     def _tick(self, net: Network) -> None:
@@ -182,6 +189,7 @@ class VxlanProcess:
         bgp = self._bgp()
         if bgp is None or self.vtep_ip is None:
             return
+        self._sync_df_elections(net)
         routes = self._local_routes()
         snap = tuple((r.route_type, r.vni, r.mac, r.esi) for r in routes)
         for ip, peer in bgp.peers.items():
@@ -190,9 +198,11 @@ class VxlanProcess:
             # ponytail: loopback-sourced side-channel (see module docstring).
             if self.router.egress_for(ip) is None:
                 continue  # loopback not reachable yet (IGP still converging)
-            if self._sent.get(ip) == snap:
+            refresh = max(peer.hold_time / 3.0, self.interval)
+            if self._sent.get(ip) == snap and net.now - self._sent_at.get(ip, 0.0) < refresh:
                 continue
             self._sent[ip] = snap
+            self._sent_at[ip] = net.now
             self.router.send_ip(
                 net,
                 Ipv4Packet(
@@ -213,21 +223,21 @@ class VxlanProcess:
         seg = pkt.payload
         if not isinstance(seg, TcpSegment) or not isinstance(seg.payload, EvpnUpdate):
             return
-        self._on_update(pkt.src, seg.payload)
+        self._on_update(pkt.src, seg.payload, net)
 
-    def _on_update(self, sender: IPv4Address, update: EvpnUpdate) -> None:
+    def _on_update(
+        self,
+        sender: IPv4Address,
+        update: EvpnUpdate,
+        net: Network | None = None,
+    ) -> None:
         # Full-snapshot replace keyed by the sending VTEP (the packet's IP
         # source — not reconstructed from the NLRI, so a *fully withdrawn*
         # sender with an empty route list still clears its old state; that's
         # what makes mass withdrawal (sec 8.2) a single atomic step here).
         if sender == self.vtep_ip:
             return
-        for vteps in self.remote_vteps.values():
-            vteps.discard(sender)
-        for vteps in self.remote_ad.values():
-            vteps.discard(sender)
-        for vteps in self.remote_es.values():
-            vteps.discard(sender)
+        self._withdraw_sender(sender)
         self._remote_type2[sender] = {}
         for r in update.routes:
             if r.route_type == 3:
@@ -239,6 +249,43 @@ class VxlanProcess:
             elif r.route_type == 4 and r.esi:
                 self.remote_es.setdefault(r.esi, set()).add(sender)
         self._rebuild_remote_mac_paths()
+        if net is not None:
+            self._arm_peer_hold(net, sender)
+            self._sync_df_elections(net)
+
+    def _withdraw_sender(self, sender: IPv4Address) -> None:
+        for table in (self.remote_vteps, self.remote_ad, self.remote_es):
+            for vteps in table.values():
+                vteps.discard(sender)
+        self._remote_type2.pop(sender, None)
+
+    def on_bgp_down(self, net: Network, sender: IPv4Address) -> None:
+        """Withdraw every EVPN route learned over a dead BGP session."""
+        self._sent.pop(sender, None)
+        self._sent_at.pop(sender, None)
+        self._rx_seq[sender] = self._rx_seq.get(sender, 0) + 1
+        self._withdraw_sender(sender)
+        self._rebuild_remote_mac_paths()
+        self._sync_df_elections(net)
+
+    def _arm_peer_hold(self, net: Network, sender: IPv4Address) -> None:
+        bgp = self._bgp()
+        peer = bgp.peers.get(sender) if bgp is not None else None
+        hold = peer.hold_time if peer is not None else 90.0
+        if hold <= 0:
+            return
+        self._rx_seq[sender] = self._rx_seq.get(sender, 0) + 1
+        seq = self._rx_seq[sender]
+        _schedule(
+            net,
+            hold,
+            self.router.node_id,
+            lambda sender=sender, seq=seq: self._peer_hold_fired(net, sender, seq),
+        )
+
+    def _peer_hold_fired(self, net: Network, sender: IPv4Address, seq: int) -> None:
+        if seq == self._rx_seq.get(sender):
+            self.on_bgp_down(net, sender)
 
     def _rebuild_remote_mac_paths(self) -> None:
         """Resolve Type-2 routes through all-active Ethernet A-D aliases.
@@ -264,17 +311,49 @@ class VxlanProcess:
         self.mac_vni = {k: v for k, v in self.mac_vni.items() if isinstance(v, str)}
         self.remote_mac_paths = paths
         for key, vteps in paths.items():
-            self.mac_vni[key] = min(vteps)
+            if key not in self.mac_vni:
+                self.mac_vni[key] = min(vteps)
 
-    def df_vtep(self, esi: str, ethernet_tag: int) -> IPv4Address | None:
-        """Return the RFC 7432 sec 8.5 modulo-election winner."""
+    def _df_candidates(self, esi: str) -> tuple[IPv4Address, ...]:
         candidates = set(self.remote_es.get(esi, ()))
-        if self.vtep_ip is not None and any(
+        if self.router.powered_on and self.vtep_ip is not None and any(
             own_esi == esi and self._port_up(name)
             for name, own_esi in self.esi.items()
         ):
             candidates.add(self.vtep_ip)
-        ordered = sorted(candidates)
+        return tuple(sorted(candidates))
+
+    def _sync_df_elections(self, net: Network) -> None:
+        esis = set(self.remote_es) | {
+            esi for esi in self.esi.values() if esi != ESI_SINGLE_HOMED
+        }
+        for esi in sorted(esis):
+            candidates = self._df_candidates(esi)
+            if candidates == self._df_members.get(esi, ()):
+                if esi in self._df_pending:
+                    self._df_seq[esi] = self._df_seq.get(esi, 0) + 1
+                    self._df_pending.pop(esi, None)
+                continue
+            if candidates == self._df_pending.get(esi):
+                continue
+            self._df_seq[esi] = self._df_seq.get(esi, 0) + 1
+            seq = self._df_seq[esi]
+            self._df_pending[esi] = candidates
+            _schedule(
+                net,
+                DF_ELECTION_WAIT,
+                self.router.node_id,
+                lambda esi=esi, seq=seq: self._commit_df_election(esi, seq),
+            )
+
+    def _commit_df_election(self, esi: str, seq: int) -> None:
+        if seq != self._df_seq.get(esi):
+            return
+        self._df_members[esi] = self._df_pending.pop(esi, ())
+
+    def df_vtep(self, esi: str, ethernet_tag: int) -> IPv4Address | None:
+        """Return the RFC 7432 sec 8.5 modulo-election winner."""
+        ordered = self._df_members.get(esi, ())
         return ordered[ethernet_tag % len(ordered)] if ordered else None
 
     def _is_df(self, iface_name: str, vni: int) -> bool:
@@ -307,21 +386,36 @@ class VxlanProcess:
                     out.transmit(net, frame)
                 return
             if isinstance(loc, IPv4Address):         # known remote: unicast VXLAN
-                self._encap(net, vni, self._remote_path((vni, dst), frame) or loc, frame)
+                self._encap(
+                    net, vni, self._remote_path((vni, dst), frame) or loc, frame,
+                    ingress_esi=self.esi.get(iface.name, ESI_SINGLE_HOMED),
+                )
                 return
         # BUM (broadcast/multicast/unknown-unicast): ingress-replicate.
         self._flood(net, vni, iface.name, frame)
 
     def _flood(self, net: Network, vni: int, in_port: str | None, frame: EthernetFrame) -> None:
+        ingress_esi = self.esi.get(in_port or "", ESI_SINGLE_HOMED)
         for name, avni in sorted(self.access.items()):
-            if avni == vni and name != in_port:
+            same_es = (
+                ingress_esi != ESI_SINGLE_HOMED
+                and self.esi.get(name) == ingress_esi
+            )
+            if avni == vni and name != in_port and not same_es and self._is_df(name, vni):
                 out = self.router.interfaces.get(name)
                 if out is not None:
                     out.transmit(net, frame.clone())
         for vtep in sorted(self.remote_vteps.get(vni, ())):
-            self._encap(net, vni, vtep, frame.clone())
+            self._encap(net, vni, vtep, frame.clone(), ingress_esi=ingress_esi)
 
-    def _encap(self, net: Network, vni: int, vtep: IPv4Address, inner: EthernetFrame) -> None:
+    def _encap(
+        self,
+        net: Network,
+        vni: int,
+        vtep: IPv4Address,
+        inner: EthernetFrame,
+        ingress_esi: str = ESI_SINGLE_HOMED,
+    ) -> None:
         if self.vtep_ip is None:
             return
         self.router.send_ip(
@@ -334,7 +428,7 @@ class VxlanProcess:
                 payload=UdpSegment(
                     src_port=_entropy_port(inner),
                     dst_port=VXLAN_UDP_PORT,
-                    payload=VxlanPacket(vni=vni, inner=inner),
+                    payload=VxlanPacket(vni=vni, inner=inner, ingress_esi=ingress_esi),
                 ),
             ),
         )
@@ -350,13 +444,22 @@ class VxlanProcess:
         if not inner.is_broadcast and not MacAddr(dst).is_multicast:
             loc = self.mac_vni.get((vx.vni, dst))
             if isinstance(loc, str):
+                if (
+                    vx.ingress_esi != ESI_SINGLE_HOMED
+                    and self.esi.get(loc) == vx.ingress_esi
+                ):
+                    return
                 out = self.router.interfaces.get(loc)
                 if out is not None:
                     out.transmit(net, inner)
                 return
         # Unknown-unicast/BUM: flood every local access port in this VNI.
         for name, avni in sorted(self.access.items()):
-            if avni == vx.vni and self._is_df(name, vx.vni):
+            same_es = (
+                vx.ingress_esi != ESI_SINGLE_HOMED
+                and self.esi.get(name) == vx.ingress_esi
+            )
+            if avni == vx.vni and not same_es and self._is_df(name, vx.vni):
                 out = self.router.interfaces.get(name)
                 if out is not None:
                     out.transmit(net, inner.clone())

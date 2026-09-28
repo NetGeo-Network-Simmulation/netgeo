@@ -444,6 +444,7 @@ class BgpProcess:
         closes and hard resets (power loss)."""
         if peer.state == "idle":
             return
+        was_established = peer.state == "established"
         # Same reasoning as _begin_connect: kill any in-flight
         # ConnectRetryTimer from before this close, whether or not we're
         # about to arm a fresh one below.
@@ -451,6 +452,10 @@ class BgpProcess:
         peer.rib_in.clear()
         peer.adj_out = None          # a new session must get a fresh UPDATE
         self._set_state(net, peer, "idle")
+        if was_established:
+            for process in self.router.processes:
+                if getattr(process, "proto", "") == "vxlan":
+                    process.on_bgp_down(net, peer.ip)
         self._decide_and_install(net)
         self._advertise_all(net)
         if not peer.admin_down:
