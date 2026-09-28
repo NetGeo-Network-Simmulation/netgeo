@@ -15,7 +15,7 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 
 beforeAll(() => loadBrandAssets([
   'chassis-mikrotik-ccr2004', 'chassis-mikrotik-crs317',
-  'chassis-mikrotik-rb5009-k79',
+  'chassis-mikrotik-rb5009-k79', 'chassis-cisco-c9300-48p-nm8x',
 ], nodeFetch));
 
 function build(device: DeviceDef) {
@@ -32,6 +32,19 @@ const base: DeviceDef = {
 };
 
 describe('rack3d Blender chassis envelope', () => {
+  it('resolves the C9300 pack alias to the corrected 488mm/NM-8X catalog entry', () => {
+    const pack = {
+      id: 'switches:cisco-c9300-48p-access', name: 'Cisco Catalyst 9300-48P',
+      category: 'switches', description: '', builtin: true, vendor: 'Cisco',
+      ports: [{ count: 48, type: 'eth' }, { count: 8, type: 'sfp' }],
+      physical: { ru: 1, form_factor: '1U-stackable' },
+    } satisfies CatalogEntry;
+    const resolved = resolveDeviceType('ios', 'switch', [], pack);
+    expect(resolved.slug).toBe('cisco-c9300-48p');
+    expect(resolved.chassisMm).toEqual({ widthMm: 445, depthMm: 488 });
+    expect(resolved.front.portZones.flatMap((zone) => zone.ports)
+      .find((port) => port.type === 'sfp+')?.count).toBe(8);
+  });
   it('resolves the RB5009 pack as a 220 mm body with a separate K-79 asset', () => {
     const pack = {
       id: 'routers:mikrotik-rb5009ug-s-in',
@@ -137,6 +150,27 @@ describe('rack3d Blender chassis envelope', () => {
     } finally {
       disposeScene(built);
     }
+  });
+
+  it('uses the full C9300-48P/NM-8X visual with 56 ordered cable anchors', () => {
+    const built = build({
+      ...base, id: 'c9300', brand: 'Cisco', model: 'Catalyst 9300-48P',
+      chassisAsset: 'chassis-cisco-c9300-48p-nm8x',
+      bodyWidthM: 0.445, bodyDepthM: 0.488, ports: 56,
+      portGroups: [{ type: 'rj45', count: 48 }, { type: 'sfp28', count: 8 }],
+    });
+    try {
+      const chassis = built.root.getObjectByName('chassis')!;
+      const size = new THREE.Box3().setFromObject(chassis).getSize(new THREE.Vector3());
+      expect(size.x).toBeCloseTo(0.4826, 3);
+      expect(size.z).toBeGreaterThanOrEqual(0.488);
+      expect(Object.keys(built.registry.devices.c9300!.portRefs)).toHaveLength(56);
+      expect(built.registry.devices.c9300!.portRefs[0]!.y).toBeCloseTo(0.0082, 4);
+      expect(built.registry.devices.c9300!.portRefs[47]!.y).toBeCloseTo(-0.0082, 4);
+      expect(built.registry.devices.c9300!.portRefs[48]!.x).toBeCloseTo(0.158, 4);
+      expect(built.root.getObjectByName('front-plate')).toBeFalsy();
+      expect(built.root.getObjectByName('rack-ear')).toBeFalsy();
+    } finally { disposeScene(built); }
   });
 
   it('keeps the existing procedural body when no SKU asset is mapped', () => {

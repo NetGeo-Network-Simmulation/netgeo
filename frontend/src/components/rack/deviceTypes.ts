@@ -273,15 +273,15 @@ export const DEVICE_TYPES: DeviceType[] = [
     model: 'Catalyst 9300-48P',
     nos: 'ios',
     uHeight: 1,
-    // §8.1 V(2nd) (cisco.com tech-specs + router-switch.com, cross-checked):
-    // deep chassis — separate modular uplink bay adds length vs the 9500.
-    chassisMm: { widthMm: 445, depthMm: 526 },
+    // V, Cisco hardware installation guide: 1.73 x 17.5 x 19.2in
+    // (44 x 445 x 488mm), with default PSU/fan FRUs installed.
+    chassisMm: { widthMm: 445, depthMm: 488 },
     front: {
       portZones: [
         {
           ports: [
             { type: 'console-usb', count: 1 },
-            { type: 'console-rj45', count: 1 },
+            { type: 'usb', count: 1 },
           ],
           rows: 1,
           align: 'left',
@@ -293,7 +293,8 @@ export const DEVICE_TYPES: DeviceType[] = [
           align: 'fill',
         },
         {
-          ports: [{ type: 'sfp+', count: 4, label: 'NM' }],
+          // Cisco C9300-NM-8X guide: eight 1/10G SFP+ slots.
+          ports: [{ type: 'sfp+', count: 8, label: 'NM-8X' }],
           rows: 1,
           align: 'right',
           widthFraction: 0.18,
@@ -4110,7 +4111,8 @@ function buildFromPack(pack: CatalogEntry, kind: NodeKind): DeviceType | null {
   // panel from counts alone. This also prevents a desktop XG-99M from being
   // stretched to full rack width when it arrives through /device-types.
   const packSlug = pack.id.split(':').pop()!;
-  const curated = DEVICE_TYPES.find((dt) => dt.slug === packSlug);
+  const curatedSlug = packSlug === 'cisco-c9300-48p-access' ? 'cisco-c9300-48p' : packSlug;
+  const curated = DEVICE_TYPES.find((dt) => dt.slug === curatedSlug);
   if (curated) return { ...curated, model: pack.name, uHeight: pack.physical?.ru ?? curated.uHeight };
 
   const portZones: PortZone[] = [];

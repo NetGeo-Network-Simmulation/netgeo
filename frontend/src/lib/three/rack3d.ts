@@ -104,7 +104,8 @@ export const MEDIA: Record<string, MediaSpec> = {
   om3: { label: 'OM3 multimode · aqua', jacket: 0x36c6c0, boot: 0x36c6c0, r: 0.0017, minBendM: 0.03 },
   om4: { label: 'OM4 multimode · violet', jacket: 0xae7bc6, boot: 0xae7bc6, r: 0.0017, minBendM: 0.03 },
   cat6a: { label: 'Cat6A horizontal · blue', jacket: 0x2f6bff, boot: 0x2f6bff, r: 0.0034, minBendM: 0.051 },
-  dac: { label: 'DAC twinax 25/100G · black', jacket: 0x16150f, boot: 0x2a2a26, r: 0.0042 },
+  // TE SFP28 DAC family: 5.96mm cable OD (CAT-C11-H5 official drawing).
+  dac: { label: 'DAC twinax 25/100G · black', jacket: 0x16150f, boot: 0x2a2a26, r: 0.00298 },
   coax: { label: 'Coax 50Ω · black', jacket: 0x16150f, boot: 0x1a1a1c, r: 0.004, minBendM: 0.05 },
   // DEAD CODE — P6: no backend CableMedia counterpart today.
   om5: { label: 'OM5 wideband · lime', jacket: 0xa6d608, boot: 0xa6d608, r: 0.0017, minBendM: 0.03 },
@@ -540,8 +541,10 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   // NG-PH3D 3a: instance transforms for the Blender-authored rj45/lc boot
   // assets, collected while cables are built and flushed into one
   // InstancedMesh per family right before buildScene returns.
-  const bootInstances: Record<BootFamily, { pos: THREE.Vector3; quat: THREE.Quaternion; color: THREE.Color }[]> = {
-    rj45: [], lc: [],
+  const bootInstances: Record<BootFamily, {
+    pos: THREE.Vector3; quat: THREE.Quaternion; color: THREE.Color; variant: string;
+  }[]> = {
+    rj45: [], lc: [], 'sfp-lc': [], 'sfp-dac': [], 'qsfp-dac': [],
   };
 
   // NG-PH3D 3b: same idea for the Blender-authored SFP/QSFP cage shells —
@@ -987,26 +990,41 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     body.userData.dev = def.id;
     if (visualChassis) body.traverse((part) => { part.userData.dev = def.id; });
     g.add(body);
-    if (visualChassis && def.chassisAsset === 'chassis-mikrotik-rb5009-k79') {
-      // The Blender model owns all visible ports, metal and bracket. Its
+    if (visualChassis) {
+      // Full visual chassis own their ports, metal and rack brackets. Their
       // decorative sockets never create logical ports; transparent hit meshes
-      // at the same front locations carry the catalog ordinal for raycasting.
-      // Pitch is proportional to the vendor image, not a measured drawing.
+      // carry catalog ordinals for raycasting/cabling. Position cues are
+      // authored with the matching Blender model and remain separate from the
+      // data-driven interface list.
       const faceZ = rack.d / 2 - 0.088;
       const portRefs: Record<number, THREE.Vector3> = {};
-      const xs = [-0.083, -0.039, -0.0197, -0.0004, 0.0189,
-        0.0382, 0.0575, 0.0768, 0.0961];
+      const anchors: { x: number; y: number; w: number; h: number }[] = [];
+      if (def.chassisAsset === 'chassis-mikrotik-rb5009-k79') {
+        for (const x of [-0.083, -0.039, -0.0197, -0.0004, 0.0189,
+          0.0382, 0.0575, 0.0768, 0.0961]) anchors.push({ x, y: 0, w: 0.016, h: 0.014 });
+      } else if (def.chassisAsset === 'chassis-cisco-c9300-48p-nm8x') {
+        for (const y of [0.0082, -0.0082]) {
+          for (let col = 0; col < 24; col++) anchors.push({
+            x: -0.172 + col * 0.0129, y, w: 0.0119, h: 0.0091,
+          });
+        }
+        for (const y of [0.008, -0.008]) {
+          for (let col = 0; col < 4; col++) anchors.push({
+            x: 0.158 + col * 0.0152, y, w: 0.014, h: 0.00895,
+          });
+        }
+      }
       const proxyMat = track(new THREE.MeshBasicMaterial({
         transparent: true, opacity: 0, depthWrite: false,
       }));
-      for (let i = 0; i < Math.min(def.ports, xs.length); i++) {
-        const x = xs[i]!;
-        const proxy = box(0.016, 0.014, 0.002, proxyMat, 'port-hit-' + i);
-        proxy.position.set(x, 0, faceZ + 0.003);
+      for (let i = 0; i < Math.min(def.ports, anchors.length); i++) {
+        const anchor = anchors[i]!;
+        const proxy = box(anchor.w, anchor.h, 0.002, proxyMat, 'port-hit-' + i);
+        proxy.position.set(anchor.x, anchor.y, faceZ + 0.003);
         proxy.userData.dev = def.id;
         proxy.userData.port = i;
         g.add(proxy);
-        portRefs[i] = new THREE.Vector3(x, 0, faceZ + 0.01);
+        portRefs[i] = new THREE.Vector3(anchor.x, anchor.y, faceZ + 0.01);
       }
       g.position.y = devY;
       registry.devices[def.id] = { def, group: g, rackKey, portRefs, faceZ };
@@ -1822,11 +1840,37 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     return routeCurve(pts, minBend * 1.45, 5, prefixEnd);
   }
 
+  function portTypeAt(deviceId: string, index: number): PortType | undefined {
+    const def = registry.devices[deviceId]?.def;
+    if (!def) return undefined;
+    let offset = 0;
+    for (const group of portGroupsOf(def)) {
+      if (index < offset + group.count) return group.type;
+      offset += group.count;
+    }
+    return def.ptype;
+  }
+
+  function connectorFamily(mediaKey: string, portType?: PortType): BootFamily | undefined {
+    if (['cat6a', 'cat6a_xc', 'cat6a_oob'].includes(mediaKey)) return 'rj45';
+    if (mediaKey === 'dac' || mediaKey === 'aoc') {
+      return portType === 'qsfp28' ? 'qsfp-dac' : 'sfp-dac';
+    }
+    if (['os2', 'os2apc', 'om3', 'om4', 'om5'].includes(mediaKey)) {
+      return portType === 'sfp28' ? 'sfp-lc' : 'lc';
+    }
+    return undefined;
+  }
+
   /** `stubEnd`: the b-end (t=0.996) has no real device to plug into (NG-PH3D
    *  3e external cable) — cap it with a dark bushing instead of a connector
    *  boot, so it reads as "passes into a fitting and continues", not a plug
    *  floating in the tray. */
-  function addCable(curve: THREE.Curve<THREE.Vector3>, mediaKey: string, meta: CableMeta, stubEnd = false) {
+  function addCable(
+    curve: THREE.Curve<THREE.Vector3>, mediaKey: string, meta: CableMeta,
+    stubEnd = false, endpointTypes?: [PortType | undefined, PortType | undefined],
+    endpointBrands?: [string | undefined, string | undefined],
+  ) {
     const spec = MEDIA[mediaKey]!;
     const geo = track(new THREE.TubeGeometry(curve as THREE.Curve<THREE.Vector3> & { getPointAt: (t: number) => THREE.Vector3 }, 140, spec.r, 8, false));
     const pair = mats.media[mediaKey]!;
@@ -1845,22 +1889,22 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       cap.position.copy(curve.getPointAt(1)).addScaledVector(tan, -0.01);
       root.add(cap);
     }
-    // connector: plug body + tapered strain relief, shaped per family
-    const fam = ['cat6a', 'cat6a_xc', 'cat6a_oob'].includes(mediaKey) ? 'rj45'
-      : ['dac', 'aoc'].includes(mediaKey) ? 'sfp'
-      : ['pwrA', 'pwrB'].includes(mediaKey) ? 'iec' : 'lc';
-    for (const t of [0.004, 0.996]) {
+    // Connector family is resolved per endpoint, not just per cable media:
+    // the same optical run can terminate at an LC panel on one side and an
+    // SFP-family transceiver on the other; DAC picks SFP or QSFP by port.
+    for (const [endIndex, t] of [[0, 0.004], [1, 0.996]] as const) {
       if (stubEnd && t > 0.5) continue; // capped above, no connector boot at the open end
       const tan = curve.getTangentAt(t).normalize();
-      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), tan);
-      const inward = t < 0.5 ? 1 : -1;
+      const inwardAxis = t < 0.5 ? tan.clone().negate() : tan.clone();
+      const q = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), inwardAxis);
+      const endSign = t < 0.5 ? 1 : -1;
       // seat the body just off the panel so it is not buried in the faceplate
       const f = Math.min(0.4, 0.01 / Math.max(0.05, curve.getLength()));
       const seat = curve.getPointAt(t < 0.5 ? f : 1 - f);
       const cm = mats.plugShell; // dark housing, not the jacket colour
       const add = (m: THREE.Mesh, along: number, up = 0) => {
         m.quaternion.copy(q);
-        m.position.copy(seat).addScaledVector(tan, along * inward);
+        m.position.copy(seat).addScaledVector(tan, along * endSign);
         if (up) m.position.y += up;
         root.add(m);
         return m;
@@ -1875,21 +1919,31 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // InstancedMesh draw call instead of N per-cable meshes. Falls back to
       // the original procedural shapes (unchanged below) whenever the asset
       // isn't cached yet — first paint, or any test that never loads it.
-      const bootGeo = (fam === 'rj45' || fam === 'lc') ? getBootGeometry(fam) : undefined;
-      if (bootGeo) {
+      const fam = connectorFamily(mediaKey, endpointTypes?.[endIndex]);
+      const bootGeo = fam ? getBootGeometry(fam) : undefined;
+      if (fam && bootGeo) {
         const tip = curve.getPointAt(t < 0.5 ? 0 : 1);
-        bootInstances[fam as BootFamily].push({ pos: tip, quat: q.clone(), color: pair.bt.color });
+        bootInstances[fam].push({
+          pos: tip, quat: q.clone(), color: pair.bt.color,
+          // Geometry is shared by MSA envelope; vendor remains lightweight
+          // per-instance metadata/material tint, never a duplicate mesh.
+          variant: `${endpointBrands?.[endIndex] ?? 'generic'}:${fam}:${mediaKey}`,
+        });
         continue;
       }
-      if (fam === 'rj45') {
+      const fallbackFam = fam ?? (['pwrA', 'pwrB'].includes(mediaKey) ? 'iec' : 'lc');
+      if (fallbackFam === 'rj45') {
         add(box(0.0117, 0.024, 0.0085, cm, 'rj45-plug'), 0);
         const tab = box(0.0068, 0.012, 0.0042, mats.plugClip, 'rj45-latch-tab');
         tab.rotation.x = -0.32;
         add(tab, -0.012, 0.008);
-      } else if (fam === 'sfp') {
+      } else if (fallbackFam === 'sfp-lc' || fallbackFam === 'sfp-dac') {
         add(box(0.0138, 0.04, 0.0092, cm, 'sfp-module'), 0);
         add(box(0.0125, 0.0135, 0.0022, mats.handle, 'sfp-bail-latch'), 0.019);
-      } else if (fam === 'iec') {
+      } else if (fallbackFam === 'qsfp-dac') {
+        add(box(0.0184, 0.06, 0.0135, cm, 'qsfp-module'), 0);
+        add(box(0.017, 0.014, 0.0022, mats.handle, 'qsfp-pull-tab'), 0.027);
+      } else if (fallbackFam === 'iec') {
         add(box(0.0148, 0.032, 0.0148, cm, 'iec-connector'), 0);
         add(box(0.0168, 0.0062, 0.0168, mats.plugClip, 'iec-grip-rib'), -0.009);
       } else {
@@ -2036,7 +2090,8 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       const len = addCable(curve, l.m, {
         name: end[0] + ':' + end[1] + ' → luar scene',
         devs: [end[0]], live: l.live, media: l.m,
-      }, true);
+      }, true, [portTypeAt(end[0], end[1]), undefined],
+      [registry.devices[end[0]]?.def.brand, undefined]);
       const sprite = makeLabel(
         MEDIA[l.m]!.label.split(' · ')[0] + '  ' + stockLength(len) + ' m',
         curve.getPointAt(0.5).clone().add(new THREE.Vector3(0, 0.06, 0)),
@@ -2071,7 +2126,8 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const len = addCable(curve, l.m, {
       name: l.a[0] + ':' + l.a[1] + '→' + l.b[0] + ':' + l.b[1],
       devs: [l.a[0], l.b[0]], live: l.live, media: l.m,
-    });
+    }, false, [portTypeAt(l.a[0], l.a[1]), portTypeAt(l.b[0], l.b[1])],
+    [registry.devices[l.a[0]]?.def.brand, registry.devices[l.b[0]]?.def.brand]);
     const sprite = makeLabel(
       MEDIA[l.m]!.label.split(' · ')[0] + '  ' + stockLength(len) + ' m',
       curve.getPointAt(0.5).clone().add(new THREE.Vector3(0, 0.06, 0)),
@@ -2125,7 +2181,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   // reproduces the doc's housing-colour convention (SFF-8432 Note 13 /
   // TIA-598-C) without a material per media.
   const ONE = new THREE.Vector3(1, 1, 1);
-  for (const fam of ['rj45', 'lc'] as BootFamily[]) {
+  for (const fam of ['rj45', 'lc', 'sfp-lc', 'sfp-dac', 'qsfp-dac'] as BootFamily[]) {
     const list = bootInstances[fam];
     if (!list.length) continue;
     const geo = getBootGeometry(fam)!;
@@ -2140,6 +2196,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     });
     im.instanceMatrix.needsUpdate = true;
     if (im.instanceColor) im.instanceColor.needsUpdate = true;
+    im.userData.variantMap = list.map((item) => item.variant);
     root.add(im);
   }
 
