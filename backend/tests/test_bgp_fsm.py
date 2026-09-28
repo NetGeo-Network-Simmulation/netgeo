@@ -55,6 +55,32 @@ def test_fsm_walks_every_valid_state_in_order():
     assert _peer(pb).state == "established"
 
 
+def test_direct_ibgp_uses_link_address_even_with_owned_loopback_router_id():
+    net = Network(seed=24)
+    a = net.add_device(Router("a"))
+    b = net.add_device(Router("b"))
+    _link(net, a, "eth0", "10.0.0.1/30", b, "eth0", "10.0.0.2/30")
+    net.add_iface(a, "lo0", ["1.1.1.1/32"])
+    net.add_iface(b, "lo0", ["2.2.2.2/32"])
+    pa = BgpProcess(a, asn=65000, router_id="1.1.1.1", keepalive_interval=1.0)
+    pb = BgpProcess(b, asn=65000, router_id="2.2.2.2", keepalive_interval=1.0)
+    pa.add_neighbor("10.0.0.2", 65000)
+    pb.add_neighbor("10.0.0.1", 65000)
+
+    net.run(until=5.0)
+
+    assert _peer(pa).state == _peer(pb).state == "established"
+    opens = [
+        record
+        for record in net.capture.records("a-b", limit=200)
+        if record.direction == "tx" and "BGP OPEN" in record.info
+    ]
+    assert {record.layers["ipv4"]["src"] for record in opens} == {
+        "10.0.0.1",
+        "10.0.0.2",
+    }
+
+
 def test_fsm_visits_active_when_transport_is_not_yet_reachable():
     """No static/dynamic route to the peer at start -> Connect can't send
     OPEN -> the retry timer demotes it to Active, exactly the "stuck in
