@@ -647,19 +647,20 @@ class VxlanPacket:
 class EvpnRoute:
     """One EVPN NLRI. ``route_type`` 1 = Ethernet A-D (per-ES when ``vni`` is 0,
     per-EVI otherwise, RFC 7432 sec 7.1), 2 = MAC/IP advertisement (``mac``/
-    ``ip``), 3 = Inclusive Multicast (IMET, ingress-replication for BUM).
+    ``ip``), 3 = Inclusive Multicast (IMET, ingress-replication for BUM),
+    4 = Ethernet Segment (DF-election membership, sec 7.4/8.5).
     ``vtep`` is the advertising VTEP IP (the overlay next hop)."""
 
-    route_type: int          # 1 (Ethernet A-D) | 2 (MAC/IP) | 3 (IMET)
+    route_type: int          # 1 (Ethernet A-D) | 2 (MAC/IP) | 3 (IMET) | 4 (ES)
     vni: int
     vtep: str
     mac: str = ""            # Type-2 only
     ip: str = ""            # Type-2 MAC/IP (optional, unused for pure-L2)
-    esi: str = ""             # Type-1 only, RFC 7432 sec 5: 10-octet colon-hex
+    esi: str = ""             # Type-1/2/4, RFC 7432 sec 5: 10-octet colon-hex
 
     @property
     def wire_size(self) -> int:
-        if self.route_type == 1:
+        if self.route_type in (1, 4):
             return 25 + 10   # + ESI (10 octets, sec 5)
         return 25 + (12 if self.route_type == 2 else 0)
 

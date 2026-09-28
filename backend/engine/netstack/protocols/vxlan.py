@@ -31,11 +31,9 @@ Deliberate simplifications (ponytail — each names its ceiling + upgrade path):
   learning on decap if a scenario needs conversational learning without EVPN.
 - ``# ponytail:`` one VTEP per node, keyed by the loopback /32 (like SR). No
   Type-5 IP-VRF, no anycast gateway (still NG-SIM-10 non-goals).
-- ``# ponytail:`` ESI multi-homing (A4, RFC 7432 sec 5/7.1/8.2) tracks per-ES
-  and per-EVI Ethernet A-D routes for mass withdrawal, but skips DF election
-  (sec 8.5) and aliasing/load-balancing consumption (sec 8.4) — a remote PE
-  still picks exactly one VTEP per learned MAC. Upgrade = DF election +
-  multi-path forwarding when an active-active lab needs it.
+- ``# ponytail:`` all-active ESI multi-homing uses the RFC 7432 default
+  modulo DF election (sec 8.5) and Ethernet A-D aliasing (sec 8.4). VNI is
+  the simulator's Ethernet-tag value; no RFC 8584 extended election modes.
 """
 from __future__ import annotations
 
@@ -99,6 +97,11 @@ class VxlanProcess:
         # (esi, vni) -> remote VTEPs advertising Ethernet A-D for it (Type-1);
         # vni 0 = per-ES (all EVIs, RFC 7432 sec 7.1), used for mass withdrawal.
         self.remote_ad: dict[tuple[str, int], set[IPv4Address]] = {}
+        self.remote_es: dict[str, set[IPv4Address]] = {}       # ESI -> Type-4 advertisers
+        # Raw Type-2 advertisements are retained per sender so Ethernet A-D
+        # changes can rebuild aliased next-hop sets without waiting for MACs.
+        self._remote_type2: dict[IPv4Address, dict[tuple[int, str], str]] = {}
+        self.remote_mac_paths: dict[tuple[int, str], set[IPv4Address]] = {}
         self._sent: dict[IPv4Address, tuple] = {}    # peer -> last snapshot sent
         self._started = False
         router.processes.append(self)
@@ -164,9 +167,15 @@ class VxlanProcess:
                 continue
             routes.append(EvpnRoute(route_type=1, vni=0, vtep=vtep, esi=esi))          # per-ES
             routes.append(EvpnRoute(route_type=1, vni=self.access[name], vtep=vtep, esi=esi))  # per-EVI
+        for esi in sorted({e for name, e in self.esi.items()
+                           if e != ESI_SINGLE_HOMED and self._port_up(name)}):
+            routes.append(EvpnRoute(route_type=4, vni=0, vtep=vtep, esi=esi))
         for (vni, mac), loc in sorted(self.mac_vni.items()):
             if isinstance(loc, str) and self._port_up(loc):   # locally-learned MAC -> Type-2
-                routes.append(EvpnRoute(route_type=2, vni=vni, vtep=vtep, mac=mac))
+                routes.append(EvpnRoute(
+                    route_type=2, vni=vni, vtep=vtep, mac=mac,
+                    esi=self.esi.get(loc, ESI_SINGLE_HOMED),
+                ))
         return routes
 
     def _advertise(self, net: Network) -> None:
@@ -174,7 +183,7 @@ class VxlanProcess:
         if bgp is None or self.vtep_ip is None:
             return
         routes = self._local_routes()
-        snap = tuple((r.route_type, r.vni, r.mac) for r in routes)
+        snap = tuple((r.route_type, r.vni, r.mac, r.esi) for r in routes)
         for ip, peer in bgp.peers.items():
             if peer.remote_asn != bgp.asn:
                 continue  # EVPN exchange follows the iBGP peer topology
@@ -217,17 +226,66 @@ class VxlanProcess:
             vteps.discard(sender)
         for vteps in self.remote_ad.values():
             vteps.discard(sender)
-        self.mac_vni = {
-            k: v for k, v in self.mac_vni.items()
-            if not (isinstance(v, IPv4Address) and v == sender)
-        }
+        for vteps in self.remote_es.values():
+            vteps.discard(sender)
+        self._remote_type2[sender] = {}
         for r in update.routes:
             if r.route_type == 3:
                 self.remote_vteps.setdefault(r.vni, set()).add(sender)
             elif r.route_type == 2 and r.mac:
-                self.mac_vni[(r.vni, r.mac)] = sender
+                self._remote_type2[sender][(r.vni, r.mac)] = r.esi
             elif r.route_type == 1 and r.esi:
                 self.remote_ad.setdefault((r.esi, r.vni), set()).add(sender)
+            elif r.route_type == 4 and r.esi:
+                self.remote_es.setdefault(r.esi, set()).add(sender)
+        self._rebuild_remote_mac_paths()
+
+    def _rebuild_remote_mac_paths(self) -> None:
+        """Resolve Type-2 routes through all-active Ethernet A-D aliases.
+
+        RFC 7432 sec 8.4 requires both per-ES and per-EVI A-D reachability
+        before an otherwise MAC-less PE becomes an eligible next hop.
+        """
+        paths: dict[tuple[int, str], set[IPv4Address]] = {}
+        for sender, routes in sorted(self._remote_type2.items()):
+            for key, esi in sorted(routes.items()):
+                vni, _mac = key
+                if esi and esi != ESI_SINGLE_HOMED:
+                    eligible = (
+                        self.remote_ad.get((esi, 0), set())
+                        & self.remote_ad.get((esi, vni), set())
+                    )
+                else:
+                    eligible = {sender}
+                if not eligible:
+                    continue
+                paths.setdefault(key, set()).update(eligible)
+
+        self.mac_vni = {k: v for k, v in self.mac_vni.items() if isinstance(v, str)}
+        self.remote_mac_paths = paths
+        for key, vteps in paths.items():
+            self.mac_vni[key] = min(vteps)
+
+    def df_vtep(self, esi: str, ethernet_tag: int) -> IPv4Address | None:
+        """Return the RFC 7432 sec 8.5 modulo-election winner."""
+        candidates = set(self.remote_es.get(esi, ()))
+        if self.vtep_ip is not None and any(
+            own_esi == esi and self._port_up(name)
+            for name, own_esi in self.esi.items()
+        ):
+            candidates.add(self.vtep_ip)
+        ordered = sorted(candidates)
+        return ordered[ethernet_tag % len(ordered)] if ordered else None
+
+    def _is_df(self, iface_name: str, vni: int) -> bool:
+        esi = self.esi.get(iface_name, ESI_SINGLE_HOMED)
+        return esi == ESI_SINGLE_HOMED or self.df_vtep(esi, vni) == self.vtep_ip
+
+    def _remote_path(self, key: tuple[int, str], frame: EthernetFrame) -> IPv4Address | None:
+        paths = sorted(self.remote_mac_paths.get(key, ()))
+        if not paths:
+            return None
+        return paths[(_entropy_port(frame) - 49152) % len(paths)]
 
     # ----- data plane: access -> overlay -------------------------------------
     def on_access_frame(self, net: Network, iface: Interface, frame: EthernetFrame) -> None:
@@ -249,7 +307,7 @@ class VxlanProcess:
                     out.transmit(net, frame)
                 return
             if isinstance(loc, IPv4Address):         # known remote: unicast VXLAN
-                self._encap(net, vni, loc, frame)
+                self._encap(net, vni, self._remote_path((vni, dst), frame) or loc, frame)
                 return
         # BUM (broadcast/multicast/unknown-unicast): ingress-replicate.
         self._flood(net, vni, iface.name, frame)
@@ -298,7 +356,7 @@ class VxlanProcess:
                 return
         # Unknown-unicast/BUM: flood every local access port in this VNI.
         for name, avni in sorted(self.access.items()):
-            if avni == vx.vni:
+            if avni == vx.vni and self._is_df(name, vx.vni):
                 out = self.router.interfaces.get(name)
                 if out is not None:
                     out.transmit(net, inner.clone())
@@ -321,7 +379,8 @@ class VxlanProcess:
     def evpn_rows(self) -> list[dict]:
         """The EVPN table: local + learned Type-1 (Ethernet A-D), Type-2
         (MAC) and Type-3 (IMET). ``esi`` is "-" for non-Type-1 rows; a
-        Type-1 ``vni`` of "*" is the per-ES (all-EVI) route."""
+        Type-1 ``vni`` of "*" is the per-ES (all-EVI) route. Type-4 rows
+        expose Ethernet Segment membership used by DF election."""
         rows: list[dict] = []
         for vni in sorted(self._live_vnis()):
             rows.append({"type": 3, "vni": vni, "mac": "*",
@@ -347,6 +406,14 @@ class VxlanProcess:
         for esi, vni in sorted(self.remote_ad):
             for vtep in sorted(self.remote_ad[(esi, vni)]):
                 rows.append({"type": 1, "vni": vni or "*", "mac": "-",
+                             "vtep": str(vtep), "origin": "remote", "esi": esi})
+        for esi in sorted({e for name, e in self.esi.items()
+                           if e != ESI_SINGLE_HOMED and self._port_up(name)}):
+            rows.append({"type": 4, "vni": "*", "mac": "-",
+                         "vtep": str(self.vtep_ip), "origin": "local", "esi": esi})
+        for esi in sorted(self.remote_es):
+            for vtep in sorted(self.remote_es[esi]):
+                rows.append({"type": 4, "vni": "*", "mac": "-",
                              "vtep": str(vtep), "origin": "remote", "esi": esi})
         return rows
 

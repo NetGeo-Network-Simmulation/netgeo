@@ -15,9 +15,16 @@ from __future__ import annotations
 from ipaddress import IPv4Address
 
 import pytest
-
 from engine.netstack import Network
 from engine.netstack.device import Host
+from engine.netstack.frames import (
+    EthernetFrame,
+    EvpnRoute,
+    EvpnUpdate,
+    Ipv4Packet,
+    VxlanPacket,
+)
+from engine.netstack.iface import Interface
 from engine.netstack.protocols.bgp import BgpProcess
 from engine.netstack.protocols.ospf import OspfProcess
 from engine.netstack.protocols.vxlan import ESI_SINGLE_HOMED, VxlanProcess
@@ -244,6 +251,8 @@ def test_type1_ethernet_ad_appears_on_both_pes():
     assert leaf2_vtep in v1.remote_ad.get((SHARED_ESI, 10), set())
     assert leaf1_vtep in v2.remote_ad.get((SHARED_ESI, 0), set())
     assert leaf1_vtep in v2.remote_ad.get((SHARED_ESI, 10), set())
+    assert leaf2_vtep in v1.remote_es.get(SHARED_ESI, set())
+    assert leaf1_vtep in v2.remote_es.get(SHARED_ESI, set())
 
 
 def test_mac_learned_behind_esi_port_is_type2():
@@ -253,6 +262,8 @@ def test_mac_learned_behind_esi_port_is_type2():
     ha_mac = str(net.devices["ha"].interfaces["eth0"].mac)
     v2 = _vxlan(net, "leaf2")
     assert v2.mac_vni.get((10, ha_mac)) == IPv4Address("10.255.0.1")
+    advertised = next(r for r in _vxlan(net, "leaf1")._local_routes() if r.mac == ha_mac)
+    assert advertised.esi == SHARED_ESI
 
 
 def test_es_failure_mass_withdraws_all_macs_in_one_step():
@@ -307,3 +318,118 @@ def test_esi_replay_determinism():
     a, b = build(), build()
     assert a.ledger.seq == b.ledger.seq
     assert a.ledger.hash() == b.ledger.hash()
+
+
+# ===== DF election + all-active aliasing (RFC 7432 sec 8.4/8.5) ==============
+
+def _unit_vtep(ip: str, *, esi: str = SHARED_ESI) -> tuple[Network, VxlanProcess]:
+    net = Network(seed=17)
+    router = net.add_device(Router("pe"))
+    net.add_iface(router, "lo0", [f"{ip}/32"])
+    access = net.add_iface(router, "eth1")
+    ce = net.add_device(Host("ce"))
+    net.connect("ce-link", access, net.add_iface(ce, "eth0"))
+    vx = VxlanProcess(router)
+    vx.bind_access("eth1", 10, esi=esi)
+    vx.vtep_ip = IPv4Address(ip)
+    return net, vx
+
+
+def test_df_election_orders_pe_ips_then_uses_modulo():
+    _net, vx = _unit_vtep("10.255.0.2")
+    vx.remote_es[SHARED_ESI] = {
+        IPv4Address("10.255.0.3"),
+        IPv4Address("10.255.0.1"),
+    }
+
+    # Numeric order is .1/.2/.3. Ethernet tag 10 elects ordinal 1; tag 11
+    # elects ordinal 2 (RFC 7432 sec 8.5 service carving).
+    assert vx.df_vtep(SHARED_ESI, 10) == IPv4Address("10.255.0.2")
+    assert vx.df_vtep(SHARED_ESI, 11) == IPv4Address("10.255.0.3")
+
+
+def test_non_df_drops_overlay_bum_toward_multihomed_segment(monkeypatch):
+    net, vx = _unit_vtep("10.255.0.2")
+    vx.remote_es[SHARED_ESI] = {IPv4Address("10.255.0.1")}
+    sent: list[str] = []
+    monkeypatch.setattr(
+        Interface,
+        "transmit",
+        lambda self, _net, _frame: sent.append(self.qualified_name),
+    )
+    inner = EthernetFrame(
+        src_mac="02:00:00:00:00:01",
+        dst_mac="ff:ff:ff:ff:ff:ff",
+    )
+    outer = Ipv4Packet(src=IPv4Address("10.255.0.9"), dst=vx.vtep_ip, proto=17)
+
+    vx.on_overlay(net, outer, VxlanPacket(vni=10, inner=inner))
+
+    # Tag 10 modulo two candidates elects .1; local .2 is non-DF.
+    assert sent == []
+
+
+def test_aliasing_uses_macless_pe_with_both_ad_routes():
+    _net, vx = _unit_vtep("10.255.0.9", esi=ESI_SINGLE_HOMED)
+    pe1, pe2 = IPv4Address("10.255.0.1"), IPv4Address("10.255.0.2")
+    mac = "02:00:00:00:00:aa"
+
+    vx._on_update(pe1, EvpnUpdate(routes=[
+        EvpnRoute(1, 0, str(pe1), esi=SHARED_ESI),
+        EvpnRoute(1, 10, str(pe1), esi=SHARED_ESI),
+        EvpnRoute(2, 10, str(pe1), mac=mac, esi=SHARED_ESI),
+    ]))
+    # PE2 has not learned/advertised the MAC, but its per-ES + per-EVI A-D
+    # routes make it an all-active alias for that MAC.
+    vx._on_update(pe2, EvpnUpdate(routes=[
+        EvpnRoute(1, 0, str(pe2), esi=SHARED_ESI),
+        EvpnRoute(1, 10, str(pe2), esi=SHARED_ESI),
+    ]))
+
+    key = (10, mac)
+    assert vx.remote_mac_paths[key] == {pe1, pe2}
+    frames = [
+        EthernetFrame(src_mac=f"02:00:00:00:00:0{i}", dst_mac=mac)
+        for i in (1, 2)
+    ]
+    assert {vx._remote_path(key, frame) for frame in frames} == {pe1, pe2}
+
+
+def test_aliasing_requires_per_es_and_per_evi_ad_routes():
+    _net, vx = _unit_vtep("10.255.0.9", esi=ESI_SINGLE_HOMED)
+    pe1, pe2 = IPv4Address("10.255.0.1"), IPv4Address("10.255.0.2")
+    mac = "02:00:00:00:00:aa"
+    vx._on_update(pe1, EvpnUpdate(routes=[
+        EvpnRoute(1, 0, str(pe1), esi=SHARED_ESI),
+        EvpnRoute(1, 10, str(pe1), esi=SHARED_ESI),
+        EvpnRoute(2, 10, str(pe1), mac=mac, esi=SHARED_ESI),
+    ]))
+    vx._on_update(pe2, EvpnUpdate(routes=[
+        EvpnRoute(1, 10, str(pe2), esi=SHARED_ESI),
+    ]))
+
+    assert vx.remote_mac_paths[(10, mac)] == {pe1}
+
+
+def test_ad_withdrawal_repoints_stale_mac_route_to_surviving_alias():
+    _net, vx = _unit_vtep("10.255.0.9", esi=ESI_SINGLE_HOMED)
+    pe1, pe2 = IPv4Address("10.255.0.1"), IPv4Address("10.255.0.2")
+    mac = "02:00:00:00:00:aa"
+    shared = [
+        EvpnRoute(1, 0, "", esi=SHARED_ESI),
+        EvpnRoute(1, 10, "", esi=SHARED_ESI),
+    ]
+    vx._on_update(pe1, EvpnUpdate(routes=[
+        *shared,
+        EvpnRoute(2, 10, str(pe1), mac=mac, esi=SHARED_ESI),
+    ]))
+    vx._on_update(pe2, EvpnUpdate(routes=shared))
+    assert vx.remote_mac_paths[(10, mac)] == {pe1, pe2}
+
+    # Model the RFC 7432 sec 8.2 ordering where per-ES A-D is withdrawn
+    # before a stale MAC advertisement. The surviving PE becomes the only
+    # next hop immediately; no wait for the Type-2 withdrawal is required.
+    vx._on_update(pe1, EvpnUpdate(routes=[
+        EvpnRoute(2, 10, str(pe1), mac=mac, esi=SHARED_ESI),
+    ]))
+    assert vx.remote_mac_paths[(10, mac)] == {pe2}
