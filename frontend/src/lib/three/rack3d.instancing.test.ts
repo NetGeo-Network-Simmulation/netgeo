@@ -74,16 +74,47 @@ describe('rj45/lc boot instancing (NG-PH3D 3a)', () => {
     const afterCount = countMeshes(after.root);
     expect(afterCount.names).toContain('boot-instanced-rj45');
     expect(afterCount.names).toContain('boot-instanced-lc');
+    expect(afterCount.names).toContain('boot-instanced-sfp-lc');
     expect(afterCount.names).not.toContain('rj45-plug');
     expect(afterCount.names).not.toContain('lc-connector');
-    // 'strain-relief' legitimately still appears for the power cords every
-    // switch/server gets (fam 'iec' — DAC/AOC/power boots are out of this
-    // session's verified-dimension scope, untouched procedural fallback).
+    // Power remains on its explicit IEC fallback, never an LC connector.
+    expect(afterCount.names).toContain('iec-connector');
 
     // instancing must reduce draw-call-contributing objects, not add to them
     expect(afterCount.meshes).toBeLessThan(beforeCount.meshes);
     console.log('mesh count before assets loaded:', beforeCount.meshes);
     console.log('mesh count after assets loaded:', afterCount.meshes);
     disposeScene(after);
+  });
+
+  it('selects SFP/QSFP DAC families per endpoint and points each module inward', async () => {
+    await loadBootAssets(nodeFetch);
+    const built = buildScene({
+      racks: [{ key: 'A', enclosure: 'apc', devices: [
+        dev('sfp', 1, 1, 'switch', 1, 'sfp28'),
+        dev('qsfp', 3, 1, 'switch', 1, 'qsfp28'),
+      ] }],
+      links: [link(['sfp', 0], ['qsfp', 0], 'dac')],
+    });
+    try {
+      const sfp = built.root.getObjectByName('boot-instanced-sfp-dac') as THREE.InstancedMesh;
+      const qsfp = built.root.getObjectByName('boot-instanced-qsfp-dac') as THREE.InstancedMesh;
+      expect(sfp.count).toBe(1);
+      expect(qsfp.count).toBe(1);
+      expect(sfp.userData.variantMap).toEqual(['Test:sfp-dac:dac']);
+      expect(qsfp.userData.variantMap).toEqual(['Test:qsfp-dac:dac']);
+      const cable = built.registry.cables.find((entry) => entry.mediaKey === 'dac')!;
+      const localInsertion = new THREE.Vector3(0, 1, 0);
+      const readAxis = (mesh: THREE.InstancedMesh) => {
+        const matrix = new THREE.Matrix4();
+        mesh.getMatrixAt(0, matrix);
+        const q = new THREE.Quaternion();
+        matrix.decompose(new THREE.Vector3(), q, new THREE.Vector3());
+        return localInsertion.clone().applyQuaternion(q).normalize();
+      };
+      expect(readAxis(sfp).dot(cable.curve.getTangentAt(0.004).normalize().negate())).toBeGreaterThan(0.999);
+      expect(readAxis(qsfp).dot(cable.curve.getTangentAt(0.996).normalize())).toBeGreaterThan(0.999);
+      expect(built.root.getObjectByName('iec-connector')).toBeTruthy();
+    } finally { disposeScene(built); }
   });
 });

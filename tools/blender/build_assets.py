@@ -14,12 +14,11 @@ Axis convention: each part is authored with its LENGTH along Blender's local
 Z (the exporter's default "+Y Up" conversion rotates Blender Z -> glTF/three.js
 Y), so the exported mesh's local +Y is the connector's plug-in axis — the
 axis rack3d.ts already aligns to a cable's tangent via
-`Quaternion.setFromUnitVectors(Vector3(0,1,0), tangent)`. The origin sits at
-the connector's TIP (the face that seats into a port); the body/boot extend
-in -Z (-> -Y post-export) from there, so an instance placed at a cable's
-endpoint with the tip at that point looks flush with the port.
+`Quaternion.setFromUnitVectors(Vector3(0,1,0), inward)`. The origin sits at
+the connector/cage datum. Cable-side bodies extend in -Z (-> -Y after
+export); pluggable module shells may also extend in +Z into the chassis.
 
-Scope (NG-PH3D 3a + wave-1 face pass): only dimension-VERIFIED parts are
+Scope (NG-PH3D 3a + physical wave 2): only dimension-VERIFIED parts are
 modelled with real numbers. QSFP-DD/XFP/FC/ST/MPO/E2000/IEC power connectors
 stay UNVERIFIED and are deliberately not built here. MikroTik's official
 product pages/brochures verify the outer dimensions and port counts for the
@@ -283,6 +282,21 @@ def export_visual_glb(filename):
     print('wrote', path)
 
 
+def compact_scene_by_material(prefix):
+    """Collapse repeated visual parts to one mesh per material/draw call."""
+    groups = {}
+    for obj in list(bpy.context.scene.objects):
+        if obj.type != 'MESH' or not obj.data.materials:
+            continue
+        if any(mat is None for mat in obj.data.materials):
+            continue
+        key = tuple(mat.name for mat in obj.data.materials)
+        groups.setdefault(key, []).append(obj)
+    for index, objs in enumerate(groups.values()):
+        if len(objs) > 1:
+            join(objs, f'{prefix}-material-{index}')
+
+
 def build_rb5009_k79():
     """RB5009UG+S+IN with its K-79 1U adapter, authored entirely in Blender.
 
@@ -410,33 +424,90 @@ def render_rb5009_preview():
 
 
 # ─── RJ45 plug + boot (§2.a "RJ45 — DIKOREKSI Sesi 1b", V(2nd)) ────────────
-# Body: width 11.68mm, height 8.5-9.0mm (mid 8.75mm), length 16.0-16.5mm
-# (mid 16.25mm). Boot: 10-15mm (mid 12.5mm), tapering to the Cat6A family's
-# jacket radius already in MEDIA (cat6a/cat6a_xc/cat6a_oob average ~3.27mm).
+# Molex 1300478008 drawing: 52.2mm overall, 11.68mm mating width,
+# 13.8mm overmould body, 5-9mm accepted cable. Source:
+# https://www.molex.com/content/dam/molex/molex-dot-com/products/automated/
+# en-us/salesdrawingpdf/130/130047/1300478008_sd.pdf
 def build_rj45():
     clear_scene()
     body = box('rj45-body', 0.01168, 0.00875, 0.01625, 0.0)
     tab = box('rj45-latch-tab', 0.0068, 0.0042, 0.006, -0.004)
     tab.location.y += 0.006  # sits proud on the +Y face, near the tip
     bpy.ops.object.transform_apply(location=True)
-    boot = frustum('rj45-boot', 0.0042, 0.00327, 0.0125, -0.01625)  # top <= body/2 (8.75mm)
-    obj = join([body, tab, boot], 'rj45-connector')
+    overmould = box('rj45-overmould', 0.0138, 0.0138, 0.02995, -0.01625)
+    relief = frustum('rj45-cable-entry', 0.0069, 0.00325, 0.006, -0.0462)
+    obj = join([body, tab, overmould, relief], 'rj45-connector')
     add_material(obj, 'rj45-housing', (0.07, 0.07, 0.075))
     export_glb(obj, 'boot-rj45.glb')
 
 
 # ─── LC simplex connector + boot (§2.a "LC (simplex)", V — Senko datasheet)─
-# Body: 42mm x 5.58mm x 10.43mm. Boot: 8mm, tapering to the LC-family's
-# fibre jacket radius already in MEDIA (os2/om3/om4/om5 = 1.7mm).
-# Duplex clip pitch is UNVERIFIED (doc §2.a) -> simplex body only, reused
-# for every LC-family media even where the real cable is duplex.
+# SENKO duplex family: 54mm length, 6.25mm ferrule pitch, 8.6mm height,
+# 2mm cable. Source:
+# https://www.senko.com/wp-content/uploads/2024/08/DS-LC-000006-RevA-EN.pdf
 def build_lc():
     clear_scene()
-    body = box('lc-body', 0.00558, 0.01043, 0.042, 0.0)
-    boot = frustum('lc-boot', 0.0025, 0.0017, 0.008, -0.042)  # top <= body/2 (5.58mm)
-    obj = join([body, boot], 'lc-connector')
+    parts = []
+    for side in (-1, 1):
+        leg = box(f'lc-body-{side}', 0.00558, 0.0086, 0.046, 0.0)
+        leg.location.x = side * 0.003125
+        bpy.ops.object.transform_apply(location=True)
+        parts.append(leg)
+    parts.append(box('lc-duplex-clip', 0.01183, 0.0065, 0.009, -0.004))
+    parts.append(frustum('lc-duplex-boot', 0.0038, 0.001, 0.008, -0.046))
+    obj = join(parts, 'lc-duplex-connector')
     add_material(obj, 'lc-housing', (0.75, 0.75, 0.78))
     export_glb(obj, 'boot-lc.glb')
+
+
+# SFP/SFP+/SFP28 share one mechanical envelope. SFF-8432 R5.2a:
+# https://members.snia.org/document/dl/25892 — 13.55±0.25 x
+# 8.55±0.15 x 47.50±0.20mm, maximum 10mm in front of the cage datum.
+def sfp_module_shell(name):
+    return cube_at(name, 0.01355, 0.00855, 0.0475, z=0.01375)
+
+
+def build_sfp_lc():
+    clear_scene()
+    parts = [sfp_module_shell('sfp-lc-module')]
+    for side in (-1, 1):
+        leg = box(f'sfp-lc-leg-{side}', 0.00558, 0.0086, 0.054, -0.010)
+        leg.location.x = side * 0.003125
+        bpy.ops.object.transform_apply(location=True)
+        parts.append(leg)
+    parts.append(box('sfp-lc-duplex-clip', 0.01183, 0.0065, 0.009, -0.014))
+    obj = join(parts, 'sfp-lc-termination')
+    add_material(obj, 'sfp-lc-neutral', (0.34, 0.36, 0.38))
+    export_glb(obj, 'connector-sfp-lc.glb')
+
+
+def build_sfp_dac():
+    """One SFP-family DAC/AOC geometry; colour is an instance variant.
+
+    TE's SFP+ family accepts 4.7-6.48mm cable and its SFP28 cable is 5.96mm:
+    https://www.te.com/en/product-CAT-C11-H5.html . The relief stays inside
+    SFF-8432's verified 10mm front allowance.
+    """
+    clear_scene()
+    module = sfp_module_shell('sfp-dac-module')
+    relief = frustum('sfp-dac-relief', 0.0042, 0.00298, 0.010, -0.010)
+    obj = join([module, relief], 'sfp-dac-termination')
+    add_material(obj, 'sfp-dac-neutral', (0.18, 0.19, 0.20))
+    export_glb(obj, 'connector-sfp-dac.glb')
+
+
+def build_qsfp_dac():
+    """QSFP+/QSFP28 family; SFF-8661 max 18.4 x 13.5 x 72.4mm.
+
+    Source: https://members.snia.org/document/dl/25959 . The cage-datum
+    split is a placement cue; total module length remains the verified max.
+    """
+    clear_scene()
+    module = cube_at('qsfp-dac-module', 0.0184, 0.0135, 0.0724, z=0.0227)
+    relief = frustum('qsfp-dac-relief', 0.0054, 0.00324, 0.0135, -0.0135)
+    obj = join([module, relief], 'qsfp-dac-termination')
+    add_material(obj, 'qsfp-dac-neutral', (0.18, 0.19, 0.20))
+    export_glb(obj, 'connector-qsfp-dac.glb')
 
 
 # ─── SFP/SFP+/SFP28 cage shell (§2.c, V — SFF-8432 Rev 5.1 Table, direct) ──
@@ -524,6 +595,97 @@ def build_chassis_mikrotik_crs328():
         'chassis-mikrotik-crs328', 'chassis-mikrotik-crs328.glb',
         0.443, 0.300, 0.044, top_rows=18, side_rows=10,
     )
+
+
+def build_cisco_c9300_48p_nm8x():
+    """Catalyst C9300-48P + C9300-NM-8X, authored from primary specs.
+
+    Cisco verifies 44 x 445 x 488mm, 48 front 1G PoE+ ports, front UID/
+    status/USB mini-B/USB-A, the modular uplink bay, rear 3 fans + 2 PSUs,
+    console/mgmt and StackWise/StackPower. The NM-8X guide verifies 8 SFP+
+    slots. Sources:
+    https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/
+    hardware/install/b_c9300_hig/technical-specs.html
+    https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/
+    hardware/install/b_c9300_hig/Product-overview.html
+    https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/
+    hardware/install/b_c9300_hig/Installing-a-network-module.html
+
+    Exact unpublished offsets, perforation pitch and bracket fold depth are
+    proportional visual cues. The chassis envelope is exact; separate ears
+    extend it to the EIA-310 482.6mm face width. No logo/CAD is imported.
+    """
+    clear_scene()
+    dark = (0.045, 0.052, 0.058)
+    face = (0.075, 0.082, 0.088)
+    metal = (0.36, 0.38, 0.40)
+    gold = (0.54, 0.37, 0.14)
+    blue = (0.05, 0.34, 0.55)
+    front_y, rear_y = -0.245, 0.245
+    painted_box('c9300-48p-chassis', (0.445, 0.488, 0.044), (0, 0, 0),
+                'c9300-black-steel', dark, 0.48)
+    painted_box('c9300-front-panel', (0.445, 0.002, 0.044),
+                (0, front_y, 0), 'c9300-face', face, 0.42)
+
+    # Separate 19-inch mounting brackets with real through-slots.
+    ear_w = (0.4826 - 0.445) / 2
+    for sign, side in ((-1, 'left'), (1, 'right')):
+        pierced_k79_plate(f'c9300-{side}-rack-ear', (ear_w, 0.003, 0.044),
+                          (sign * (0.445 / 2 + ear_w / 2), front_y, 0),
+                          [(sign * 0.233, z, 0.007, 0.005)
+                           for z in (-0.014, 0.014)])
+
+    # 48 copper ports, two rows of 24. Offsets/pitch are proportional cues;
+    # connector envelopes are Molex-derived, while count/order are Cisco V.
+    pitch = 0.0129
+    for row, z in enumerate((0.0082, -0.0082)):
+        for col in range(24):
+            n = row * 24 + col + 1
+            x = -0.172 + col * pitch
+            painted_box(f'ge-{n}-bezel', (0.0119, 0.0015, 0.0091),
+                        (x, front_y - 0.0018, z), 'port-nickel', metal, 0.52)
+            painted_box(f'ge-{n}-mouth', (0.0108, 0.001, 0.0078),
+                        (x, front_y - 0.0027, z), 'port-shadow', (0.004, 0.005, 0.006))
+            painted_box(f'ge-{n}-contacts', (0.0078, 0.0005, 0.0012),
+                        (x, front_y - 0.0033, z - 0.0023), 'contact-gold', gold, 0.55)
+
+    # C9300-NM-8X modular card: 8 SFP+ slots, two rows of four.
+    painted_box('c9300-nm8x-module', (0.069, 0.0022, 0.036),
+                (0.181, front_y - 0.0015, 0), 'nm8x-panel', (0.10, 0.11, 0.12), 0.5)
+    for row, z in enumerate((0.008, -0.008)):
+        for col in range(4):
+            n = row * 4 + col + 1
+            x = 0.158 + col * 0.0152
+            painted_box(f'nm8x-sfp-{n}', (0.014, 0.0014, 0.00895),
+                        (x, front_y - 0.003, z), 'port-nickel', metal, 0.52)
+            painted_box(f'nm8x-sfp-{n}-mouth', (0.0128, 0.0008, 0.0078),
+                        (x, front_y - 0.004, z), 'port-shadow', (0.004, 0.005, 0.006))
+
+    # Front service controls. Geometry follows component type/count only.
+    painted_box('front-usb-mini-b', (0.007, 0.0014, 0.0045),
+                (-0.207, front_y - 0.002, -0.008), 'usb-blue', blue)
+    painted_box('front-usb-a', (0.010, 0.0014, 0.0047),
+                (-0.194, front_y - 0.002, -0.008), 'usb-blue', blue)
+    for i in range(5):
+        painted_box(f'front-status-{i}', (0.0018, 0.0008, 0.0018),
+                    (-0.208 + (i % 2) * 0.005, front_y - 0.0027,
+                     0.012 - (i // 2) * 0.005), 'led-green', (0.04, 0.55, 0.23))
+
+    # Rear replaceable units: 3 fan trays, two PSUs, stack/mgmt cues.
+    painted_box('c9300-rear-panel', (0.445, 0.002, 0.044),
+                (0, rear_y, 0), 'c9300-face', face, 0.42)
+    for i in range(3):
+        painted_box(f'rear-fan-{i+1}', (0.046, 0.003, 0.034),
+                    (-0.183 + i * 0.050, rear_y + 0.002, 0), 'fan-dark', (0.08, 0.09, 0.10))
+    for i in range(2):
+        painted_box(f'rear-psu-{i+1}', (0.079, 0.003, 0.034),
+                    (0.174 - i * 0.083, rear_y + 0.002, 0), 'psu-dark', (0.12, 0.13, 0.14), 0.4)
+    for i, x in enumerate((-0.020, 0.003, 0.026)):
+        painted_box(f'rear-stack-mgmt-{i}', (0.017, 0.003, 0.012),
+                    (x, rear_y + 0.002, -0.008), 'port-shadow', (0.004, 0.005, 0.006))
+
+    compact_scene_by_material('c9300-48p')
+    export_visual_glb('brands/cisco/c9300-48p-nm8x.glb')
 
 
 # ─── RJ-11/RJ-14 (6P6C) voice/FXS jack cage shell (Sesi port-fxs) ──────────
@@ -666,6 +828,9 @@ def build_lattice3():
 if __name__ == '__main__':
     build_rj45()
     build_lc()
+    build_sfp_lc()
+    build_sfp_dac()
+    build_qsfp_dac()
     build_sfp_cage()
     build_qsfp_cage()
     build_chassis_mikrotik_ccr2004()
@@ -674,6 +839,7 @@ if __name__ == '__main__':
     build_rb5009_k79()
     if '--preview-rb5009' in sys.argv:
         render_rb5009_preview()
+    build_cisco_c9300_48p_nm8x()
     build_rj11_cage()
     build_cabinet_outdoor()
     build_monopole()

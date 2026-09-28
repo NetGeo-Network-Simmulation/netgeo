@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { chassisFamilyForDeviceSlug, loadBootAssets, loadBrandAssets, getBootGeometry } from './bootAssets';
+import { chassisFamilyForDeviceSlug, loadBootAssets, loadBrandAssets, getBootGeometry, getVisualChassis } from './bootAssets';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
   const file = path.resolve(__dirname, '../../../public', url.replace(/^\//, ''));
@@ -28,9 +28,9 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     const rBox = rj45.boundingBox!;
     const rSize = new THREE.Vector3();
     rBox.getSize(rSize);
-    // body 11.68 x 8.75 x 16.25mm + boot 12.5mm along Y -> total Y ~28.75mm
-    expect(rSize.x).toBeCloseTo(0.01168, 3);
-    expect(rSize.y).toBeCloseTo(0.02875, 2);
+    // Molex drawing: 13.8mm max overmould and 52.2mm overall length.
+    expect(rSize.x).toBeCloseTo(0.0138, 3);
+    expect(rSize.y).toBeCloseTo(0.0522, 3);
     expect(rBox.max.y).toBeCloseTo(0, 3); // tip at the local origin
 
     const lc = getBootGeometry('lc')!;
@@ -39,10 +39,27 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     const lBox = lc.boundingBox!;
     const lSize = new THREE.Vector3();
     lBox.getSize(lSize);
-    // body 5.58 x 10.43 x 42mm + boot 8mm along Y -> total Y = 50mm
-    expect(lSize.x).toBeCloseTo(0.00558, 3);
-    expect(lSize.y).toBeCloseTo(0.05, 3);
+    // SENKO duplex: 6.25mm pitch + 5.58mm body, 54mm overall length.
+    expect(lSize.x).toBeCloseTo(0.01183, 3);
+    expect(lSize.y).toBeCloseTo(0.054, 3);
     expect(lBox.max.y).toBeCloseTo(0, 3);
+
+    const sfpLc = getBootGeometry('sfp-lc')!;
+    sfpLc.computeBoundingBox();
+    const sfpLcSize = sfpLc.boundingBox!.getSize(new THREE.Vector3());
+    expect(sfpLcSize.x).toBeCloseTo(0.01355, 3);
+    // 37.5mm module insertion + 10mm front + 54mm LC termination.
+    expect(sfpLcSize.y).toBeCloseTo(0.1015, 3);
+
+    const sfpDac = getBootGeometry('sfp-dac')!;
+    sfpDac.computeBoundingBox();
+    expect(sfpDac.boundingBox!.getSize(new THREE.Vector3()).x).toBeCloseTo(0.01355, 3);
+
+    const qsfpDac = getBootGeometry('qsfp-dac')!;
+    qsfpDac.computeBoundingBox();
+    const qsfpSize = qsfpDac.boundingBox!.getSize(new THREE.Vector3());
+    expect(qsfpSize.x).toBeCloseTo(0.0184, 3);
+    expect(qsfpSize.z).toBeCloseTo(0.0135, 3);
   });
 
   // 3a.2 also builds the SFP and QSFP cage shells (dimension-verified,
@@ -116,6 +133,19 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     expect(size.x).toBeCloseTo(0.443, 3);
     expect(size.y).toBeCloseTo(0.044, 3);
     expect(size.z).toBeCloseTo(0.300, 3);
+  });
+
+  it('loads the official C9300-48P chassis envelope with separate 19-inch ears', async () => {
+    await loadBrandAssets(['chassis-cisco-c9300-48p-nm8x'], nodeFetch);
+    expect(chassisFamilyForDeviceSlug('cisco-c9300-48p')).toBe('chassis-cisco-c9300-48p-nm8x');
+    expect(chassisFamilyForDeviceSlug('cisco-c9300-48p-access')).toBe('chassis-cisco-c9300-48p-nm8x');
+    const scene = getVisualChassis('chassis-cisco-c9300-48p-nm8x')!;
+    const body = scene.getObjectByName('c9300-48p-chassis')!;
+    const bodySize = new THREE.Box3().setFromObject(body).getSize(new THREE.Vector3());
+    expect(bodySize.x).toBeCloseTo(0.445, 3);
+    expect(bodySize.y).toBeCloseTo(0.044, 3);
+    expect(bodySize.z).toBeCloseTo(0.488, 3);
+    expect(new THREE.Box3().setFromObject(scene).getSize(new THREE.Vector3()).x).toBeCloseTo(0.4826, 3);
   });
 
   // Slice port-fxs: RJ-11 6P voice jack cage — narrower/shorter than the
