@@ -521,7 +521,11 @@ def test_ad_withdrawal_repoints_stale_mac_route_to_surviving_alias():
     assert vx.remote_mac_paths[(10, mac)] == {pe2}
 
 
-def _dual_homed_lab() -> Network:
+def _dual_homed_lab(
+    *,
+    vxlan_interval: float = 1.0,
+    hold_time: float = 6.0,
+) -> Network:
     """Three VTEPs: leaf1/leaf2 share a real CE segment; leaf3 is remote."""
     net = Network(seed=23)
     leaves = [net.add_device(Router(f"leaf{i}")) for i in (1, 2, 3)]
@@ -538,6 +542,13 @@ def _dual_homed_lab() -> Network:
     ce = net.add_device(Switch("dual-ce", stp_enabled=False))
     net.connect("ce-l1", net.add_iface(leaves[0], "eth2"), net.add_iface(ce, "eth0"))
     net.connect("ce-l2", net.add_iface(leaves[1], "eth2"), net.add_iface(ce, "eth1"))
+    ce.create_lag("po1", ["eth0", "eth1"], mode="static")
+    ce_host = net.add_device(Host("ce-host"))
+    net.connect(
+        "ce-host-link",
+        net.add_iface(ce_host, "eth0", ["10.0.0.1/24"]),
+        net.add_iface(ce, "eth2"),
+    )
     remote = net.add_device(Host("remote"))
     net.connect(
         "remote-l3",
@@ -564,16 +575,16 @@ def _dual_homed_lab() -> Network:
             asn=65000,
             router_id=f"10.255.0.{index}",
             keepalive_interval=1.0,
-            hold_time=6.0,
+            hold_time=hold_time,
         )
         for peer_index in (1, 2, 3):
             if peer_index != index:
                 bgp.add_neighbor(f"10.255.0.{peer_index}", 65000)
 
     for leaf in leaves[:2]:
-        vx = VxlanProcess(leaf, interval=1.0)
+        vx = VxlanProcess(leaf, interval=vxlan_interval)
         vx.bind_access("eth2", 10, esi=SHARED_ESI)
-    vx3 = VxlanProcess(leaves[2], interval=1.0)
+    vx3 = VxlanProcess(leaves[2], interval=vxlan_interval)
     vx3.bind_access("eth2", 10)
     net.start()
     net.run(until=30.0)
@@ -616,24 +627,74 @@ def test_dual_homed_ce_power_cycle_withdraws_and_readvertises_all_routes():
     assert v2.df_vtep(SHARED_ESI, 10) == leaf1_ip
 
 
-def test_dual_homed_ce_has_exactly_one_df_for_overlay_bum(monkeypatch):
+def test_dual_homed_ce_end_to_end_has_one_delivery_and_no_recirculation():
     net = _dual_homed_lab()
-    v1, v2 = _vxlan(net, "leaf1"), _vxlan(net, "leaf2")
-    sent: list[str] = []
-    monkeypatch.setattr(
-        Interface,
-        "transmit",
-        lambda self, _net, _frame: sent.append(self.qualified_name),
-    )
-    inner = EthernetFrame(
-        src_mac="02:00:00:00:00:03",
-        dst_mac="ff:ff:ff:ff:ff:ff",
-    )
-    for vx in (v1, v2):
-        vx.on_overlay(
-            net,
-            Ipv4Packet(src=IPv4Address("10.255.0.3"), dst=vx.vtep_ip, proto=17),
-            VxlanPacket(vni=10, inner=inner.clone()),
-        )
+    ce = net.devices["dual-ce"]
+    assert ce.interfaces["po1"].mode == "static"
+    assert [m.name for m in ce.interfaces["po1"].active_members(net.now)] == ["eth0", "eth1"]
 
-    assert sent == ["leaf1:eth2"]
+    # Warm ARP/MAC state, then prove one actual host packet traverses access
+    # LAG -> VXLAN encap -> routed underlay -> decap exactly once.
+    assert net.ping("remote", "10.0.0.1", count=1).received == 1
+    started = net.now
+    report = net.ping("remote", "10.0.0.1", count=1)
+    assert report.sent == report.received == 1
+
+    # Split horizon must prevent either multihoming PE from tunnelling a
+    # received frame back to its sibling on the same Ethernet Segment.
+    vxlan_records = [
+        record
+        for record in net.capture.records(limit=10_000)
+        if record.time >= started and "VXLAN" in record.info
+    ]
+    assert vxlan_records
+    recirculated = []
+    for record in vxlan_records:
+        ipv4 = record.layers.get("ipv4", {})
+        pair = (ipv4.get("src"), ipv4.get("dst"))
+        if pair in {
+            ("10.255.0.1", "10.255.0.2"),
+            ("10.255.0.2", "10.255.0.1"),
+        }:
+            recirculated.append(record)
+    assert recirculated == []
+
+
+def test_neighbor_shutdown_withdraws_evpn_until_no_shutdown():
+    net = _dual_homed_lab()
+    leaf1_ip = IPv4Address("10.255.0.1")
+    leaf2 = net.devices["leaf2"]
+    bgp2 = next(p for p in leaf2.processes if p.proto == "bgp")
+    v2 = _vxlan(net, "leaf2")
+    assert bgp2.peers[leaf1_ip].state == "established"
+    assert leaf1_ip in v2.remote_es.get(SHARED_ESI, set())
+
+    bgp2.shutdown_neighbor(net, leaf1_ip)
+    net.run_for(4.0)
+    assert bgp2.peers[leaf1_ip].admin_down
+    assert leaf1_ip not in v2.remote_es.get(SHARED_ESI, set())
+    assert leaf1_ip not in v2.remote_ad.get((SHARED_ESI, 0), set())
+    assert leaf1_ip not in v2.remote_vteps.get(10, set())
+    assert leaf1_ip not in v2._sent
+
+    bgp2.no_shutdown_neighbor(net, leaf1_ip)
+    net.run_for(10.0)
+    assert bgp2.peers[leaf1_ip].state == "established"
+    assert leaf1_ip in v2.remote_es.get(SHARED_ESI, set())
+    assert leaf1_ip in v2.remote_ad.get((SHARED_ESI, 0), set())
+    assert leaf1_ip in v2.remote_vteps.get(10, set())
+
+
+def test_refresh_cadence_is_capped_by_hold_time_when_interval_is_large():
+    net = _dual_homed_lab(vxlan_interval=20.0, hold_time=6.0)
+    v1, v2 = _vxlan(net, "leaf1"), _vxlan(net, "leaf2")
+    leaf1_ip = IPv4Address("10.255.0.1")
+    leaf2_ip = IPv4Address("10.255.0.2")
+    before = v1._sent_at[leaf2_ip]
+
+    net.run_for(2.1)
+
+    assert before < v1._sent_at[leaf2_ip] <= before + 2.0
+    net.set_device_power("leaf1", False)
+    net.run_for(6.1)
+    assert leaf1_ip not in v2.remote_es.get(SHARED_ESI, set())
