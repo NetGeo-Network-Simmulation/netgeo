@@ -48,6 +48,40 @@ export function modeForEngine(mode: DistributionMode, remote: boolean): Distribu
   return mode === 'headless' ? 'headless' : 'native-offline';
 }
 
+export function runtimeProfileFromSearch(search: string): RuntimeProfile | null {
+  const params = new URLSearchParams(search);
+  const mode = params.get('netgeoRuntime');
+  const engine = params.get('netgeoEngine') ?? '';
+  if (mode === 'native-remote' || mode === 'full-online') {
+    const remoteOrigin = normalizeRemoteOrigin(engine);
+    return remoteOrigin ? { mode, remoteOrigin, localOrigin: '' } : null;
+  }
+  if (mode === 'headless') {
+    const localOrigin = normalizeLocalOrigin(engine);
+    return localOrigin ? { mode, remoteOrigin: '', localOrigin } : null;
+  }
+  if (mode === 'native-offline') {
+    return { mode, remoteOrigin: '', localOrigin: '' };
+  }
+  return null;
+}
+
+function consumeLauncherProfile(): RuntimeProfile | null {
+  if (typeof window === 'undefined') return null;
+  const profile = runtimeProfileFromSearch(window.location.search);
+  if (!profile) return null;
+  saveRuntimeProfile(profile);
+  const url = new URL(window.location.href);
+  url.searchParams.delete('netgeoRuntime');
+  url.searchParams.delete('netgeoEngine');
+  try {
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+  } catch {
+    // Embedded runtimes can deny history mutation. The validated profile still applies.
+  }
+  return profile;
+}
+
 export async function checkRemoteEngine(origin: string): Promise<string> {
   const normalized = normalizeRemoteOrigin(origin);
   if (!normalized) throw new Error('Enter a valid http:// or https:// server origin.');
@@ -73,6 +107,8 @@ export async function checkRemoteEngine(origin: string): Promise<string> {
 
 export function readRuntimeProfile(): RuntimeProfile {
   try {
+    const launcherProfile = consumeLauncherProfile();
+    if (launcherProfile) return launcherProfile;
     const stored = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<RuntimeProfile> | null;
     const mode = stored?.mode && MODES.has(stored.mode) ? stored.mode : DEFAULT_PROFILE.mode;
     const remoteOrigin = normalizeRemoteOrigin(stored?.remoteOrigin ?? '') ?? '';

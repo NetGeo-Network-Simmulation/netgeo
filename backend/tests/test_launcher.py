@@ -13,6 +13,8 @@ import socket
 import sys
 import time
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+from urllib.request import urlopen
 
 import pytest
 
@@ -127,6 +129,113 @@ def test_help_flag_documents_no_window(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "--no-window" in out
     assert "NETGEO_NO_WINDOW" in out
+
+
+def test_help_documents_remote_and_local_engine_lifecycle(monkeypatch, capsys):
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--help"])
+    launcher.main()
+    out = capsys.readouterr().out
+    assert "--engine-origin" in out
+    assert "--engine-host" in out
+    assert "--engine-port" in out
+    assert "NETGEO_ENGINE_ORIGIN" in out
+
+
+def test_local_bind_validates_one_loopback_host_and_port(monkeypatch):
+    for name in ("NETGEO_ENGINE_HOST", "NETGEO_ENGINE_PORT"):
+        monkeypatch.delenv(name, raising=False)
+    assert launcher._local_bind(["--engine-host", "::1", "--engine-port", "8123"]) == ("::1", 8123)
+    with pytest.raises(SystemExit, match="loopback"):
+        launcher._local_bind(["--engine-host", "0.0.0.0"])
+    with pytest.raises(SystemExit, match="1 to 65535"):
+        launcher._local_bind(["--engine-port", "0"])
+
+
+def test_remote_mode_never_mounts_or_runs_bundled_backend(monkeypatch):
+    class FakeServer:
+        def __init__(self):
+            self.shutdown_called = False
+            self.close_called = False
+
+        def shutdown(self):
+            self.shutdown_called = True
+
+        def server_close(self):
+            self.close_called = True
+
+    fake_server = FakeServer()
+    fake_thread = type("T", (), {"join": lambda self: None})()
+    opened = []
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--engine-origin", "https://engine.test:9443/path"])
+    monkeypatch.delenv("NETGEO_NO_BROWSER", raising=False)
+    monkeypatch.setattr(launcher, "_check_remote_health", lambda origin: "1.2.126" if origin == "https://engine.test:9443" else "bad")
+    monkeypatch.setattr(
+        launcher,
+        "_start_remote_frontend",
+        lambda origin: (
+            "http://127.0.0.1:8124/?netgeoRuntime=native-remote&netgeoEngine=https%3A%2F%2Fengine.test%3A9443",
+            fake_server,
+            fake_thread,
+        ),
+    )
+    monkeypatch.setattr(launcher, "_bundled_backend", lambda: pytest.fail("remote mode imported bundled backend"))
+    monkeypatch.setattr(launcher, "_mount_frontend", lambda _app: pytest.fail("remote mode mounted FastAPI frontend"))
+    monkeypatch.setattr(launcher, "_run_webview_in_subprocess", lambda url: opened.append(url) or True)
+
+    launcher.main()
+
+    query = parse_qs(urlsplit(opened[0]).query)
+    assert query == {"netgeoRuntime": ["native-remote"], "netgeoEngine": ["https://engine.test:9443"]}
+    assert fake_server.shutdown_called is True
+    assert fake_server.close_called is True
+
+
+def test_remote_health_failure_is_honest_and_does_not_start_ui(monkeypatch):
+    monkeypatch.setattr(sys, "argv", ["netgeo", "--engine-origin", "https://down.test"])
+    monkeypatch.setattr(
+        launcher,
+        "_check_remote_health",
+        lambda _origin: (_ for _ in ()).throw(SystemExit("remote engine unavailable: timed out")),
+    )
+    monkeypatch.setattr(launcher, "_start_remote_frontend", lambda _origin: pytest.fail("unhealthy remote started UI"))
+    with pytest.raises(SystemExit, match="remote engine unavailable"):
+        launcher.main()
+
+
+def test_headless_local_runs_backend_on_the_same_validated_origin(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["netgeo", "--engine-host", "127.0.0.1", "--engine-port", "8125"],
+    )
+    monkeypatch.delenv("NETGEO_ENGINE_ORIGIN", raising=False)
+    monkeypatch.setenv("NETGEO_NO_BROWSER", "1")
+    fake_uvicorn = type(
+        "Uvicorn", (), {"run": staticmethod(lambda _app, **kwargs: calls.append(kwargs))}
+    )()
+    monkeypatch.setattr(launcher, "_bundled_backend", lambda: (fake_uvicorn, object()))
+    monkeypatch.setattr(launcher, "_mount_frontend", lambda _app: None)
+
+    launcher.main()
+
+    assert calls == [{"host": "127.0.0.1", "port": 8125, "log_level": "info"}]
+
+
+def test_remote_frontend_server_is_static_only_and_bootstraps_one_engine(monkeypatch, tmp_path):
+    (tmp_path / "index.html").write_text("<title>NetGeo remote</title>", encoding="utf-8")
+    monkeypatch.setattr(launcher, "FRONTEND_DIST", tmp_path)
+    url, server, thread = launcher._start_remote_frontend("http://127.0.0.1:9001")
+    try:
+        assert thread.is_alive()
+        with urlopen(url, timeout=2) as response:
+            assert b"NetGeo remote" in response.read()
+        query = parse_qs(urlsplit(url).query)
+        assert query == {"netgeoRuntime": ["native-remote"], "netgeoEngine": ["http://127.0.0.1:9001"]}
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
 
 
 def test_run_webview_in_subprocess_true_on_clean_exit(monkeypatch):

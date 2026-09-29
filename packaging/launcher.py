@@ -1,9 +1,9 @@
-"""NetGeo desktop launcher — all-in-one native entry point.
+"""NetGeo desktop launcher — native local or remote entry point.
 
-Runs the existing FastAPI backend (already Postgres/Redis-free — see
-packaging/README.md) on a free localhost port, mounts the built frontend
-(frontend/dist) as static files on that same app/port, and opens it in a
-native pywebview window (WebKitGTK on Linux). Single process, single port.
+Local mode runs the existing FastAPI backend (already Postgres/Redis-free —
+see packaging/README.md) and frontend on one loopback port. Remote mode
+health-checks one external engine, serves only the bundled frontend locally,
+and opens it in the same native pywebview shell (WebKitGTK on Linux).
 
 ponytail: reuses app.main.app as-is (no edits to the normal dev/Docker
 entrypoint) and mounts the frontend in-process instead of adding a second
@@ -16,6 +16,8 @@ from __future__ import annotations
 
 import ctypes
 import ctypes.util
+import functools
+import json
 import os
 import signal
 import socket
@@ -24,7 +26,11 @@ import sys
 import threading
 import time
 import webbrowser
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlsplit
+from urllib.request import Request, urlopen
 
 FROZEN = getattr(sys, "frozen", False)
 if FROZEN:
@@ -39,10 +45,6 @@ else:
     FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
     ICONS_DIR = REPO_ROOT / "packaging" / "icons"
 
-import uvicorn  # noqa: E402
-from app.main import app  # noqa: E402
-from fastapi.staticfiles import StaticFiles  # noqa: E402
-
 # Distro-specific WebKitGTK prerequisites (see docs/qa/2026-08-30-shell-dan-
 # desktop.md §6 / 2026-08-30-format-installer-linux.md §D — package names
 # verified there, not guessed here).
@@ -56,14 +58,19 @@ _WEBKIT_INSTALL_HINT = (
 )
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-        s.bind(("127.0.0.1", 0))
+def _free_port(host: str = "127.0.0.1") -> int:
+    family = socket.AF_INET6 if host == "::1" else socket.AF_INET
+    with socket.socket(family, socket.SOCK_STREAM) as s:
+        s.bind((host, 0))
         return s.getsockname()[1]
 
 
 def _wait_until_ready(
-    port: int, server_thread: threading.Thread, timeout: float = 10.0, interval: float = 0.05
+    port: int,
+    server_thread: threading.Thread,
+    timeout: float = 10.0,
+    interval: float = 0.05,
+    host: str = "127.0.0.1",
 ) -> bool:
     """Poll for uvicorn to accept TCP connections instead of a blind sleep
     (measured median ready time ~0.24s vs the old fixed 1.0s — see
@@ -74,14 +81,24 @@ def _wait_until_ready(
         if not server_thread.is_alive():
             return False
         try:
-            with socket.create_connection(("127.0.0.1", port), timeout=interval):
+            with socket.create_connection((host, port), timeout=interval):
                 return True
         except OSError:
             time.sleep(interval)
     return False
 
 
-def _mount_frontend() -> None:
+def _bundled_backend():
+    """Import the bundled engine only for local modes, never remote clients."""
+    import uvicorn
+    from app.main import app
+
+    return uvicorn, app
+
+
+def _mount_frontend(app) -> None:
+    from fastapi.staticfiles import StaticFiles
+
     if FRONTEND_DIST.is_dir():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
     else:
@@ -90,6 +107,105 @@ def _mount_frontend() -> None:
             "build it first (cd frontend && npm run build). Running API-only.",
             file=sys.stderr,
         )
+
+
+def _option_value(args: list[str], name: str, env_name: str) -> str | None:
+    """Read a single-value launcher option, with an environment fallback."""
+    if name in args:
+        index = args.index(name)
+        if index + 1 >= len(args) or args[index + 1].startswith("--"):
+            raise SystemExit(f"[netgeo-launcher] {name} requires a value")
+        return args[index + 1]
+    value = os.environ.get(env_name)
+    return value if value else None
+
+
+def _normalize_engine_origin(value: str) -> str:
+    """Return an HTTP(S) origin suitable for both REST and WebSocket use."""
+    try:
+        parsed = urlsplit(value.strip())
+        # Accessing .port is deliberate: urllib raises for malformed/out-of-range ports.
+        port = parsed.port
+    except ValueError as exc:
+        raise SystemExit(f"[netgeo-launcher] invalid engine origin: {exc}") from exc
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise SystemExit("[netgeo-launcher] engine origin must be an http:// or https:// URL")
+    if parsed.username or parsed.password or port == 0:
+        raise SystemExit("[netgeo-launcher] engine origin cannot contain credentials or port 0")
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
+def _local_bind(args: list[str]) -> tuple[str, int]:
+    host = _option_value(args, "--engine-host", "NETGEO_ENGINE_HOST") or "127.0.0.1"
+    if host not in {"localhost", "127.0.0.1", "::1"}:
+        raise SystemExit(
+            "[netgeo-launcher] local engine host must be a loopback: localhost, 127.0.0.1, or ::1"
+        )
+    raw_port = _option_value(args, "--engine-port", "NETGEO_ENGINE_PORT")
+    if raw_port is None:
+        return host, _free_port(host)
+    try:
+        port = int(raw_port)
+    except ValueError as exc:
+        raise SystemExit("[netgeo-launcher] engine port must be an integer from 1 to 65535") from exc
+    if not 1 <= port <= 65535:
+        raise SystemExit("[netgeo-launcher] engine port must be an integer from 1 to 65535")
+    return host, port
+
+
+def _origin(host: str, port: int) -> str:
+    url_host = f"[{host}]" if host == "::1" else host
+    return f"http://{url_host}:{port}"
+
+
+def _check_remote_health(origin: str, timeout: float = 5.0) -> str:
+    """Fail closed when a configured remote is not a healthy NetGeo engine."""
+    request = Request(f"{origin}/api/health", headers={"Accept": "application/json"})
+    try:
+        with urlopen(request, timeout=timeout) as response:
+            payload = json.load(response)
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            detail = "server denied the health check; verify authentication or proxy policy"
+        else:
+            detail = f"health check returned HTTP {exc.code}"
+        raise SystemExit(f"[netgeo-launcher] remote engine unavailable: {detail}") from exc
+    except (URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"[netgeo-launcher] remote engine unavailable: {exc}") from exc
+    if not isinstance(payload, dict) or payload.get("status") != "ok" or payload.get("app") != "NetGeo":
+        raise SystemExit("[netgeo-launcher] remote engine did not identify as a healthy NetGeo backend")
+    return str(payload.get("version", "unknown"))
+
+
+class _FrontendOnlyHandler(SimpleHTTPRequestHandler):
+    """Serve the bundled SPA without importing it into the FastAPI engine."""
+
+    def do_GET(self) -> None:
+        path = urlsplit(self.path).path
+        target = Path(self.directory) / path.lstrip("/")
+        if path != "/" and not target.is_file():
+            self.path = "/"
+        super().do_GET()
+
+    def log_message(self, _format: str, *_args: object) -> None:
+        return
+
+
+def _start_remote_frontend(
+    engine_origin: str,
+) -> tuple[str, ThreadingHTTPServer, threading.Thread]:
+    """Start only the static UI for remote mode; never start bundled FastAPI."""
+    if not FRONTEND_DIST.is_dir():
+        raise SystemExit(
+            f"[netgeo-launcher] {FRONTEND_DIST} not found; remote native mode needs a built frontend"
+        )
+    port = _free_port()
+    handler = functools.partial(_FrontendOnlyHandler, directory=str(FRONTEND_DIST))
+    server = ThreadingHTTPServer(("127.0.0.1", port), handler)
+    server_thread = threading.Thread(target=server.serve_forever, daemon=True)
+    server_thread.start()
+    query = urlencode({"netgeoRuntime": "native-remote", "netgeoEngine": engine_origin})
+    return f"http://127.0.0.1:{port}/?{query}", server, server_thread
 
 
 def _dri_driver_path() -> str | None:
@@ -860,16 +976,22 @@ def _print_version() -> None:
 def _print_help() -> None:
     print("NetGeo desktop launcher")
     print()
-    print("Usage: netgeo [--version] [--help] [--no-window]")
+    print("Usage: netgeo [--version] [--help] [--no-window] [runtime options]")
     print()
     print("  --version    print the app version and exit")
     print("  --help       show this message and exit")
     print("  --no-window  run the backend, open the UI in the system browser")
     print("               instead of a native window (distribution variant #4)")
+    print("  --engine-origin URL   use a remote NetGeo engine; do not start bundled backend")
+    print("  --engine-host HOST    local engine bind host: localhost, 127.0.0.1, or ::1")
+    print("  --engine-port PORT    local engine port (1-65535; default: free loopback port)")
     print()
     print("Env vars:")
     print("  NETGEO_NO_WINDOW=1    same as --no-window (for systemd/containers)")
     print("  NETGEO_NO_BROWSER=1   run the backend headless, no window/browser")
+    print("  NETGEO_ENGINE_ORIGIN  same as --engine-origin")
+    print("  NETGEO_ENGINE_HOST    same as --engine-host")
+    print("  NETGEO_ENGINE_PORT    same as --engine-port")
     print("  PYWEBVIEW_GUI=gtk|qt  force the native-window backend")
     print("  NETGEO_GL=hw|sw|auto  force/auto-probe hardware GL for WebGL (default: auto)")
 
@@ -893,24 +1015,43 @@ def main() -> None:
         url = args[args.index("--window-child") + 1]
         sys.exit(0 if _try_webview(url) else 1)
 
-    _mount_frontend()
-    port = _free_port()
-    url = f"http://127.0.0.1:{port}"
-    print(f"[netgeo-launcher] serving on {url}")
+    remote_value = _option_value(args, "--engine-origin", "NETGEO_ENGINE_ORIGIN")
+    frontend_server: ThreadingHTTPServer | None = None
+    if remote_value:
+        engine_origin = _normalize_engine_origin(remote_value)
+        version = _check_remote_health(engine_origin)
+        if os.environ.get("NETGEO_NO_BROWSER") == "1":
+            print(f"[netgeo-launcher] remote engine healthy ({version}) at {engine_origin}")
+            return
+        url, frontend_server, server_thread = _start_remote_frontend(engine_origin)
+        port = urlsplit(url).port or 0
+        print(
+            f"[netgeo-launcher] remote engine {engine_origin} ({version}); "
+            f"frontend-only UI on {urlsplit(url).scheme}://{urlsplit(url).netloc}"
+        )
+    else:
+        uvicorn, app = _bundled_backend()
+        _mount_frontend(app)
+        host, port = _local_bind(args)
+        engine_origin = _origin(host, port)
+        launch_mode = "headless" if _no_window_reason(args) else "native-offline"
+        query = urlencode({"netgeoRuntime": launch_mode, "netgeoEngine": engine_origin})
+        url = f"{engine_origin}/?{query}"
+        print(f"[netgeo-launcher] serving on {engine_origin}")
 
-    # ponytail: NETGEO_NO_BROWSER skips opening any window/browser for
-    # headless/CI/test runs — unchanged behavior from before pywebview.
-    if os.environ.get("NETGEO_NO_BROWSER") == "1":
-        uvicorn.run(app, host="127.0.0.1", port=port, log_level="info")
-        return
+        # ponytail: NETGEO_NO_BROWSER skips opening any window/browser for
+        # headless/CI/test runs — unchanged behavior from before pywebview.
+        if os.environ.get("NETGEO_NO_BROWSER") == "1":
+            uvicorn.run(app, host=host, port=port, log_level="info")
+            return
 
-    server_thread = threading.Thread(
-        target=uvicorn.run,
-        kwargs={"app": app, "host": "127.0.0.1", "port": port, "log_level": "info"},
-        daemon=True,
-    )
-    server_thread.start()
-    _wait_until_ready(port, server_thread)  # poll instead of a blind sleep
+        server_thread = threading.Thread(
+            target=uvicorn.run,
+            kwargs={"app": app, "host": host, "port": port, "log_level": "info"},
+            daemon=True,
+        )
+        server_thread.start()
+        _wait_until_ready(port, server_thread, host=host)  # poll instead of a blind sleep
 
     reason = _no_window_reason(args)
     if reason:
@@ -925,6 +1066,9 @@ def main() -> None:
         # fallback has no such signal, so just keep the process (and its
         # background uvicorn thread) alive the same way uvicorn.run() used to.
         server_thread.join()
+    elif frontend_server is not None:
+        frontend_server.shutdown()
+        frontend_server.server_close()
 
 
 if __name__ == "__main__":
