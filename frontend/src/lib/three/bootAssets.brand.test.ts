@@ -18,7 +18,8 @@ describe('optional device brand assets', () => {
     expect(fetched.some((url) => url.includes('/brands/') || url.includes('/chassis-'))).toBe(false);
     await loadBrandAssets(['chassis-mikrotik-rb5009-k79'], nodeFetch);
     expect(fetched.filter((url) => url.includes('/brands/'))).toEqual([
-      '/3d/brands/mikrotik/rb5009ug-s-in-k79.glb',
+      '/3d/brands/mikrotik/rb5009ug-s-in.glb',
+      '/3d/brands/mikrotik/k79-rackmount.glb',
     ]);
     const scene = getVisualChassis('chassis-mikrotik-rb5009-k79')!;
     expect(scene).toBeDefined();

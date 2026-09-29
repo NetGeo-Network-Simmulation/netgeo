@@ -77,7 +77,9 @@ describe('rack3d Blender chassis envelope', () => {
       expect(Object.keys(built.registry.devices.rb!.portRefs)).toHaveLength(9);
       expect(built.root.getObjectByName('front-plate')).toBeFalsy();
       expect(built.root.getObjectByName('rack-ear')).toBeFalsy();
-      expect(built.root.getObjectByName('port-hit-0')?.userData.port).toBe(0);
+      const hits = built.root.getObjectByName('port-hit-instanced') as THREE.InstancedMesh;
+      expect(hits.count).toBe(9);
+      expect(hits.userData.portMap[0]).toEqual({ dev: 'rb', port: 0 });
       expect(chassis.getObjectByName('ether1-2p5g-mouth')?.userData.dev).toBe('rb');
     } finally { disposeScene(built); }
   });
@@ -163,13 +165,20 @@ describe('rack3d Blender chassis envelope', () => {
       const chassis = built.root.getObjectByName('chassis')!;
       const size = new THREE.Box3().setFromObject(chassis).getSize(new THREE.Vector3());
       expect(size.x).toBeCloseTo(0.4826, 3);
-      expect(size.z).toBeGreaterThanOrEqual(0.488);
+      expect(size.z).toBeCloseTo(0.488, 4);
       expect(Object.keys(built.registry.devices.c9300!.portRefs)).toHaveLength(56);
       expect(built.registry.devices.c9300!.portRefs[0]!.y).toBeCloseTo(0.0082, 4);
       expect(built.registry.devices.c9300!.portRefs[47]!.y).toBeCloseTo(-0.0082, 4);
       expect(built.registry.devices.c9300!.portRefs[48]!.x).toBeCloseTo(0.158, 4);
       expect(built.root.getObjectByName('front-plate')).toBeFalsy();
       expect(built.root.getObjectByName('rack-ear')).toBeFalsy();
+      const hits = built.root.getObjectByName('port-hit-instanced') as THREE.InstancedMesh;
+      expect(hits.count).toBe(56);
+      expect(hits.userData.portMap).toHaveLength(56);
+      expect(hits.userData.portMap[55]).toEqual({ dev: 'c9300', port: 55 });
+      const individualHits: THREE.Object3D[] = [];
+      built.root.traverse((obj) => { if (/^port-hit-\d+$/.test(obj.name)) individualHits.push(obj); });
+      expect(individualHits).toHaveLength(0);
     } finally { disposeScene(built); }
   });
 

@@ -39,27 +39,49 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     const lBox = lc.boundingBox!;
     const lSize = new THREE.Vector3();
     lBox.getSize(lSize);
-    // SENKO duplex: 6.25mm pitch + 5.58mm body, 54mm overall length.
-    expect(lSize.x).toBeCloseTo(0.01183, 3);
+    // SENKO duplex: 12x11mm outer front envelope, 54mm overall length.
+    expect(lSize.x).toBeCloseTo(0.012, 3);
     expect(lSize.y).toBeCloseTo(0.054, 3);
+    expect(lSize.z).toBeCloseTo(0.011, 3);
     expect(lBox.max.y).toBeCloseTo(0, 3);
 
     const sfpLc = getBootGeometry('sfp-lc')!;
     sfpLc.computeBoundingBox();
     const sfpLcSize = sfpLc.boundingBox!.getSize(new THREE.Vector3());
     expect(sfpLcSize.x).toBeCloseTo(0.01355, 3);
-    // 37.5mm module insertion + 10mm front + 54mm LC termination.
-    expect(sfpLcSize.y).toBeCloseTo(0.1015, 3);
+    // SFP optical: 47.5mm behind positive stop + 9mm front; LC extends
+    // another 54mm ahead from the module's external face.
+    expect(sfpLcSize.y).toBeCloseTo(0.1115, 3);
 
     const sfpDac = getBootGeometry('sfp-dac')!;
     sfpDac.computeBoundingBox();
-    expect(sfpDac.boundingBox!.getSize(new THREE.Vector3()).x).toBeCloseTo(0.01355, 3);
+    const sfpDacSize = sfpDac.boundingBox!.getSize(new THREE.Vector3());
+    expect(sfpDacSize.x).toBeCloseTo(0.01355, 3);
+    expect(sfpDacSize.y).toBeCloseTo(0.0575, 4);
+    expect(sfpDac.boundingBox!.min.y).toBeCloseTo(-0.010, 4);
+    expect(sfpDac.boundingBox!.max.y).toBeCloseTo(0.0475, 4);
+
+    const copperSfp = getBootGeometry('sfp-rj45')!;
+    copperSfp.computeBoundingBox();
+    const copperSize = copperSfp.boundingBox!.getSize(new THREE.Vector3());
+    expect(copperSize.x).toBeCloseTo(0.0148, 4);
+    expect(copperSize.y).toBeCloseTo(0.0702, 4);
 
     const qsfpDac = getBootGeometry('qsfp-dac')!;
     qsfpDac.computeBoundingBox();
     const qsfpSize = qsfpDac.boundingBox!.getSize(new THREE.Vector3());
     expect(qsfpSize.x).toBeCloseTo(0.0184, 3);
+    expect(qsfpSize.y).toBeCloseTo(0.0724, 3);
     expect(qsfpSize.z).toBeCloseTo(0.0135, 3);
+
+    for (const family of ['qsfp-lc', 'qsfp-mpo'] as const) {
+      const geometry = getBootGeometry(family)!;
+      geometry.computeBoundingBox();
+      const size = geometry.boundingBox!.getSize(new THREE.Vector3());
+      expect(size.x).toBeCloseTo(0.0184, 3);
+      expect(size.y).toBeCloseTo(0.0724, 3);
+      expect(size.z).toBeCloseTo(0.0135, 3);
+    }
   });
 
   // 3a.2 also builds the SFP and QSFP cage shells (dimension-verified,
@@ -145,7 +167,9 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
     expect(bodySize.x).toBeCloseTo(0.445, 3);
     expect(bodySize.y).toBeCloseTo(0.044, 3);
     expect(bodySize.z).toBeCloseTo(0.488, 3);
-    expect(new THREE.Box3().setFromObject(scene).getSize(new THREE.Vector3()).x).toBeCloseTo(0.4826, 3);
+    const fullSize = new THREE.Box3().setFromObject(scene).getSize(new THREE.Vector3());
+    expect(fullSize.x).toBeCloseTo(0.4826, 3);
+    expect(fullSize.z).toBeCloseTo(0.488, 4);
   });
 
   // Slice port-fxs: RJ-11 6P voice jack cage — narrower/shorter than the

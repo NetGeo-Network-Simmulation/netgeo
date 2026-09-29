@@ -19,7 +19,11 @@ import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
-export type BootFamily = 'rj45' | 'lc' | 'sfp-lc' | 'sfp-dac' | 'qsfp-dac';
+export type BootFamily =
+  | 'rj45' | 'lc'
+  | 'sfp-lc' | 'sfp-dac' | 'sfp-rj45'
+  | 'qsfp-dac' | 'qsfp-lc' | 'qsfp-mpo'
+  | 'strain-relief' | 'qsfp-pull-loop';
 export type CageFamily = 'cage-sfp' | 'cage-qsfp' | 'cage-rj11';
 export type EnclosureFamily = 'cabinet-outdoor';
 export type StructureFamily = 'tower-monopole' | 'tower-lattice4' | 'tower-lattice3';
@@ -36,7 +40,12 @@ const URLS: Record<Exclude<AssetFamily, ChassisFamily>, string> = {
   lc: '/3d/boot-lc.glb',
   'sfp-lc': '/3d/connector-sfp-lc.glb',
   'sfp-dac': '/3d/connector-sfp-dac.glb',
+  'sfp-rj45': '/3d/connector-sfp-rj45.glb',
   'qsfp-dac': '/3d/connector-qsfp-dac.glb',
+  'qsfp-lc': '/3d/connector-qsfp-lc.glb',
+  'qsfp-mpo': '/3d/connector-qsfp-mpo.glb',
+  'strain-relief': '/3d/connector-strain-relief.glb',
+  'qsfp-pull-loop': '/3d/connector-qsfp-pull-loop.glb',
   'cage-sfp': '/3d/cage-sfp.glb',
   'cage-qsfp': '/3d/cage-qsfp.glb',
   'cage-rj11': '/3d/cage-rj11.glb',
@@ -48,11 +57,14 @@ const URLS: Record<Exclude<AssetFamily, ChassisFamily>, string> = {
 
 // Brand packs are optional. A Plant mount fetches the shared connector and
 // cabinet assets above; only a visible SKU requests its brand GLB below.
-const BRAND_URLS: Record<ChassisFamily, string> = {
+const BRAND_URLS: Record<ChassisFamily, string | readonly string[]> = {
   'chassis-mikrotik-ccr2004': '/3d/chassis-mikrotik-ccr2004.glb',
   'chassis-mikrotik-crs317': '/3d/chassis-mikrotik-crs317.glb',
   'chassis-mikrotik-crs328': '/3d/chassis-mikrotik-crs328.glb',
-  'chassis-mikrotik-rb5009-k79': '/3d/brands/mikrotik/rb5009ug-s-in-k79.glb',
+  'chassis-mikrotik-rb5009-k79': [
+    '/3d/brands/mikrotik/rb5009ug-s-in.glb',
+    '/3d/brands/mikrotik/k79-rackmount.glb',
+  ],
   'chassis-cisco-c9300-48p-nm8x': '/3d/brands/cisco/c9300-48p-nm8x.glb',
 };
 
@@ -118,9 +130,20 @@ export function loadBrandAssets(
     if (cache[fam] || visualCache[fam] || unavailableBrands.has(fam)) return Promise.resolve();
     if (!brandInflight[fam]) {
       brandInflight[fam] = (async () => {
-        const gltf = await new GLTFLoader().parseAsync(await fetchArrayBuffer(BRAND_URLS[fam]), '');
-        if (fam === 'chassis-mikrotik-rb5009-k79' || fam === 'chassis-cisco-c9300-48p-nm8x') visualCache[fam] = gltf.scene;
-        else cache[fam] = mergedGeometry(gltf);
+        const source = BRAND_URLS[fam];
+        const urls = typeof source === 'string' ? [source] : source;
+        const gltfs = await Promise.all(urls.map(async (url) => (
+          new GLTFLoader().parseAsync(await fetchArrayBuffer(url), '')
+        )));
+        if (fam === 'chassis-mikrotik-rb5009-k79' || fam === 'chassis-cisco-c9300-48p-nm8x') {
+          if (gltfs.length === 1) visualCache[fam] = gltfs[0]!.scene;
+          else {
+            const packageGroup = new THREE.Group();
+            packageGroup.name = fam + '-packages';
+            for (const gltf of gltfs) packageGroup.add(gltf.scene);
+            visualCache[fam] = packageGroup;
+          }
+        } else cache[fam] = mergedGeometry(gltfs[0]!);
       })().catch((error) => {
         // Optional brand art never blocks the procedural chassis and ports.
         unavailableBrands.add(fam);
