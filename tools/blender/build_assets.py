@@ -19,8 +19,10 @@ the connector/cage datum. Cable-side bodies extend in -Z (-> -Y after
 export); pluggable module shells may also extend in +Z into the chassis.
 
 Scope (NG-PH3D 3a + physical wave 2): only dimension-VERIFIED parts are
-modelled with real numbers. QSFP-DD/XFP/FC/ST/MPO/E2000/IEC power connectors
-stay UNVERIFIED and are deliberately not built here. MikroTik's official
+modelled with real numbers. QSFP-DD/XFP/FC/ST/E2000/IEC power connectors
+stay UNVERIFIED and are deliberately not built here. MPO is represented only
+as an interface cue inside an MSA-sized QSFP module; no unsourced standalone
+MPO plug envelope is claimed. MikroTik's official
 product pages/brochures verify the outer dimensions and port counts for the
 CCR2004-1G-12S+2XS, CRS317-1G-16S+RM and CRS328-24P-4S+RM. Their precise
 vent/faceplate offsets are not published, so the ventilation pattern below is
@@ -242,7 +244,7 @@ def top_legend(name, label, x, y, size=0.007):
 
 
 def pierced_k79_plate(name, dims, centre, holes):
-    """One formed metal plate with genuine through-slots in its front face."""
+    """One inferred formed plate with through-slots matching official imagery."""
     plate = painted_box(name, dims, centre, 'k79-black-steel',
                         (0.095, 0.102, 0.113), 0.52)
     for x, z, width, height in holes:
@@ -269,11 +271,11 @@ def pierced_k79_plate(name, dims, centre, holes):
     return plate
 
 
-def export_visual_glb(filename):
+def export_visual_glb(filename, predicate=lambda obj: True):
     """Keep separate mesh materials: a merged, recoloured geometry loses them."""
     bpy.ops.object.select_all(action='DESELECT')
     for obj in bpy.context.scene.objects:
-        if obj.type == 'MESH':
+        if obj.type == 'MESH' and predicate(obj):
             obj.select_set(True)
     os.makedirs(OUT_DIR, exist_ok=True)
     path = os.path.join(OUT_DIR, filename)
@@ -305,9 +307,9 @@ def build_rb5009_k79():
     units/1U from https://mikrotik.com/product/rb5009_mount and its assembly
     PDF https://cdn.mikrotik.com/web-assets/product_files/K79_230513.pdf .
     482.6 mm rack face width and 44.45 mm 1U height are EIA-310 nominal.
-    All offsets, hole sizes, grille/fin pitch, port pitch, and metal thickness
-    are PROPORTIONAL art cues from the official product imagery, not claims of
-    vendor dimensions. The GLB has NO logical ports: rack3d's catalog anchors
+    All K-79 offsets, hole sizes, grille/fin pitch, port pitch, and metal
+    thickness are PROPORTIONAL art cues from the official product imagery,
+    not verified hole/ear dimensions. The GLB has NO logical ports: rack3d's catalog anchors
     remain the only cable/picking targets.
 
     Blender -Y is the front; glTF export converts it to three.js +Z.
@@ -396,7 +398,13 @@ def build_rb5009_k79():
                 (0.1095, 0.030, -0.001), 'terminal-green', (0.10, 0.27, 0.13))
     painted_box('front-power-led', (0.002, 0.0007, 0.001),
                 (-0.107, front_y-0.002, 0.008), 'led-green', (0.05, 0.55, 0.22))
-    export_visual_glb('brands/mikrotik/rb5009ug-s-in-k79.glb')
+    # Device and accessory remain independent packages: a desktop RB5009 is
+    # still its real 220mm body, while K-79 can be lazy-composed only for the
+    # rackmount presentation. K-79 hole/ear geometry remains visual inference.
+    export_visual_glb('brands/mikrotik/rb5009ug-s-in.glb',
+                      lambda obj: not obj.name.startswith('k79-'))
+    export_visual_glb('brands/mikrotik/k79-rackmount.glb',
+                      lambda obj: obj.name.startswith('k79-'))
 
 
 def render_rb5009_preview():
@@ -442,8 +450,9 @@ def build_rj45():
 
 
 # ─── LC simplex connector + boot (§2.a "LC (simplex)", V — Senko datasheet)─
-# SENKO duplex family: 54mm length, 6.25mm ferrule pitch, 8.6mm height,
-# 2mm cable. Source:
+# SENKO duplex family: 54mm length; 12.0mm overall front width and 11.0mm
+# overall height; 6.25mm ferrule pitch and 8.6mm body are subdimensions.
+# The family drawing also specifies a 2mm cable. Source:
 # https://www.senko.com/wp-content/uploads/2024/08/DS-LC-000006-RevA-EN.pdf
 def build_lc():
     clear_scene()
@@ -453,7 +462,7 @@ def build_lc():
         leg.location.x = side * 0.003125
         bpy.ops.object.transform_apply(location=True)
         parts.append(leg)
-    parts.append(box('lc-duplex-clip', 0.01183, 0.0065, 0.009, -0.004))
+    parts.append(box('lc-duplex-clip', 0.012, 0.011, 0.009, -0.004))
     parts.append(frustum('lc-duplex-boot', 0.0038, 0.001, 0.008, -0.046))
     obj = join(parts, 'lc-duplex-connector')
     add_material(obj, 'lc-housing', (0.75, 0.75, 0.78))
@@ -462,38 +471,40 @@ def build_lc():
 
 # SFP/SFP+/SFP28 share one mechanical envelope. SFF-8432 R5.2a:
 # https://members.snia.org/document/dl/25892 — 13.55±0.25 x
-# 8.55±0.15 x 47.50±0.20mm, maximum 10mm in front of the cage datum.
-def sfp_module_shell(name):
-    return cube_at(name, 0.01355, 0.00855, 0.0475, z=0.01375)
+# 8.55±0.15mm, with the positive stop at Z=0, 47.50±0.20mm behind it and
+# maximum 10mm in front. The full maximum shell is therefore 57.5mm, spanning
+# -10..+47.5mm; do not misread 47.5mm as the complete module length.
+def sfp_module_shell(name, front=0.010):
+    return box(name, 0.01355, 0.00855, 0.0475 + front, 0.0475)
 
 
 def build_sfp_lc():
     clear_scene()
-    parts = [sfp_module_shell('sfp-lc-module')]
+    # Representative optical module uses 9mm front protrusion (56.5mm total),
+    # while remaining inside SFF-8432's 10mm maximum.
+    parts = [sfp_module_shell('sfp-lc-module', 0.009)]
     for side in (-1, 1):
         leg = box(f'sfp-lc-leg-{side}', 0.00558, 0.0086, 0.054, -0.010)
         leg.location.x = side * 0.003125
         bpy.ops.object.transform_apply(location=True)
         parts.append(leg)
-    parts.append(box('sfp-lc-duplex-clip', 0.01183, 0.0065, 0.009, -0.014))
+    parts.append(box('sfp-lc-duplex-clip', 0.012, 0.011, 0.009, -0.014))
     obj = join(parts, 'sfp-lc-termination')
     add_material(obj, 'sfp-lc-neutral', (0.34, 0.36, 0.38))
     export_glb(obj, 'connector-sfp-lc.glb')
 
 
 def build_sfp_dac():
-    """One SFP-family DAC/AOC geometry; colour is an instance variant.
+    """SFP-family DAC/AOC head at the SFF-8432 maximum envelope.
 
-    TE's SFP+ family accepts 4.7-6.48mm cable and its SFP28 cable is 5.96mm:
-    https://www.te.com/en/product-CAT-C11-H5.html . The relief stays inside
-    SFF-8432's verified 10mm front allowance.
+    Cable relief is a separate reusable Blender asset, scaled from the
+    selected official runtime cable profile. That lets SFP, QSFP DAC and AOC
+    share head geometry without baking a false one-size cable diameter.
     """
     clear_scene()
     module = sfp_module_shell('sfp-dac-module')
-    relief = frustum('sfp-dac-relief', 0.0042, 0.00298, 0.010, -0.010)
-    obj = join([module, relief], 'sfp-dac-termination')
-    add_material(obj, 'sfp-dac-neutral', (0.18, 0.19, 0.20))
-    export_glb(obj, 'connector-sfp-dac.glb')
+    add_material(module, 'sfp-dac-neutral', (0.18, 0.19, 0.20))
+    export_glb(module, 'connector-sfp-dac.glb')
 
 
 def build_qsfp_dac():
@@ -503,11 +514,70 @@ def build_qsfp_dac():
     split is a placement cue; total module length remains the verified max.
     """
     clear_scene()
-    module = cube_at('qsfp-dac-module', 0.0184, 0.0135, 0.0724, z=0.0227)
-    relief = frustum('qsfp-dac-relief', 0.0054, 0.00324, 0.0135, -0.0135)
-    obj = join([module, relief], 'qsfp-dac-termination')
-    add_material(obj, 'qsfp-dac-neutral', (0.18, 0.19, 0.20))
-    export_glb(obj, 'connector-qsfp-dac.glb')
+    module = box('qsfp-dac-module', 0.0184, 0.0135, 0.0724, 0.0589)
+    add_material(module, 'qsfp-dac-neutral', (0.18, 0.19, 0.20))
+    export_glb(module, 'connector-qsfp-dac.glb')
+
+
+def build_qsfp_optical(interface):
+    """MSA-sized QSFP optical head with LC or MPO interface cue.
+
+    The outer 18.4 x 13.5 x 72.4mm envelope is verified by SFF-8661:
+    https://members.snia.org/document/dl/25959 . Socket dimensions below are
+    inset visual cues only, so they never enlarge or claim a standalone plug.
+    """
+    clear_scene()
+    module = box(f'qsfp-{interface}-module', 0.0184, 0.0135, 0.0724, 0.0589)
+    parts = [module]
+    if interface == 'lc':
+        for x in (-0.003125, 0.003125):
+            parts.append(cube_at(f'qsfp-lc-receptacle-{x}', 0.0046, 0.002,
+                                 0.006, x=x, y=0, z=-0.0105))
+    else:
+        parts.append(cube_at('qsfp-mpo-receptacle-cue', 0.012, 0.002,
+                             0.006, x=0, y=0, z=-0.0105))
+    obj = join(parts, f'qsfp-{interface}-termination')
+    add_material(obj, f'qsfp-{interface}-neutral', (0.26, 0.28, 0.30))
+    export_glb(obj, f'connector-qsfp-{interface}.glb')
+
+
+def build_sfp_rj45():
+    """Coherent FCLF8522P2BTL copper SFP, authored from its drawing.
+
+    Overall K=70.20mm, positive-stop-to-rear S=47.50mm, nose X=22.70mm;
+    the nose grows to E=14.80mm around the 8P8C interface rather than reusing
+    the optical shell or loose RJ45 plug. Source:
+    https://www.coherent.com/resources/datasheet/networking/optical-transceivers/sfp/fclf852xp2btl-transceiver-ds.pdf
+    """
+    clear_scene()
+    rear = box('coherent-copper-sfp-rear', 0.01355, 0.00855, 0.0475, 0.0475)
+    nose = box('coherent-copper-sfp-rj45-nose', 0.0148, 0.0133, 0.0227, 0.0)
+    mouth = cube_at('coherent-copper-sfp-rj45-mouth-cue', 0.01168, 0.008,
+                    0.0012, z=-0.0221)
+    obj = join([rear, nose, mouth], 'coherent-fclf8522p2btl-envelope')
+    add_material(obj, 'copper-sfp-neutral', (0.20, 0.22, 0.23))
+    export_glb(obj, 'connector-sfp-rj45.glb')
+
+
+def build_strain_relief():
+    """Unit strain relief; rack3d scales radial axes to official cable OD/2."""
+    clear_scene()
+    relief = frustum('unit-strain-relief', 1.35, 1.0, 1.0, 0.0, sides=12)
+    add_material(relief, 'strain-relief-neutral', (0.10, 0.10, 0.11))
+    export_glb(relief, 'connector-strain-relief.glb')
+
+
+def build_qsfp_pull_loop():
+    """Lightweight authored U-loop, shown only in near LOD."""
+    clear_scene()
+    parts = [
+        cube_at('qsfp-loop-left', 0.0012, 0.0012, 0.017, x=-0.006, z=-0.022),
+        cube_at('qsfp-loop-right', 0.0012, 0.0012, 0.017, x=0.006, z=-0.022),
+        cube_at('qsfp-loop-grip', 0.0132, 0.0012, 0.0012, z=-0.0305),
+    ]
+    obj = join(parts, 'qsfp-pull-loop')
+    add_material(obj, 'qsfp-pull-loop-neutral', (0.20, 0.42, 0.60))
+    export_glb(obj, 'connector-qsfp-pull-loop.glb')
 
 
 # ─── SFP/SFP+/SFP28 cage shell (§2.c, V — SFF-8432 Rev 5.1 Table, direct) ──
@@ -621,7 +691,9 @@ def build_cisco_c9300_48p_nm8x():
     metal = (0.36, 0.38, 0.40)
     gold = (0.54, 0.37, 0.14)
     blue = (0.05, 0.34, 0.55)
-    front_y, rear_y = -0.245, 0.245
+    # Keep every front/rear cue inside the official 488mm overall depth.
+    # The body alone establishes the exact [-244,+244]mm envelope.
+    front_y, rear_y = -0.2395, 0.2395
     painted_box('c9300-48p-chassis', (0.445, 0.488, 0.044), (0, 0, 0),
                 'c9300-black-steel', dark, 0.48)
     painted_box('c9300-front-panel', (0.445, 0.002, 0.044),
@@ -831,6 +903,11 @@ if __name__ == '__main__':
     build_sfp_lc()
     build_sfp_dac()
     build_qsfp_dac()
+    build_qsfp_optical('lc')
+    build_qsfp_optical('mpo')
+    build_sfp_rj45()
+    build_strain_relief()
+    build_qsfp_pull_loop()
     build_sfp_cage()
     build_qsfp_cage()
     build_chassis_mikrotik_ccr2004()

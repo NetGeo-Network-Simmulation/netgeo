@@ -23,7 +23,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
 import { buildScene, disposeScene, type BuildOptions, type DeviceDef, type LinkDef } from './rack3d';
-import { loadBootAssets } from './bootAssets';
+import { loadBootAssets, loadBrandAssets } from './bootAssets';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
   const file = path.resolve(__dirname, '../../../public', url.replace(/^\//, ''));
@@ -39,6 +39,7 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 // rack3d.instancing.test.ts).
 beforeAll(async () => {
   await loadBootAssets(nodeFetch);
+  await loadBrandAssets(['chassis-cisco-c9300-48p-nm8x'], nodeFetch);
 });
 
 function dev(id: string, u: number, h: number, kind: DeviceDef['kind'], portGroups?: { type: NonNullable<DeviceDef['ptype']>; count: number }[]): DeviceDef {
@@ -117,5 +118,28 @@ describe('draw-call budget (Sesi LOD tuning, 78-device dense scenario)', () => {
     } finally {
       disposeScene(built);
     }
+  });
+
+  it('keeps the 56 C9300 hit targets to one draw call with an ordinal portMap', () => {
+    const c9300: DeviceDef = {
+      id: 'c9300', u: 1, h: 1, kind: 'switch', brand: 'Cisco',
+      model: 'Catalyst 9300-48P', accent: 0x2f7fb8, ports: 56,
+      bodyWidthM: 0.445, bodyDepthM: 0.488,
+      chassisAsset: 'chassis-cisco-c9300-48p-nm8x',
+      portGroups: [{ type: 'rj45', count: 48 }, { type: 'sfp28', count: 8 }],
+    };
+    const built = buildScene({
+      racks: [{ key: 'rack-a', enclosure: 'apc', devices: [c9300] }], links: [],
+    });
+    try {
+      const hitDraws: THREE.Object3D[] = [];
+      built.root.traverse((obj) => { if (obj.name.startsWith('port-hit')) hitDraws.push(obj); });
+      expect(hitDraws).toHaveLength(1);
+      const hits = hitDraws[0] as THREE.InstancedMesh;
+      expect(hits.isInstancedMesh).toBe(true);
+      expect(hits.count).toBe(56);
+      expect(hits.userData.portMap).toHaveLength(56);
+      expect(countDrawable(built.root)).toBeLessThan(150);
+    } finally { disposeScene(built); }
   });
 });
