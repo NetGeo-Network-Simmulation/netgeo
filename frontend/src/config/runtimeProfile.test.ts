@@ -7,6 +7,7 @@ import {
   normalizeRemoteOrigin,
   readRuntimeProfile,
   runtimeApiBase,
+  runtimeProfileFromSearch,
   runtimeWebSocketBase,
   saveRuntimeProfile,
 } from './runtimeProfile';
@@ -30,6 +31,35 @@ describe('runtime profile', () => {
     expect(modeForEngine('native-offline', true)).toBe('native-remote');
     expect(modeForEngine('full-online', true)).toBe('full-online');
     expect(runtimeApiBase()).toBe('https://netgeo.example.test:8443/api');
+  });
+
+  it('accepts one validated launcher endpoint for REST and WebSocket startup', () => {
+    expect(runtimeProfileFromSearch('?netgeoRuntime=native-remote&netgeoEngine=https%3A%2F%2Fengine.test%3A9443%2Fignored')).toEqual({
+      mode: 'native-remote',
+      remoteOrigin: 'https://engine.test:9443',
+      localOrigin: '',
+    });
+    expect(runtimeProfileFromSearch('?netgeoRuntime=headless&netgeoEngine=http%3A%2F%2F127.0.0.1%3A8123')).toEqual({
+      mode: 'headless',
+      remoteOrigin: '',
+      localOrigin: 'http://127.0.0.1:8123',
+    });
+    expect(runtimeProfileFromSearch('?netgeoRuntime=native-offline&netgeoEngine=https%3A%2F%2Funused.test')).toEqual({
+      mode: 'native-offline',
+      remoteOrigin: '',
+      localOrigin: '',
+    });
+    expect(runtimeProfileFromSearch('?netgeoRuntime=headless&netgeoEngine=https%3A%2F%2Fremote.test')).toBeNull();
+    expect(runtimeProfileFromSearch('?netgeoRuntime=native-remote&netgeoEngine=ftp%3A%2F%2Fengine.test')).toBeNull();
+  });
+
+  it('consumes launcher startup data once and keeps REST and WebSocket paired', () => {
+    window.history.replaceState({}, '', '/?netgeoRuntime=native-remote&netgeoEngine=https%3A%2F%2Fengine.test%3A9443');
+
+    expect(readRuntimeProfile().remoteOrigin).toBe('https://engine.test:9443');
+    expect(window.location.search).toBe('');
+    expect(runtimeApiBase()).toBe('https://engine.test:9443/api');
+    expect(runtimeWebSocketBase()).toBe('wss://engine.test:9443');
   });
 
   it('uses an optional loopback endpoint only for headless clients', () => {

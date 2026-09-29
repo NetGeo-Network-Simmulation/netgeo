@@ -162,8 +162,11 @@ Host dan port ditampilkan di Settings; `/api` dan WebSocket memakai endpoint yan
 yang dikonfigurasi diperiksa kesehatannya sebelum disimpan dan klien dimuat ulang.
 Server remote harus menjalankan NetGeo versi ini atau lebih baru agar CORS loopback native diterima.
 Profil #2 tetap dinonaktifkan sampai integrasi Google Maps dan pengelolaan API key tersedia; profil
-#4 tetap harus dimulai lewat `--no-window`. Profil remote di UI belum menghentikan backend bundled
-yang diluncurkan oleh aplikasi native.
+#4 tetap harus dimulai lewat `--no-window`. Untuk memulai native langsung dengan engine remote tanpa
+menjalankan backend bundled, gunakan `netgeo --engine-origin https://host:port` atau
+`NETGEO_ENGINE_ORIGIN=https://host:port netgeo`. Launcher memverifikasi `/api/health`, menyajikan
+frontend lokal saja, lalu memasangkan REST dan WebSocket ke origin remote yang sama. Headless-local
+dapat mengunci endpoint dengan `--engine-host` dan `--engine-port` (atau env sepadan).
 
 ### Region peta offline
 

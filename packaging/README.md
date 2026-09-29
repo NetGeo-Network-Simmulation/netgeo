@@ -445,4 +445,5 @@ build), instalasi nyata via `apt install ./netgeo_*.deb` /
 - Belum ada mode onefile (onedir dipilih untuk startup lebih cepat /
   debugging lebih mudah).
 - `launcher.py` selalu memilih port bebas secara acak; tidak ada flag
-  `--port`, tidak ada file config, tidak ada single-instance lock.
+  `--port` generik atau file config; port engine lokal dapat dikunci lewat
+  `--engine-port`, tetapi belum ada single-instance lock.

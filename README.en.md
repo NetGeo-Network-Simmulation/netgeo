@@ -158,8 +158,12 @@ a server origin with an optional port, such as `https://netgeo.example.com:8443`
 the host and port; `/api` and WebSockets share that endpoint. A configured endpoint is health-checked
 before it is saved and the client reloads. The remote server must run this
 release or newer so it accepts the native loopback CORS origin. Profile #2 remains disabled until
-Google Maps and API-key management exist; profile #4 still starts with `--no-window`. Selecting a
-remote engine in the native UI does not yet stop its bundled backend process.
+Google Maps and API-key management exist; profile #4 still starts with `--no-window`. To start the
+native app directly against a remote engine without running the bundled backend, use
+`netgeo --engine-origin https://host:port` or
+`NETGEO_ENGINE_ORIGIN=https://host:port netgeo`. The launcher verifies `/api/health`, serves only the
+local frontend, and pairs REST and WebSocket with the same remote origin. Headless-local can pin its
+endpoint with `--engine-host` and `--engine-port` (or their environment equivalents).
 
 ### Offline map region
 
