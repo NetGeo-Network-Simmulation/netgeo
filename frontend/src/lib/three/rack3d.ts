@@ -12,7 +12,7 @@
  */
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { getBootGeometry, getVisualChassis, type BootFamily, type CageFamily, type ChassisFamily, type StructureFamily } from './bootAssets';
+import { getBootGeometry, getVisualChassis, type AssetFamily, type BootFamily, type CageFamily, type ChassisFamily, type StructureFamily } from './bootAssets';
 
 /* ─── Real-world geometry (EIA-310): 1U = 44.45 mm, 19" panel = 482.6 mm ─── */
 export const U = 0.04445;
@@ -139,19 +139,61 @@ export const CABLE_PROFILES: Record<string, CableProfile> = {
   'fs-q28-pc01': { key: 'fs-q28-pc01', radiusM: 0.0033, minBendM: 0.033, faceplateClearanceM: 0.07245, connectorFrontM: 0.0135 },
   'fs-q28-pc05': { key: 'fs-q28-pc05', radiusM: 0.0042, minBendM: 0.042, faceplateClearanceM: 0.08325, connectorFrontM: 0.0135 },
   'cisco-qsfp100-aoc': { key: 'cisco-qsfp100-aoc', radiusM: 0.00175, minBendM: 0.03, connectorFrontM: 0.0135 },
+  // Missing optic metadata must not silently become an FS/Cisco SKU. These
+  // generic envelopes use the conservative dimensions of the verified
+  // family above while preserving honest provenance in `profileKey`.
+  'generic-sfp-dac': { key: 'generic-sfp-dac', radiusM: 0.003, minBendM: 0.03, connectorFrontM: 0.010 },
+  'generic-qsfp-dac-short': { key: 'generic-qsfp-dac-short', radiusM: 0.0033, minBendM: 0.033, faceplateClearanceM: 0.07245, connectorFrontM: 0.0135 },
+  'generic-qsfp-dac-long': { key: 'generic-qsfp-dac-long', radiusM: 0.0042, minBendM: 0.042, faceplateClearanceM: 0.08325, connectorFrontM: 0.0135 },
+  'generic-qsfp-aoc': { key: 'generic-qsfp-aoc', radiusM: 0.00175, minBendM: 0.03, connectorFrontM: 0.0135 },
 };
+
+export type ConnectorHeadFamily =
+  | 'generic' | 'rj45' | 'lc' | 'mpo'
+  | 'sfp-lc' | 'sfp-dac' | 'sfp-rj45'
+  | 'qsfp-dac' | 'qsfp-lc' | 'qsfp-mpo';
+
+export interface LinkEndpointOptic {
+  vendor?: string;
+  sku?: string;
+  connector?: 'generic' | 'rj45' | 'lc-duplex' | 'mpo';
+  headFamily?: ConnectorHeadFamily;
+}
+
+export interface LinkCableSpec {
+  profileKey?: string;
+  stockLengthM?: number;
+}
+
+export interface CableProfileSelection {
+  endpoints?: readonly (LinkEndpointOptic | undefined)[];
+  endpointTypes?: readonly (PortType | undefined)[];
+  cable?: LinkCableSpec;
+}
 
 export function resolveCableProfile(
   mediaKey: string,
-  endpointTypes: readonly (PortType | undefined)[] = [],
-  nominalLengthM = 1,
+  selectionOrTypes: CableProfileSelection | readonly (PortType | undefined)[] = {},
+  routedLengthM = 1,
 ): CableProfile {
-  const qsfp = endpointTypes.includes('qsfp28');
+  const selection: CableProfileSelection = Array.isArray(selectionOrTypes)
+    ? { endpointTypes: selectionOrTypes as readonly (PortType | undefined)[] }
+    : selectionOrTypes as CableProfileSelection;
+  const explicit = selection.cable?.profileKey;
+  if (explicit && CABLE_PROFILES[explicit]) return CABLE_PROFILES[explicit]!;
+  const sku = selection.endpoints?.map((e) => e?.sku?.toUpperCase() ?? '').join(' ') ?? '';
+  if (sku.includes('SFP-10G-AC01')) return CABLE_PROFILES['fs-sfp10-ac01']!;
+  if (sku.includes('Q28-PC05')) return CABLE_PROFILES['fs-q28-pc05']!;
+  if (sku.includes('Q28-PC01')) return CABLE_PROFILES['fs-q28-pc01']!;
+  const heads = selection.endpoints?.map((e) => e?.headFamily);
+  const qsfp = heads?.some((h) => h?.startsWith('qsfp-'))
+    || selection.endpointTypes?.includes('qsfp28');
+  const nominalLengthM = selection.cable?.stockLengthM ?? routedLengthM;
   if (mediaKey === 'dac') {
-    if (qsfp) return CABLE_PROFILES[nominalLengthM <= 1.5 ? 'fs-q28-pc01' : 'fs-q28-pc05']!;
-    return CABLE_PROFILES['fs-sfp10-ac01']!;
+    if (qsfp) return CABLE_PROFILES[nominalLengthM <= 1.5 ? 'generic-qsfp-dac-short' : 'generic-qsfp-dac-long']!;
+    return CABLE_PROFILES['generic-sfp-dac']!;
   }
-  if (mediaKey === 'aoc' && qsfp) return CABLE_PROFILES['cisco-qsfp100-aoc']!;
+  if (mediaKey === 'aoc' && qsfp) return CABLE_PROFILES['generic-qsfp-aoc']!;
   const spec = MEDIA[mediaKey] ?? MEDIA.cat6a!;
   return { key: mediaKey, radiusM: spec.r, minBendM: spec.minBendM };
 }
@@ -202,6 +244,25 @@ export interface LinkDef {
   b: [string, number];
   m: string;
   live: boolean;
+  /** Optional per-end optic identity. Absence is intentionally generic. */
+  endpoints?: [LinkEndpointOptic | undefined, LinkEndpointOptic | undefined];
+  cable?: LinkCableSpec;
+}
+
+function connectorFamilyForEndpoint(
+  mediaKey: string, portType?: PortType, endpoint?: LinkEndpointOptic,
+): BootFamily | undefined {
+  const explicit = endpoint?.headFamily;
+  if (explicit && explicit !== 'generic') return explicit;
+  const sku = endpoint?.sku?.toUpperCase() ?? '';
+  if (endpoint?.connector === 'mpo') {
+    return portType === 'qsfp28' && /QSFP.*SR4|SR4.*QSFP/.test(sku) ? 'qsfp-mpo' : 'mpo';
+  }
+  if (['cat6a', 'cat6a_xc', 'cat6a_oob'].includes(mediaKey)) return 'rj45';
+  if (mediaKey === 'dac' || mediaKey === 'aoc') return portType === 'qsfp28' ? 'qsfp-dac' : 'sfp-dac';
+  if (mediaKey === 'mpo') return 'mpo';
+  if (['os2', 'os2apc', 'om3', 'om4', 'om5'].includes(mediaKey)) return 'lc';
+  return undefined;
 }
 
 export interface CableMeta {
@@ -573,6 +634,48 @@ export interface BuiltScene {
   rowWidthM: number;
 }
 
+/** Exact non-brand GLB families needed for one scene. The host calls this
+ * before rebuilding, avoiding the old startup download of every connector,
+ * cage, cabinet and tower. Generic MPO deliberately has no GLB until a
+ * primary standalone-plug envelope is available. */
+export function assetFamiliesForScene(
+  opts: BuildOptions,
+): Set<Exclude<AssetFamily, ChassisFamily>> {
+  const result = new Set<Exclude<AssetFamily, ChassisFamily>>();
+  const devices = new Map<string, DeviceDef>();
+  for (const rack of opts.racks) {
+    if (rack.enclosure === 'outdoor-nema') result.add('cabinet-outdoor');
+    for (const device of rack.devices) {
+      devices.set(device.id, device);
+      for (const group of portGroupsOf(device)) {
+        if (group.type === 'sfp28') result.add('cage-sfp');
+        if (group.type === 'qsfp28') result.add('cage-qsfp');
+        if (group.type === 'fxs') result.add('cage-rj11');
+      }
+    }
+  }
+  if (opts.structure) result.add(opts.structure.family);
+  const typeAt = (endpoint: [string, number]): PortType | undefined => {
+    const device = devices.get(endpoint[0]);
+    if (!device) return undefined;
+    let offset = 0;
+    for (const group of portGroupsOf(device)) {
+      if (endpoint[1] < offset + group.count) return group.type;
+      offset += group.count;
+    }
+    return device.ptype;
+  };
+  for (const link of opts.links) {
+    ([link.a, link.b] as const).forEach((endpoint, index) => {
+      const family = connectorFamilyForEndpoint(link.m, typeAt(endpoint), link.endpoints?.[index]);
+      if (family && family !== 'mpo') result.add(family);
+      if ((link.m === 'dac' || link.m === 'aoc') && family) result.add('strain-relief');
+      if (family?.startsWith('qsfp-')) result.add('qsfp-pull-loop');
+    });
+  }
+  return result;
+}
+
 export function buildScene(opts: BuildOptions): BuiltScene {
   const mats = makeMaterials();
   const registry: Registry = {
@@ -587,7 +690,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   const bootInstances: Record<BootFamily, {
     pos: THREE.Vector3; quat: THREE.Quaternion; color: THREE.Color; scale?: THREE.Vector3;
   }[]> = {
-    rj45: [], lc: [], 'sfp-lc': [], 'sfp-dac': [], 'sfp-rj45': [],
+    rj45: [], lc: [], mpo: [], 'sfp-lc': [], 'sfp-dac': [], 'sfp-rj45': [],
     'qsfp-dac': [], 'qsfp-lc': [], 'qsfp-mpo': [],
     'strain-relief': [], 'qsfp-pull-loop': [],
   };
@@ -1616,6 +1719,8 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   const lane = (ch: number, n: number) => ch - 0.004 + ((n % LANE_WRAP) - (LANE_WRAP - 1) / 2) * LANE_PITCH;
   // a run sags in proportion to how far it has to reach — real cable behaviour
   const dropSag = (from: number, to: number) => Math.min(0.012, Math.abs(to - from) * 0.045 + 0.002);
+  const combDepth = (tier: number, minBend: number, clearance: number) =>
+    Math.max(COMB_Z + tier, clearance > 0 ? clearance + minBend * 6 : 0);
   // NG-PH3D 3a: the port->channel jog's own standoff/depth (OUT_Z/COMB_Z)
   // are physical rack dimensions, too small on their own to give a stiff
   // cable (Cat6A's 51mm) room to turn without violating its own minimum
@@ -1626,10 +1731,15 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     faceplateClearance = 0,
   ) {
     const sag = dropSag(p.x, l);
-    const oz = Math.max(OUT_Z, minBend * 0.6) + tier, cz = COMB_Z + tier;
-    const lead = Math.max(oz * 0.5, faceplateClearance);
+    const oz = Math.max(OUT_Z, minBend * 0.6) + tier;
+    // The published faceplate value is a minimum straight clearance, not a
+    // target bend datum. Keep an extra bend-radius of straight cable before
+    // the first control turn so the fillet cannot consume that clearance.
+    const lead = Math.max(oz * 0.5,
+      faceplateClearance > 0 ? faceplateClearance + minBend * 1.5 : 0);
+    const cz = combDepth(tier, minBend, faceplateClearance);
     const afterLead = faceplateClearance > 0
-      ? Math.max(oz * 1.5, lead + minBend) : oz * 1.5;
+      ? Math.max(oz * 1.5, lead + minBend * 2.5) : oz * 1.5;
     return [
       // FS specifies a straight faceplate clearance before the first bend on
       // Q28-PC01/PC05; make it an explicit first collinear control point.
@@ -1651,14 +1761,16 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     // larger than the widest jacket so neighbours cannot interpenetrate
     const tierA = (laneA % 7) * 0.012; // 7 is coprime with LANE_WRAP
     const tierB = (laneB % 7) * 0.012;
+    const combA = combDepth(tierA, minBend, faceplateClearance);
+    const combB = combDepth(tierB, minBend, faceplateClearance);
     const la = lane(chanA, laneA);
     const lb = lane(chanB, laneB);
     const pts = [a.clone(), ...legIn(a, la, tierA, minBend, faceplateClearance)];
     const prefixEnd = pts.length; // legIn(a)'s own joints are already fine — never fillet them
     if (sameRack) {
       const mid = (a.y + b.y) / 2;
-      pts.push(new THREE.Vector3(chanA, mid, a.z + COMB_Z + tierA));
-      pts.push(new THREE.Vector3(la, b.y - dropSag(b.x, lb) * 0.3, b.z + COMB_Z + tierB));
+      pts.push(new THREE.Vector3(chanA, mid, a.z + combA));
+      pts.push(new THREE.Vector3(la, b.y - dropSag(b.x, lb) * 0.3, b.z + combB));
     } else {
       const ea = exitA.p, eb = exitB.p;
       // NG-PH3D 3a: floored like legIn's own oz/cz — a fixed 60mm drop is
@@ -1692,8 +1804,8 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // longer shared edge.
       const laX = exitA.kind === 'side' ? la : la + Math.sign(ea.x - la || 1) * minBend * 1.2;
       const climbA = ea.y - 0.22;
-      if (climbA > a.y + 0.03) pts.push(new THREE.Vector3(la, climbA, a.z + COMB_Z + tierA));
-      const zBefore = a.z + COMB_Z + tierA;
+      if (climbA > a.y + 0.03) pts.push(new THREE.Vector3(la, climbA, a.z + combA));
+      const zBefore = a.z + combA;
       const preExitZA = (zBefore + ea.z) / 2;
       // NG-PH3D 3d: the two ends split this z-spread unevenly — the lane
       // end (deep inside the rack, nowhere near the cutout regardless of
@@ -1741,9 +1853,9 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // already-clear exit z, then move z to the average — same
       // one-axis-at-a-time fix as the PDU power-cord path above.
       pts.push(new THREE.Vector3(lb, eb.y - preDrop, eb.z + sz));
-      pts.push(new THREE.Vector3(lb, eb.y - preDrop, (b.z + COMB_Z + tierB + eb.z) / 2));
+      pts.push(new THREE.Vector3(lb, eb.y - preDrop, (b.z + combB + eb.z) / 2));
       const climbB = eb.y - 0.22;
-      if (climbB > b.y + 0.03) pts.push(new THREE.Vector3(lb, climbB, b.z + COMB_Z + tierB));
+      if (climbB > b.y + 0.03) pts.push(new THREE.Vector3(lb, climbB, b.z + combB));
       // NG-PH3D 3d: this point stands in for legIn(b)'s own last point (the
       // reversed spread below drops the real one via slice(1)) so THIS end
       // of the run has a fillet-able corner symmetric with legIn(a)'s at
@@ -1773,12 +1885,12 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       const mergeMinTail = minBend * 2.4;
       const mergeExtraZ = exitB.kind === 'side' && tailGap < mergeMinTail
         ? Math.sqrt(mergeMinTail * mergeMinTail - tailGap * tailGap) : 0;
-      const mergeZBase = b.z + COMB_Z + tierB;
+      const mergeZBase = b.z + combB;
       // the actual preceding point's own z — climbB's when it was pushed
       // (same formula as mergeZBase), otherwise the zmove point just
       // above, which can already sit clear on the OTHER side of a band
       // this shift would otherwise be needlessly clamped against.
-      const mergePrevZ = climbB > b.y + 0.03 ? mergeZBase : (b.z + COMB_Z + tierB + eb.z) / 2;
+      const mergePrevZ = climbB > b.y + 0.03 ? mergeZBase : (b.z + combB + eb.z) / 2;
       const mergeZ = clampZAwayFromRail(mergePrevZ, mergeZBase - mergeExtraZ, exitB.d);
       pts.push(new THREE.Vector3(lb, b.y - dropSag(b.x, lb) * 0.3, mergeZ));
     }
@@ -1800,6 +1912,12 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     // that middle span — legIn's own already-fine joints at both ends are
     // explicitly excluded so this doesn't disturb geometry that was never
     // the problem.
+    // A DAC profile with a documented faceplate clearance needs its complete
+    // span filleted, not only the tray middle. Catmull-Rom interpolation of
+    // sampled arcs draws inside the control polygon, so use a conservative
+    // 2.5x construction radius; the measured curve is asserted against the
+    // actual profile radius in rack3d.bendradius.test.ts.
+    if (faceplateClearance > 0) return routeCurve(pts, minBend * 3.2, 5, 1, pts.length - 2);
     if (!sameRack) return routeCurve(pts, minBend * 1.45, 5, prefixEnd, suffixStart);
     return smoothCurve(pts, 5);
   }
@@ -1915,21 +2033,6 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     return def.ptype;
   }
 
-  function connectorFamily(mediaKey: string, portType?: PortType): BootFamily | undefined {
-    if (['cat6a', 'cat6a_xc', 'cat6a_oob'].includes(mediaKey)) {
-      return portType === 'sfp28' ? 'sfp-rj45' : 'rj45';
-    }
-    if (mediaKey === 'dac' || mediaKey === 'aoc') {
-      return portType === 'qsfp28' ? 'qsfp-dac' : 'sfp-dac';
-    }
-    if (mediaKey === 'mpo') return 'qsfp-mpo';
-    if (['os2', 'os2apc', 'om3', 'om4', 'om5'].includes(mediaKey)) {
-      if (portType === 'qsfp28') return 'qsfp-lc';
-      return portType === 'sfp28' ? 'sfp-lc' : 'lc';
-    }
-    return undefined;
-  }
-
   function connectorVariantColor(brand: string | undefined, base: THREE.Color): THREE.Color {
     const vendor = brand?.toLowerCase() ?? '';
     // One MSA mesh, visible material variants: no per-vendor geometry copy.
@@ -1946,7 +2049,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   function addCable(
     curve: THREE.Curve<THREE.Vector3>, mediaKey: string, meta: CableMeta,
     stubEnd = false, endpointTypes?: [PortType | undefined, PortType | undefined],
-    endpointBrands?: [string | undefined, string | undefined],
+    endpoints?: [LinkEndpointOptic | undefined, LinkEndpointOptic | undefined],
     selectedProfile?: CableProfile,
   ) {
     const profile = selectedProfile ?? resolveCableProfile(mediaKey, endpointTypes, curve.getLength());
@@ -1997,18 +2100,18 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       // InstancedMesh draw call instead of N per-cable meshes. Falls back to
       // the original procedural shapes (unchanged below) whenever the asset
       // isn't cached yet — first paint, or any test that never loads it.
-      const fam = connectorFamily(mediaKey, endpointTypes?.[endIndex]);
+      const fam = connectorFamilyForEndpoint(mediaKey, endpointTypes?.[endIndex], endpoints?.[endIndex]);
       const bootGeo = fam ? getBootGeometry(fam) : undefined;
       if (fam && bootGeo) {
         const tip = curve.getPointAt(t < 0.5 ? 0 : 1);
         bootInstances[fam].push({
           pos: tip, quat: q.clone(),
-          color: connectorVariantColor(endpointBrands?.[endIndex], pair.bt.color),
+          color: connectorVariantColor(endpoints?.[endIndex]?.vendor, pair.bt.color),
         });
         if (fam.startsWith('qsfp-')) {
           bootInstances['qsfp-pull-loop'].push({
             pos: tip, quat: q.clone(),
-            color: connectorVariantColor(endpointBrands?.[endIndex], pair.bt.color),
+            color: connectorVariantColor(endpoints?.[endIndex]?.vendor, pair.bt.color),
           });
         }
         if (mediaKey === 'dac' || mediaKey === 'aoc') {
@@ -2037,6 +2140,11 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       } else if (fallbackFam === 'qsfp-dac' || fallbackFam === 'qsfp-lc' || fallbackFam === 'qsfp-mpo') {
         add(box(0.0184, 0.06, 0.0135, cm, 'qsfp-module'), 0);
         add(box(0.017, 0.014, 0.0022, mats.handle, 'qsfp-pull-tab'), 0.027);
+      } else if (fallbackFam === 'mpo') {
+        // Inferred generic MPO cue: deliberately not dimension-verified until
+        // a primary standalone-plug drawing enters the asset matrix.
+        add(box(0.012, 0.024, 0.008, cm, 'mpo-connector-generic'), 0);
+        add(box(0.010, 0.006, 0.002, mats.handle, 'mpo-key'), -0.012, 0.005);
       } else if (fallbackFam === 'iec') {
         add(box(0.0148, 0.032, 0.0148, cm, 'iec-connector'), 0);
         add(box(0.0168, 0.0062, 0.0168, mats.plugClip, 'iec-grip-rib'), -0.009);
@@ -2182,18 +2290,32 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       const p = worldPort(end[0], end[1]);
       if (!p) continue;
       const endpointType = portTypeAt(end[0], end[1]);
-      const cableProfile = resolveCableProfile(l.m, [endpointType], 1);
+      const endpointIndex = aPresent ? 0 : 1;
+      const endpoint = l.endpoints?.[endpointIndex];
+      const selection: CableProfileSelection = {
+        endpoints: [endpoint], endpointTypes: [endpointType], cable: l.cable,
+      };
+      let cableProfile = resolveCableProfile(l.m, selection, l.cable?.stockLengthM ?? 1);
       const key = rackOf(end[0])!;
       const ln = laneOrder.get(key + ':' + i) ?? nextLane(key);
-      const curve = externalCableCurve(p, chanOf.get(key)!, trayY - 0.03, ln,
-        exitPoint(registry.racks[key]!), registry.racks[key]!, crossIx++, cableProfile.minBendM ?? 0.02,
-        cableProfile.faceplateClearanceM ?? 0);
+      const routeIndex = crossIx++;
+      const route = (profile: CableProfile) => externalCableCurve(
+        p, chanOf.get(key)!, trayY - 0.03, ln,
+        exitPoint(registry.racks[key]!), registry.racks[key]!, routeIndex,
+        profile.minBendM ?? 0.02, profile.faceplateClearanceM ?? 0,
+      );
+      let curve = route(cableProfile);
+      const routedProfile = resolveCableProfile(l.m, selection, curve.getLength());
+      if (routedProfile.key !== cableProfile.key) {
+        cableProfile = routedProfile;
+        curve = route(cableProfile);
+      }
       bundleMedia[key]?.push(l.m);
       const len = addCable(curve, l.m, {
         name: end[0] + ':' + end[1] + ' → luar scene',
         devs: [end[0]], live: l.live, media: l.m,
       }, true, [endpointType, undefined],
-      [registry.devices[end[0]]?.def.brand, undefined], cableProfile);
+      [endpoint, undefined], cableProfile);
       const sprite = makeLabel(
         MEDIA[l.m]!.label.split(' · ')[0] + '  ' + stockLength(len) + ' m',
         curve.getPointAt(0.5).clone().add(new THREE.Vector3(0, 0.06, 0)),
@@ -2212,20 +2334,29 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     const endpointTypes: [PortType | undefined, PortType | undefined] = [
       portTypeAt(l.a[0], l.a[1]), portTypeAt(l.b[0], l.b[1]),
     ];
-    const cableProfile = resolveCableProfile(l.m, endpointTypes, a.distanceTo(b));
+    const selection: CableProfileSelection = {
+      endpoints: l.endpoints, endpointTypes, cable: l.cable,
+    };
+    let cableProfile = resolveCableProfile(l.m, selection, l.cable?.stockLengthM ?? 1);
     const kindOf = (id: string) => registry.devices[id]!.def.kind;
     const nearBy = Math.abs(a.y - b.y) <= U * 3.2;
     const panelHop = same && nearBy
       && (['patch', 'odf'].includes(kindOf(l.a[0])) || ['patch', 'odf'].includes(kindOf(l.b[0])));
-    let curve: THREE.Curve<THREE.Vector3>;
-    if (panelHop) {
-      curve = jumperCurve(a, b, cableProfile.minBendM ?? 0.02);
-    } else {
-      const lnA = laneOrder.get(ka + ':' + i) ?? nextLane(ka);
-      const lnB = same ? lnA : (laneOrder.get(kb + ':' + i) ?? nextLane(kb));
-      curve = cableCurve(a, b, cA, cB, trayY - 0.03, same, lnA, lnB,
-        exitPoint(registry.racks[ka]!), exitPoint(registry.racks[kb]!), same ? 0 : crossIx++,
-        cableProfile.minBendM ?? 0.02, cableProfile.faceplateClearanceM ?? 0);
+    const lnA = laneOrder.get(ka + ':' + i) ?? nextLane(ka);
+    const lnB = same ? lnA : (laneOrder.get(kb + ':' + i) ?? nextLane(kb));
+    const routeIndex = same ? 0 : crossIx++;
+    const route = (profile: CableProfile): THREE.Curve<THREE.Vector3> => panelHop
+      ? jumperCurve(a, b, profile.minBendM ?? 0.02)
+      : cableCurve(a, b, cA, cB, trayY - 0.03, same, lnA, lnB,
+        exitPoint(registry.racks[ka]!), exitPoint(registry.racks[kb]!), routeIndex,
+        profile.minBendM ?? 0.02, profile.faceplateClearanceM ?? 0);
+    let curve = route(cableProfile);
+    const routedProfile = resolveCableProfile(l.m, selection, curve.getLength());
+    if (routedProfile.key !== cableProfile.key) {
+      cableProfile = routedProfile;
+      curve = route(cableProfile);
+    }
+    if (!panelHop) {
       bundleMedia[ka]?.push(l.m);
       bundleMedia[kb]?.push(l.m);
     }
@@ -2233,7 +2364,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
       name: l.a[0] + ':' + l.a[1] + '→' + l.b[0] + ':' + l.b[1],
       devs: [l.a[0], l.b[0]], live: l.live, media: l.m,
     }, false, endpointTypes,
-    [registry.devices[l.a[0]]?.def.brand, registry.devices[l.b[0]]?.def.brand], cableProfile);
+    l.endpoints, cableProfile);
     const sprite = makeLabel(
       MEDIA[l.m]!.label.split(' · ')[0] + '  ' + stockLength(len) + ' m',
       curve.getPointAt(0.5).clone().add(new THREE.Vector3(0, 0.06, 0)),
@@ -2288,12 +2419,13 @@ export function buildScene(opts: BuildOptions): BuiltScene {
   // TIA-598-C) without a material per media.
   const ONE = new THREE.Vector3(1, 1, 1);
   for (const fam of [
-    'rj45', 'lc', 'sfp-lc', 'sfp-dac', 'sfp-rj45',
+    'rj45', 'lc', 'mpo', 'sfp-lc', 'sfp-dac', 'sfp-rj45',
     'qsfp-dac', 'qsfp-lc', 'qsfp-mpo', 'strain-relief', 'qsfp-pull-loop',
   ] as BootFamily[]) {
     const list = bootInstances[fam];
     if (!list.length) continue;
-    const geo = getBootGeometry(fam)!;
+    const geo = getBootGeometry(fam);
+    if (!geo) continue;
     const bootMat = track(mat('boot-instanced-' + fam, 0xffffff, { roughness: 0.45, metalness: 0.12 }));
     const im = new THREE.InstancedMesh(geo, bootMat, list.length);
     im.name = 'boot-instanced-' + fam;

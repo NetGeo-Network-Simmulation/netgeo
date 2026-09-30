@@ -331,6 +331,18 @@ export interface Cable {
   media: CableMedia;
   length_m: number;
   label: string;
+  /** Optional pluggable metadata at [link.a, link.b]. Missing values are
+   * deliberately generic; a device brand is not a transceiver vendor. */
+  transceivers?: [CableTransceiver | null, CableTransceiver | null];
+  cable_profile?: string | null;
+  stock_length_m?: number | null;
+}
+
+export interface CableTransceiver {
+  vendor?: string;
+  sku?: string;
+  connector?: 'generic' | 'rj45' | 'lc-duplex' | 'mpo';
+  head_family?: 'generic' | 'rj45' | 'lc' | 'mpo' | 'sfp-lc' | 'sfp-dac' | 'sfp-rj45' | 'qsfp-dac' | 'qsfp-lc' | 'qsfp-mpo';
 }
 
 export interface SiteCreate {
@@ -376,12 +388,18 @@ export interface CableCreate {
   media?: CableMedia;
   length_m?: number;
   label?: string;
+  transceivers?: [CableTransceiver | null, CableTransceiver | null];
+  cable_profile?: string | null;
+  stock_length_m?: number | null;
 }
 
 export interface CableUpdate {
   media?: CableMedia;
   length_m?: number;
   label?: string;
+  transceivers?: [CableTransceiver | null, CableTransceiver | null];
+  cable_profile?: string | null;
+  stock_length_m?: number | null;
 }
 
 /** Per-link physical verdict from GET /api/projects/{id}/plant (NG-PH-03). */

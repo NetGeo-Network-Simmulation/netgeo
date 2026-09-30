@@ -16,7 +16,7 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 beforeAll(() => loadBrandAssets([
   'chassis-mikrotik-ccr2004', 'chassis-mikrotik-crs317',
   'chassis-mikrotik-rb5009-k79', 'chassis-cisco-c9300-48p-nm8x',
-], nodeFetch));
+], nodeFetch, new Set(['chassis-mikrotik-rb5009-k79'])));
 
 function build(device: DeviceDef) {
   return buildScene({

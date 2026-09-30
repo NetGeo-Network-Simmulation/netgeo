@@ -34,7 +34,14 @@ describe('adaptTopology keeps links with only one endpoint in the shown racks', 
       id: 'l1', project_id: 'p1', a_iface: 'if-shown', b_iface: 'if-offsite',
       type: 'copper', bandwidth: 1000, delay: 0, loss: 0, mtu: 1500, status: 'up',
     };
-    const cable: Cable = { id: 'c1', project_id: 'p1', link_id: 'l1', media: 'cat6a', length_m: 1, label: '' };
+    const cable: Cable = {
+      id: 'c1', project_id: 'p1', link_id: 'l1', media: 'cat6a', length_m: 1, label: '',
+      transceivers: [
+        { vendor: 'Coherent', sku: 'FCLF8522P2BTL', connector: 'rj45', head_family: 'sfp-rj45' },
+        null,
+      ],
+      cable_profile: 'generic-sfp-dac', stock_length_m: 1,
+    };
     const topology: Topology = {
       nodes: [shown, offsite], links: [link], racks: [rack('r1'), rack('r2')], cables: [cable],
     };
@@ -45,6 +52,10 @@ describe('adaptTopology keeps links with only one endpoint in the shown racks', 
     // the off-scene endpoint keeps its node id — rack3d only ever reads a[0]/b[0]
     // to decide presence, never renders b's own ordinal
     expect(adapted.links[0]!.b[0]).toBe('n-offsite');
+    expect(adapted.links[0]!.endpoints?.[0]).toMatchObject({
+      vendor: 'Coherent', sku: 'FCLF8522P2BTL', headFamily: 'sfp-rj45',
+    });
+    expect(adapted.links[0]!.cable).toEqual({ profileKey: 'generic-sfp-dac', stockLengthM: 1 });
     expect(adapted.cableIds).toEqual(['c1']);
   });
 

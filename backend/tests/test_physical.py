@@ -142,6 +142,34 @@ async def test_cable_on_unknown_link_is_404(client):
     assert resp.status_code == 404
 
 
+async def test_cable_persists_transceiver_identity_and_keeps_legacy_fallback_generic(client):
+    pid, link_id = await _project_with_link(client)
+    legacy = await client.post(
+        "/api/cables",
+        json={"project_id": pid, "link_id": link_id, "media": "dac", "length_m": 1.0},
+    )
+    assert legacy.status_code == 201, legacy.text
+    assert legacy.json()["transceivers"] == [None, None]
+    assert legacy.json()["cable_profile"] is None
+    assert legacy.json()["stock_length_m"] is None
+
+    patched = await client.patch(
+        f"/api/cables/{legacy.json()['id']}",
+        json={
+            "transceivers": [
+                {"vendor": "FS", "sku": "Q28-PC05", "connector": "generic", "head_family": "qsfp-dac"},
+                {"vendor": "FS", "sku": "Q28-PC05", "connector": "generic", "head_family": "qsfp-dac"},
+            ],
+            "cable_profile": "fs-q28-pc05",
+            "stock_length_m": 5.0,
+        },
+    )
+    assert patched.status_code == 200, patched.text
+    assert patched.json()["cable_profile"] == "fs-q28-pc05"
+    assert patched.json()["stock_length_m"] == 5.0
+    assert patched.json()["transceivers"][0]["vendor"] == "FS"
+
+
 async def test_deleting_link_cascades_its_cables(client):
     pid, link_id = await _project_with_link(client)
     cable_id = (

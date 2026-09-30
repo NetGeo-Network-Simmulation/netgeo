@@ -10,7 +10,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { chassisFamilyForDeviceSlug, loadBootAssets, loadBrandAssets, getBootGeometry, getVisualChassis } from './bootAssets';
+import { chassisFamilyForDeviceSlug, loadAssetFamilies, loadBootAssets, loadBrandAssets, getBootGeometry, getVisualChassis } from './bootAssets';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
   const file = path.resolve(__dirname, '../../../public', url.replace(/^\//, ''));
@@ -19,6 +19,15 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 }
 
 describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
+  it('loads only explicitly requested scene families', async () => {
+    const requested: string[] = [];
+    await loadAssetFamilies(['rj45', 'cage-sfp'], async (url) => {
+      requested.push(url);
+      return nodeFetch(url);
+    });
+    expect(requested.sort()).toEqual(['/3d/boot-rj45.glb', '/3d/cage-sfp.glb']);
+  });
+
   it('loads the connector GLBs and their bounding boxes match the verified spec numbers', async () => {
     await loadBootAssets(nodeFetch);
 

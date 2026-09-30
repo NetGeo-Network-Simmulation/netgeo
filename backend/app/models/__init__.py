@@ -8,6 +8,7 @@ from app.models.schemas import (  # noqa: F401
     Cable,
     CableCreate,
     CableMedia,
+    CableTransceiver,
     CableUpdate,
     ConfigArtifact,
     ConfigFormat,
