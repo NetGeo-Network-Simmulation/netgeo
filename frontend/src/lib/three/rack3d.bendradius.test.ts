@@ -12,13 +12,13 @@
  */
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
-import { buildScene, disposeScene, MEDIA, type BuildOptions, type DeviceDef, type LinkDef } from './rack3d';
+import { buildScene, disposeScene, type BuildOptions, type DeviceDef, type LinkDef } from './rack3d';
 
 function dev(id: string, u: number, h: number, kind: DeviceDef['kind'], ports = 0, ptype: DeviceDef['ptype'] = undefined): DeviceDef {
   return { id, u, h, kind, brand: 'Test', model: 'TST-1', accent: 0x847e75, chassis: 0x1c1c1a, ports, ptype };
 }
-function link(a: [string, number], b: [string, number], m = 'cat6a', live = true): LinkDef {
-  return { a, b, m, live };
+function link(a: [string, number], b: [string, number], m = 'cat6a', live = true, extra: Partial<LinkDef> = {}): LinkDef {
+  return { a, b, m, live, ...extra };
 }
 
 /** Local radius of curvature at parameter t, via the Menger curvature of
@@ -35,7 +35,7 @@ function curvatureRadiusAt(curve: THREE.Curve<THREE.Vector3>, t: number, dt = 0.
 function assertBendRadius(built: ReturnType<typeof buildScene>, samplesPerCable = 60) {
   const violations: string[] = [];
   for (const cable of built.registry.cables) {
-    const minBend = MEDIA[cable.mediaKey]?.minBendM;
+    const minBend = cable.minBendM;
     if (!minBend) continue; // no verified number for this media — not asserted
     for (let i = 1; i < samplesPerCable; i++) {
       const t = i / samplesPerCable;
@@ -135,5 +135,42 @@ describe('minimum bend-radius invariant (NG-PH3D 3a)', () => {
     } finally {
       disposeScene(built);
     }
+  });
+
+  it('uses the selected PC01/PC05 bend and clearance for external, same-rack and cross-rack routes', () => {
+    const optic = (sku: string) => ({ vendor: 'FS', sku, headFamily: 'qsfp-dac' as const });
+    const opts: BuildOptions = {
+      racks: [
+        { key: 'A', enclosure: 'apc', devices: [
+          dev('a1', 2, 1, 'switch', 2, 'qsfp28'),
+          dev('a2', 18, 1, 'switch', 2, 'qsfp28'),
+        ] },
+        { key: 'B', enclosure: 'apc', devices: [dev('b1', 8, 1, 'switch', 2, 'qsfp28')] },
+      ],
+      links: [
+        link(['a1', 0], ['outside', 0], 'dac', true, {
+          endpoints: [optic('Q28-PC01'), undefined],
+          cable: { profileKey: 'fs-q28-pc01', stockLengthM: 1 },
+        }),
+        link(['a1', 1], ['a2', 0], 'dac', true, {
+          endpoints: [optic('Q28-PC01'), optic('Q28-PC01')],
+          cable: { profileKey: 'fs-q28-pc01', stockLengthM: 1 },
+        }),
+        link(['a2', 1], ['b1', 0], 'dac', true, {
+          endpoints: [optic('Q28-PC05'), optic('Q28-PC05')],
+          cable: { profileKey: 'fs-q28-pc05', stockLengthM: 5 },
+        }),
+      ],
+    };
+    const built = buildScene(opts);
+    try {
+      const dac = built.registry.cables.filter((c) => c.mediaKey === 'dac');
+      expect(dac.map((c) => c.profileKey)).toEqual([
+        'fs-q28-pc01', 'fs-q28-pc01', 'fs-q28-pc05',
+      ]);
+      expect(dac.map((c) => c.minBendM)).toEqual([0.033, 0.033, 0.042]);
+      expect(dac.map((c) => c.faceplateClearanceM)).toEqual([0.07245, 0.07245, 0.08325]);
+      assertBendRadius(built, 100);
+    } finally { disposeScene(built); }
   });
 });

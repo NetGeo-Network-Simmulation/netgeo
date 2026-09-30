@@ -34,7 +34,7 @@ import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { cn } from '@/lib/cn';
 import { autoName } from '@/lib/mapDeploy';
 import { nodeWatts, overLengthCables, unplacedNodes, wattsByIconMap, wattsToBtu } from '@/lib/plant';
-import { loadBootAssets, loadBrandAssets } from '@/lib/three/bootAssets';
+import { loadAssetFamilies, loadBrandAssets } from '@/lib/three/bootAssets';
 import { mountElevationM, structureSpecFor } from '@/lib/three/outdoorPlacement';
 import { RackDevicePicker } from './RackDevicePicker';
 import { UnrackedDevicesPanel } from './UnrackedDevicesPanel';
@@ -57,6 +57,7 @@ import {
   applyLabels,
   applyLod,
   applySelection,
+  assetFamiliesForScene,
   buildScene,
   devicePortWorld,
   disposeScene,
@@ -158,18 +159,9 @@ export function Rack3DElevationPanel() {
   // black canvas with no error (QA 2026-08-31's "blank frame", root-caused
   // and closed here — the POV lock alone did not fix it, this did).
   const [webglError, setWebglError] = useState(() => !webglAvailable());
-  // NG-PH3D 3a/3b: the Blender-authored boot/cage assets load once per app
-  // session (loadBootAssets() is idempotent/cached) and the scene rebuild
-  // effect below re-runs once they resolve, swapping the procedural
-  // rj45/lc/sfp/qsfp fallback shapes for the real geometry.
+  // Asset families load lazily for the current scene; toggling this state
+  // rebuilds once the requested connector/cage/chassis packages are cached.
   const [assetsLoaded, setAssetsLoaded] = useState(false);
-  useEffect(() => {
-    let live = true;
-    loadBootAssets()
-      .then(() => { if (live) setAssetsLoaded(true); })
-      .catch(() => {}); // offline/blocked fetch — stays on the procedural fallback
-    return () => { live = false; };
-  }, []);
 
   // Same query keys the old 2D panel used, kept on purpose: when this
   // panel mutates and invalidates ['topology', projectId] /
@@ -270,9 +262,14 @@ export function Rack3DElevationPanel() {
     if (!adapted) return;
     const families = adapted.racks.flatMap((rack) =>
       rack.devices.flatMap((device) => device.chassisAsset ? [device.chassisAsset] : []));
-    if (!families.length) return;
+    const rackmountAccessories = new Set(adapted.racks.flatMap((rack) =>
+      rack.devices.flatMap((device) => device.rackMounted && device.chassisAsset === 'chassis-mikrotik-rb5009-k79'
+        ? [device.chassisAsset] : [])));
     let live = true;
-    loadBrandAssets(families)
+    Promise.all([
+      loadAssetFamilies(assetFamiliesForScene(adapted)),
+      loadBrandAssets(families, undefined, rackmountAccessories),
+    ])
       .then(() => { if (live) setAssetsLoaded((loaded) => !loaded); })
       .catch(() => {});
     return () => { live = false; };

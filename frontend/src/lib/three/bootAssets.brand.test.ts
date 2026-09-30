@@ -19,6 +19,15 @@ describe('optional device brand assets', () => {
     await loadBrandAssets(['chassis-mikrotik-rb5009-k79'], nodeFetch);
     expect(fetched.filter((url) => url.includes('/brands/'))).toEqual([
       '/3d/brands/mikrotik/rb5009ug-s-in.glb',
+    ]);
+    const bodyOnly = getVisualChassis('chassis-mikrotik-rb5009-k79')!;
+    expect(new THREE.Box3().setFromObject(bodyOnly).getSize(new THREE.Vector3()).x).toBeCloseTo(0.220, 3);
+    await loadBrandAssets(
+      ['chassis-mikrotik-rb5009-k79'], nodeFetch,
+      new Set(['chassis-mikrotik-rb5009-k79']),
+    );
+    expect(fetched.filter((url) => url.includes('/brands/'))).toEqual([
+      '/3d/brands/mikrotik/rb5009ug-s-in.glb',
       '/3d/brands/mikrotik/k79-rackmount.glb',
     ]);
     const scene = getVisualChassis('chassis-mikrotik-rb5009-k79')!;

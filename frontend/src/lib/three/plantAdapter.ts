@@ -276,6 +276,16 @@ export function adaptTopology(
       b: [bNode.id, bOrd ?? 0],
       m: MEDIA_MAP[cable.media] ?? 'cat6a',
       live: !DEAD_LINK_STATUS.has(link.status ?? 'up'),
+      endpoints: cable.transceivers?.map((optic) => optic ? ({
+        vendor: optic.vendor || 'generic',
+        sku: optic.sku || 'generic',
+        connector: optic.connector ?? 'generic',
+        headFamily: optic.head_family ?? 'generic',
+      }) : undefined) as LinkDef['endpoints'],
+      cable: {
+        profileKey: cable.cable_profile ?? undefined,
+        stockLengthM: cable.stock_length_m ?? undefined,
+      },
     });
     cableIds.push(cable.id);
   }

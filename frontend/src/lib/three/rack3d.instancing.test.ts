@@ -10,7 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
-import { buildScene, disposeScene, resolveCableProfile, type BuildOptions, type DeviceDef, type LinkDef } from './rack3d';
+import { assetFamiliesForScene, buildScene, disposeScene, resolveCableProfile, type BuildOptions, type DeviceDef, type LinkDef } from './rack3d';
 import { loadBootAssets } from './bootAssets';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
@@ -22,8 +22,8 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 function dev(id: string, u: number, h: number, kind: DeviceDef['kind'], ports = 0, ptype: DeviceDef['ptype'] = undefined): DeviceDef {
   return { id, u, h, kind, brand: 'Test', model: 'TST-1', accent: 0x847e75, chassis: 0x1c1c1a, ports, ptype };
 }
-function link(a: [string, number], b: [string, number], m = 'cat6a', live = true): LinkDef {
-  return { a, b, m, live };
+function link(a: [string, number], b: [string, number], m = 'cat6a', live = true, extra: Partial<LinkDef> = {}): LinkDef {
+  return { a, b, m, live, ...extra };
 }
 
 function sceneOpts(): BuildOptions {
@@ -41,7 +41,9 @@ function sceneOpts(): BuildOptions {
       link(['a-patch', 0], ['a-sw1', 0], 'cat6a'),
       link(['a-patch', 1], ['a-sw1', 1], 'cat6a'),
       link(['a-sw1', 5], ['a-odf', 0], 'os2'),
-      link(['a-odf', 1], ['a-sw2', 0], 'om3'),
+      link(['a-odf', 1], ['a-sw2', 0], 'om3', true, {
+        endpoints: [undefined, { vendor: 'FS', sku: 'SFP-10G-SR', connector: 'lc-duplex', headFamily: 'sfp-lc' }],
+      }),
     ],
   };
 }
@@ -59,6 +61,13 @@ function countMeshes(root: THREE.Object3D) {
 }
 
 describe('rj45/lc boot instancing (NG-PH3D 3a)', () => {
+  it('requests only the connector/cage families present in the scene', () => {
+    const families = assetFamiliesForScene(sceneOpts());
+    expect(families).toEqual(new Set(['cage-sfp', 'rj45', 'lc', 'sfp-lc']));
+    expect(families.has('tower-monopole')).toBe(false);
+    expect(families.has('qsfp-dac')).toBe(false);
+  });
+
   it('falls back to procedural boots before assets load, then instances after', async () => {
     const before = buildScene(sceneOpts());
     const beforeCount = countMeshes(before.root);
@@ -94,7 +103,13 @@ describe('rj45/lc boot instancing (NG-PH3D 3a)', () => {
         dev('sfp', 1, 1, 'switch', 1, 'sfp28'),
         dev('qsfp', 3, 1, 'switch', 1, 'qsfp28'),
       ] }],
-      links: [link(['sfp', 0], ['qsfp', 0], 'dac')],
+      links: [link(['sfp', 0], ['qsfp', 0], 'dac', true, {
+        endpoints: [
+          { vendor: 'FS', sku: 'SFP-10G-AC01', headFamily: 'sfp-dac' },
+          { vendor: 'FS', sku: 'Q28-PC01', headFamily: 'qsfp-dac' },
+        ],
+        cable: { profileKey: 'fs-q28-pc01', stockLengthM: 1 },
+      })],
     });
     try {
       const sfp = built.root.getObjectByName('boot-instanced-sfp-dac') as THREE.InstancedMesh;
@@ -131,16 +146,20 @@ describe('rj45/lc boot instancing (NG-PH3D 3a)', () => {
   });
 
   it('keeps DAC/AOC stock profiles distinct and never maps MPO to LC', async () => {
-    expect(resolveCableProfile('dac', ['sfp28'], 1)).toMatchObject({
+    expect(resolveCableProfile('dac', { endpointTypes: ['qsfp28'] }, 0.8).key)
+      .toBe('generic-qsfp-dac-short');
+    expect(resolveCableProfile('dac', { endpointTypes: ['qsfp28'] }, 3).key)
+      .toBe('generic-qsfp-dac-long');
+    expect(resolveCableProfile('dac', { endpoints: [{ sku: 'SFP-10G-AC01' }] }, 1)).toMatchObject({
       key: 'fs-sfp10-ac01', radiusM: 0.003, minBendM: 0.03,
     });
-    expect(resolveCableProfile('dac', ['qsfp28'], 1)).toMatchObject({
+    expect(resolveCableProfile('dac', { endpoints: [{ sku: 'Q28-PC01', headFamily: 'qsfp-dac' }] }, 1)).toMatchObject({
       key: 'fs-q28-pc01', radiusM: 0.0033, minBendM: 0.033, faceplateClearanceM: 0.07245,
     });
-    expect(resolveCableProfile('dac', ['qsfp28'], 5)).toMatchObject({
+    expect(resolveCableProfile('dac', { endpoints: [{ sku: 'Q28-PC05', headFamily: 'qsfp-dac' }] }, 5)).toMatchObject({
       key: 'fs-q28-pc05', radiusM: 0.0042, minBendM: 0.042, faceplateClearanceM: 0.08325,
     });
-    expect(resolveCableProfile('aoc', ['qsfp28'], 5)).toMatchObject({
+    expect(resolveCableProfile('aoc', { cable: { profileKey: 'cisco-qsfp100-aoc' } }, 5)).toMatchObject({
       key: 'cisco-qsfp100-aoc', radiusM: 0.00175, minBendM: 0.03,
     });
 
@@ -153,9 +172,18 @@ describe('rj45/lc boot instancing (NG-PH3D 3a)', () => {
         dev('copper', 9, 1, 'switch', 1, 'rj45'),
       ] }],
       links: [
-        link(['q1', 0], ['q2', 0], 'mpo'),
-        link(['q2', 0], ['odf', 0], 'os2'),
-        link(['sfp', 0], ['copper', 0], 'cat6a'),
+        link(['q1', 0], ['q2', 0], 'mpo', true, {
+          endpoints: [
+            { vendor: 'FS', sku: 'QSFP28-SR4-100G', connector: 'mpo', headFamily: 'qsfp-mpo' },
+            { vendor: 'FS', sku: 'QSFP28-SR4-100G', connector: 'mpo', headFamily: 'qsfp-mpo' },
+          ],
+        }),
+        link(['q2', 0], ['odf', 0], 'os2', true, {
+          endpoints: [{ vendor: 'FS', sku: 'QSFP-100G-LR4', connector: 'lc-duplex', headFamily: 'qsfp-lc' }, undefined],
+        }),
+        link(['sfp', 0], ['copper', 0], 'cat6a', true, {
+          endpoints: [{ vendor: 'Coherent', sku: 'FCLF8522P2BTL', connector: 'rj45', headFamily: 'sfp-rj45' }, undefined],
+        }),
       ],
     });
     try {
@@ -172,7 +200,13 @@ describe('rj45/lc boot instancing (NG-PH3D 3a)', () => {
     const fs = { ...dev('fs', 3, 1, 'switch', 1, 'qsfp28'), brand: 'FS' };
     const built = buildScene({
       racks: [{ key: 'A', enclosure: 'apc', devices: [cisco, fs] }],
-      links: [link(['cisco', 0], ['fs', 0], 'dac')],
+      links: [link(['cisco', 0], ['fs', 0], 'dac', true, {
+        endpoints: [
+          { vendor: 'Cisco', sku: 'QSFP-H40G-CU1M', headFamily: 'qsfp-dac' },
+          { vendor: 'FS', sku: 'Q28-PC01', headFamily: 'qsfp-dac' },
+        ],
+        cable: { profileKey: 'fs-q28-pc01', stockLengthM: 1 },
+      })],
     });
     try {
       const heads = built.root.getObjectByName('boot-instanced-qsfp-dac') as THREE.InstancedMesh;
@@ -180,6 +214,28 @@ describe('rj45/lc boot instancing (NG-PH3D 3a)', () => {
       const a = new THREE.Color(); const b = new THREE.Color();
       heads.getColorAt(0, a); heads.getColorAt(1, b);
       expect(a.getHex()).not.toBe(b.getHex());
+    } finally { disposeScene(built); }
+  });
+
+  it('keeps legacy optics generic instead of inferring module vendor/family from the device', async () => {
+    const built = buildScene({
+      racks: [{ key: 'A', enclosure: 'apc', devices: [
+        { ...dev('cisco', 1, 1, 'switch', 1, 'qsfp28'), brand: 'Cisco' },
+        { ...dev('fs', 3, 1, 'switch', 1, 'qsfp28'), brand: 'FS' },
+        dev('odf', 5, 1, 'odf', 1, 'mpo'),
+      ] }],
+      links: [
+        link(['cisco', 0], ['fs', 0], 'om4'),
+        link(['fs', 0], ['odf', 0], 'mpo'),
+      ],
+    });
+    try {
+      expect(built.root.getObjectByName('boot-instanced-qsfp-lc')).toBeUndefined();
+      expect(built.root.getObjectByName('boot-instanced-qsfp-mpo')).toBeUndefined();
+      expect((built.root.getObjectByName('boot-instanced-lc') as THREE.InstancedMesh).count).toBe(2);
+      const genericMpo: THREE.Object3D[] = [];
+      built.root.traverse((o) => { if (o.name === 'mpo-connector-generic') genericMpo.push(o); });
+      expect(genericMpo).toHaveLength(2);
     } finally { disposeScene(built); }
   });
 });

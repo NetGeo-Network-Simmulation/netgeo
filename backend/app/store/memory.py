@@ -502,8 +502,11 @@ class MemoryRepository:
             cable = self._cables.get(cid)
             if cable is None:
                 raise NotFound(cid)
-            updated = cable.model_copy(
-                update={k: v for k, v in patch.items() if v is not None}
+            # Re-validate nested transceiver metadata; model_copy(update=...)
+            # deliberately skips Pydantic validation and would persist raw
+            # dicts instead of CableTransceiver values.
+            updated = Cable.model_validate(
+                {**cable.model_dump(), **{k: v for k, v in patch.items() if v is not None}}
             )
             self._cables[cid] = updated
             self._save()

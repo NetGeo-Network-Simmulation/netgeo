@@ -420,6 +420,16 @@ class Rack(_Base):
     enclosure_profile: RackEnclosureProfile | None = None
 
 
+class CableTransceiver(_Base):
+    vendor: str = "generic"
+    sku: str = "generic"
+    connector: Literal["generic", "rj45", "lc-duplex", "mpo"] = "generic"
+    head_family: Literal[
+        "generic", "rj45", "lc", "mpo", "sfp-lc", "sfp-dac", "sfp-rj45",
+        "qsfp-dac", "qsfp-lc", "qsfp-mpo",
+    ] = "generic"
+
+
 class Cable(_Base):
     """A physical run realizing a logical link (NG-PH-02). ``length_m`` feeds
     propagation delay; exceeding the media's max length degrades the link
@@ -431,6 +441,12 @@ class Cable(_Base):
     media: CableMedia = CableMedia.cat6
     length_m: float = 1.0
     label: str = ""
+    # Optional pluggable optics at the two link endpoints.  Old projects have
+    # no such data and intentionally deserialize to two unknown/generic ends;
+    # device manufacturer is never used as a transceiver-vendor proxy.
+    transceivers: tuple[CableTransceiver | None, CableTransceiver | None] = (None, None)
+    cable_profile: str | None = None
+    stock_length_m: float | None = Field(None, gt=0)
 
 
 class SiteCreate(_Base):
@@ -478,12 +494,18 @@ class CableCreate(_Base):
     media: CableMedia = CableMedia.cat6
     length_m: float = 1.0
     label: str = ""
+    transceivers: tuple[CableTransceiver | None, CableTransceiver | None] = (None, None)
+    cable_profile: str | None = None
+    stock_length_m: float | None = Field(None, gt=0)
 
 
 class CableUpdate(_Base):
     media: CableMedia | None = None
     length_m: float | None = None
     label: str | None = None
+    transceivers: tuple[CableTransceiver | None, CableTransceiver | None] | None = None
+    cable_profile: str | None = None
+    stock_length_m: float | None = Field(None, gt=0)
 
 
 class Topology(_Base):
