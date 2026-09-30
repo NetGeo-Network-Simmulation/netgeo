@@ -166,7 +166,9 @@ Profil #2 tetap dinonaktifkan sampai integrasi Google Maps dan pengelolaan API k
 menjalankan backend bundled, gunakan `netgeo --engine-origin https://host:port` atau
 `NETGEO_ENGINE_ORIGIN=https://host:port netgeo`. Launcher memverifikasi `/api/health`, menyajikan
 frontend lokal saja, lalu memasangkan REST dan WebSocket ke origin remote yang sama. Headless-local
-dapat mengunci endpoint dengan `--engine-host` dan `--engine-port` (atau env sepadan).
+dapat mengunci endpoint dengan `--engine-host` dan `--engine-port` (atau env sepadan). Pergantian
+dari Settings pada window native menyiapkan runtime baru sampai siap, menyimpan profil, lalu
+mematikan runtime lama secara graceful; kegagalan mempertahankan runtime yang sedang aktif.
 
 ### Region peta offline
 

@@ -23,6 +23,7 @@ import signal
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -30,7 +31,7 @@ from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 FROZEN = getattr(sys, "frozen", False)
 if FROZEN:
@@ -96,11 +97,18 @@ def _bundled_backend():
     return uvicorn, app
 
 
+_FRONTEND_MOUNTED = False
+
+
 def _mount_frontend(app) -> None:
+    global _FRONTEND_MOUNTED
+    if _FRONTEND_MOUNTED:
+        return
     from fastapi.staticfiles import StaticFiles
 
     if FRONTEND_DIST.is_dir():
         app.mount("/", StaticFiles(directory=str(FRONTEND_DIST), html=True), name="frontend")
+        _FRONTEND_MOUNTED = True
     else:
         print(
             f"[netgeo-launcher] WARNING: {FRONTEND_DIST} not found — "
@@ -158,14 +166,27 @@ def _origin(host: str, port: int) -> str:
     return f"http://{url_host}:{port}"
 
 
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
 def _check_remote_health(origin: str, timeout: float = 5.0) -> str:
     """Fail closed when a configured remote is not a healthy NetGeo engine."""
-    request = Request(f"{origin}/api/health", headers={"Accept": "application/json"})
+    health_url = f"{origin}/api/health"
+    request = Request(health_url, headers={"Accept": "application/json"})
     try:
-        with urlopen(request, timeout=timeout) as response:
+        with build_opener(_NoRedirect()).open(request, timeout=timeout) as response:
+            final_origin = _normalize_engine_origin(response.geturl())
+            if response.geturl() != health_url or final_origin != origin:
+                raise SystemExit(
+                    "[netgeo-launcher] remote health check changed URL/origin; redirects are not allowed"
+                )
             payload = json.load(response)
     except HTTPError as exc:
-        if exc.code in {401, 403}:
+        if 300 <= exc.code < 400:
+            detail = "health check redirected; redirects are not allowed"
+        elif exc.code in {401, 403}:
             detail = "server denied the health check; verify authentication or proxy policy"
         else:
             detail = f"health check returned HTTP {exc.code}"
@@ -191,6 +212,57 @@ class _FrontendOnlyHandler(SimpleHTTPRequestHandler):
         return
 
 
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, prefix=f".{path.name}.", delete=False
+    ) as handle:
+        json.dump(payload, handle)
+        handle.flush()
+        os.fsync(handle.fileno())
+        temporary = Path(handle.name)
+    os.replace(temporary, path)
+
+
+def _runtime_config_path() -> Path:
+    override = os.environ.get("NETGEO_RUNTIME_CONFIG")
+    if override:
+        return Path(override)
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    return config_home / "netgeo" / "runtime.json"
+
+
+def _load_runtime_profile(args: list[str]) -> dict:
+    remote_value = _option_value(args, "--engine-origin", "NETGEO_ENGINE_ORIGIN")
+    local_override = (
+        any(option in args for option in ("--engine-host", "--engine-port"))
+        or any(os.environ.get(name) for name in ("NETGEO_ENGINE_HOST", "NETGEO_ENGINE_PORT"))
+        or _no_window_reason(args) is not None
+        or os.environ.get("NETGEO_NO_BROWSER") == "1"
+    )
+    if remote_value:
+        return {"mode": "native-remote", "engineOrigin": _normalize_engine_origin(remote_value)}
+    if local_override:
+        return {"mode": "native-offline", "engineOrigin": ""}
+    try:
+        stored = json.loads(_runtime_config_path().read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {"mode": "native-offline", "engineOrigin": ""}
+    if isinstance(stored, dict) and stored.get("mode") == "native-remote":
+        try:
+            return {
+                "mode": "native-remote",
+                "engineOrigin": _normalize_engine_origin(str(stored.get("engineOrigin", ""))),
+            }
+        except SystemExit:
+            pass
+    return {"mode": "native-offline", "engineOrigin": ""}
+
+
+def _save_runtime_profile(profile: dict) -> None:
+    _write_json_atomic(_runtime_config_path(), profile)
+
+
 def _start_remote_frontend(
     engine_origin: str,
 ) -> tuple[str, ThreadingHTTPServer, threading.Thread]:
@@ -204,8 +276,46 @@ def _start_remote_frontend(
     server = ThreadingHTTPServer(("127.0.0.1", port), handler)
     server_thread = threading.Thread(target=server.serve_forever, daemon=True)
     server_thread.start()
+    if not _wait_until_ready(port, server_thread):
+        server.shutdown()
+        server.server_close()
+        server_thread.join(timeout=2)
+        raise RuntimeError("Remote frontend server failed readiness check.")
     query = urlencode({"netgeoRuntime": "native-remote", "netgeoEngine": engine_origin})
     return f"http://127.0.0.1:{port}/?{query}", server, server_thread
+
+
+def _stop_static_server(server: ThreadingHTTPServer, thread: threading.Thread) -> None:
+    server.shutdown()
+    server.server_close()
+    thread.join(timeout=5)
+    if thread.is_alive():
+        raise RuntimeError("Remote frontend server did not stop cleanly.")
+
+
+def _start_local_backend(host: str, port: int, mode: str) -> tuple[str, object, threading.Thread]:
+    uvicorn, app = _bundled_backend()
+    _mount_frontend(app)
+    config = uvicorn.Config(app, host=host, port=port, log_level="info")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    if not _wait_until_ready(port, thread, host=host):
+        _stop_uvicorn(server, thread)
+        raise RuntimeError(f"Local engine failed readiness check on {_origin(host, port)}")
+    engine_origin = _origin(host, port)
+    query = urlencode({"netgeoRuntime": mode, "netgeoEngine": engine_origin})
+    return f"{engine_origin}/?{query}", server, thread
+
+
+def _stop_uvicorn(server, thread: threading.Thread) -> None:
+    server.should_exit = True
+    thread.join(timeout=10)
+    if thread.is_alive():
+        server.force_exit = True
+        thread.join(timeout=2)
+    if thread.is_alive():
+        raise RuntimeError("Local engine did not stop cleanly.")
 
 
 def _dri_driver_path() -> str | None:
@@ -474,8 +584,9 @@ class _WindowBridge:
     wrong at the Python level.
     """
 
-    def __init__(self) -> None:
+    def __init__(self, control_path: Path | None = None) -> None:
         self._window = None  # bound to the webview.Window via bind() once created
+        self._control_path = control_path
 
     def bind(self, window: object) -> None:
         self._window = window
@@ -538,6 +649,26 @@ class _WindowBridge:
 
     def close(self) -> None:
         self._run_on_gui_thread(lambda: self._window.destroy())
+
+    def switch_runtime_profile(self, mode: str, engine_origin: str = "") -> dict:
+        """Validate a native runtime transition, then hand it to the parent launcher."""
+        if self._control_path is None:
+            raise RuntimeError("Runtime switching is unavailable outside the managed native launcher.")
+        if mode in {"native-remote", "full-online"}:
+            try:
+                origin = _normalize_engine_origin(engine_origin)
+                version = _check_remote_health(origin)
+            except SystemExit as exc:
+                raise RuntimeError(str(exc)) from exc
+            command = {"mode": "native-remote", "engineOrigin": origin}
+        elif mode in {"native-offline", "native-google"}:
+            version = "local"
+            command = {"mode": "native-offline", "engineOrigin": ""}
+        else:
+            raise RuntimeError(f"Unsupported native runtime mode: {mode}")
+        _write_json_atomic(self._control_path, command)
+        self._run_on_gui_thread(lambda: self._window.destroy())
+        return {"restarting": True, "version": version}
 
     def toggle_maximize(self) -> None:
         def _do() -> None:
@@ -728,7 +859,7 @@ def _button_layout() -> dict:
     return default
 
 
-def _try_webview(url: str) -> bool:
+def _try_webview(url: str, control_path: Path | None = None) -> bool:
     """Open `url` in a native window (pywebview/WebKitGTK). Blocks on this
     (main) thread until the window closes; returns True if it ran that way.
     Returns False, without blocking, if pywebview or its native backend
@@ -821,7 +952,7 @@ def _try_webview(url: str) -> bool:
         pass  # ponytail: cosmetic only (taskbar grouping) — never fatal
 
     icon_path = ICONS_DIR / "netgeo-256.png"
-    bridge = _WindowBridge()
+    bridge = _WindowBridge(control_path)
     window = webview.create_window(
         "NetGeo",
         url,
@@ -922,7 +1053,7 @@ def _relaunch_argv() -> list[str]:
     return [sys.executable, str(Path(__file__).resolve())]
 
 
-def _run_webview_in_subprocess(url: str) -> bool:
+def _run_webview_in_subprocess(url: str, control_path: Path | None = None) -> bool:
     """Try the native window in a child process, not this one.
 
     Qt can die with SIGABRT when it can't build a usable GL/EGL/GLX/Vulkan
@@ -933,8 +1064,11 @@ def _run_webview_in_subprocess(url: str) -> bool:
     child dies; this (parent) process — and the uvicorn thread it's about
     to start — is untouched and can fall back to the browser normally.
     """
+    child_args = ["--window-child", url]
+    if control_path is not None:
+        child_args.extend(["--control-file", str(control_path)])
     try:
-        result = subprocess.run(_relaunch_argv() + ["--window-child", url])
+        result = subprocess.run(_relaunch_argv() + child_args)
     except OSError as exc:
         print(_webview_unavailable(exc), file=sys.stderr)
         return False
@@ -947,6 +1081,29 @@ def _run_webview_in_subprocess(url: str) -> bool:
         reason = f"jendela asli keluar dengan kode {result.returncode}"
     print(_webview_unavailable(RuntimeError(reason)), file=sys.stderr)
     return False
+
+
+def _run_native_session(url: str) -> tuple[bool, dict | None]:
+    """Run one native window and return an optional validated switch request."""
+    with tempfile.TemporaryDirectory(prefix="netgeo-runtime-") as directory:
+        control_path = Path(directory) / "switch.json"
+        opened = _run_webview_in_subprocess(url, control_path)
+        if not control_path.is_file():
+            return opened, None
+        try:
+            command = json.loads(control_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise RuntimeError(f"Invalid native runtime control message: {exc}") from exc
+        return opened, command if isinstance(command, dict) else None
+
+
+def _validated_switch_command(command: dict) -> dict:
+    mode = command.get("mode")
+    if mode == "native-offline":
+        return {"mode": mode, "engineOrigin": ""}
+    if mode == "native-remote":
+        return {"mode": mode, "engineOrigin": _normalize_engine_origin(str(command.get("engineOrigin", "")))}
+    raise RuntimeError(f"Unsupported runtime switch mode: {mode}")
 
 
 def _no_window_reason(args: list[str]) -> str | None:
@@ -996,6 +1153,31 @@ def _print_help() -> None:
     print("  NETGEO_GL=hw|sw|auto  force/auto-probe hardware GL for WebGL (default: auto)")
 
 
+def _start_runtime(profile: dict, args: list[str], headless_ui: bool = False):
+    if profile.get("mode") == "native-remote":
+        engine_origin = _normalize_engine_origin(str(profile.get("engineOrigin", "")))
+        version = _check_remote_health(engine_origin)
+        url, server, thread = _start_remote_frontend(engine_origin)
+        print(
+            f"[netgeo-launcher] remote engine {engine_origin} ({version}); "
+            f"frontend-only UI on {urlsplit(url).scheme}://{urlsplit(url).netloc}"
+        )
+        return url, "static", server, thread
+    host, port = _local_bind(args)
+    launch_mode = "headless" if headless_ui else "native-offline"
+    url, server, thread = _start_local_backend(host, port, launch_mode)
+    print(f"[netgeo-launcher] serving on {_origin(host, port)}")
+    return url, "uvicorn", server, thread
+
+
+def _stop_runtime(runtime) -> None:
+    _url, kind, server, thread = runtime
+    if kind == "uvicorn":
+        _stop_uvicorn(server, thread)
+    else:
+        _stop_static_server(server, thread)
+
+
 def main() -> None:
     # ponytail: handled before touching the server/frontend at all — a user
     # running `netgeo --version` should get an instant answer, not a bound
@@ -1013,62 +1195,54 @@ def main() -> None:
         # Isolated here (before mounting/serving anything) so this process
         # does nothing but try the window and report success via exit code.
         url = args[args.index("--window-child") + 1]
-        sys.exit(0 if _try_webview(url) else 1)
+        control_path = None
+        if "--control-file" in args:
+            control_path = Path(args[args.index("--control-file") + 1])
+        sys.exit(0 if _try_webview(url, control_path) else 1)
 
-    remote_value = _option_value(args, "--engine-origin", "NETGEO_ENGINE_ORIGIN")
-    frontend_server: ThreadingHTTPServer | None = None
-    if remote_value:
-        engine_origin = _normalize_engine_origin(remote_value)
-        version = _check_remote_health(engine_origin)
-        if os.environ.get("NETGEO_NO_BROWSER") == "1":
-            print(f"[netgeo-launcher] remote engine healthy ({version}) at {engine_origin}")
-            return
-        url, frontend_server, server_thread = _start_remote_frontend(engine_origin)
-        port = urlsplit(url).port or 0
-        print(
-            f"[netgeo-launcher] remote engine {engine_origin} ({version}); "
-            f"frontend-only UI on {urlsplit(url).scheme}://{urlsplit(url).netloc}"
-        )
-    else:
-        uvicorn, app = _bundled_backend()
-        _mount_frontend(app)
-        host, port = _local_bind(args)
-        engine_origin = _origin(host, port)
-        launch_mode = "headless" if _no_window_reason(args) else "native-offline"
-        query = urlencode({"netgeoRuntime": launch_mode, "netgeoEngine": engine_origin})
-        url = f"{engine_origin}/?{query}"
-        print(f"[netgeo-launcher] serving on {engine_origin}")
-
-        # ponytail: NETGEO_NO_BROWSER skips opening any window/browser for
-        # headless/CI/test runs — unchanged behavior from before pywebview.
-        if os.environ.get("NETGEO_NO_BROWSER") == "1":
-            uvicorn.run(app, host=host, port=port, log_level="info")
-            return
-
-        server_thread = threading.Thread(
-            target=uvicorn.run,
-            kwargs={"app": app, "host": host, "port": port, "log_level": "info"},
-            daemon=True,
-        )
-        server_thread.start()
-        _wait_until_ready(port, server_thread, host=host)  # poll instead of a blind sleep
-
+    profile = _load_runtime_profile(args)
+    if os.environ.get("NETGEO_NO_BROWSER") == "1" and profile["mode"] == "native-remote":
+        version = _check_remote_health(profile["engineOrigin"])
+        print(f"[netgeo-launcher] remote engine healthy ({version}) at {profile['engineOrigin']}")
+        return
     reason = _no_window_reason(args)
-    if reason:
-        print(f"[netgeo-launcher] headless: native window skipped by request ({reason}) — opening system browser.")
-        opened_native = False
-    else:
-        opened_native = _run_webview_in_subprocess(url)  # isolates a Qt SIGABRT away from this process
+    runtime = _start_runtime(profile, args, headless_ui=bool(reason))
+    try:
+        if os.environ.get("NETGEO_NO_BROWSER") == "1":
+            runtime[3].join()
+            return
+        if reason:
+            print(
+                f"[netgeo-launcher] headless: native window skipped by request ({reason}) — "
+                "opening system browser."
+            )
+            webbrowser.open(runtime[0])
+            runtime[3].join()
+            return
 
-    if not opened_native:
-        webbrowser.open(url)
-        # webview.start() blocks until the window closes; the browser
-        # fallback has no such signal, so just keep the process (and its
-        # background uvicorn thread) alive the same way uvicorn.run() used to.
-        server_thread.join()
-    elif frontend_server is not None:
-        frontend_server.shutdown()
-        frontend_server.server_close()
+        while True:
+            opened_native, command = _run_native_session(runtime[0])
+            if not opened_native:
+                webbrowser.open(runtime[0])
+                runtime[3].join()
+                return
+            if command is None:
+                return
+            next_runtime = None
+            try:
+                command = _validated_switch_command(command)
+                next_runtime = _start_runtime(command, args)
+                _save_runtime_profile(command)
+            except (OSError, RuntimeError, SystemExit) as exc:
+                if next_runtime is not None:
+                    _stop_runtime(next_runtime)
+                print(f"[netgeo-launcher] runtime switch failed; keeping current engine: {exc}", file=sys.stderr)
+                continue
+            previous_runtime = runtime
+            runtime = next_runtime
+            _stop_runtime(previous_runtime)
+    finally:
+        _stop_runtime(runtime)
 
 
 if __name__ == "__main__":

@@ -137,6 +137,11 @@ export async function applyRuntimeProfile(profile: RuntimeProfile, reload: () =>
       ? normalizeLocalOrigin(profile.localOrigin)
       : null;
   if (endpoint) await checkRemoteEngine(endpoint);
+  const nativeApi = typeof window !== 'undefined' ? window.pywebview?.api : undefined;
+  if (nativeApi?.switch_runtime_profile) {
+    await nativeApi.switch_runtime_profile(profile.mode, endpoint ?? '');
+    return;
+  }
   saveRuntimeProfile(profile);
   reload();
 }

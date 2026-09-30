@@ -8,10 +8,13 @@ so this never needs real WebKitGTK installed in CI.
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import socket
 import sys
+import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from urllib.request import urlopen
@@ -164,7 +167,9 @@ def test_remote_mode_never_mounts_or_runs_bundled_backend(monkeypatch):
             self.close_called = True
 
     fake_server = FakeServer()
-    fake_thread = type("T", (), {"join": lambda self: None})()
+    fake_thread = type(
+        "T", (), {"join": lambda self, timeout=None: None, "is_alive": lambda self: False}
+    )()
     opened = []
     monkeypatch.setattr(sys, "argv", ["netgeo", "--engine-origin", "https://engine.test:9443/path"])
     monkeypatch.delenv("NETGEO_NO_BROWSER", raising=False)
@@ -180,7 +185,7 @@ def test_remote_mode_never_mounts_or_runs_bundled_backend(monkeypatch):
     )
     monkeypatch.setattr(launcher, "_bundled_backend", lambda: pytest.fail("remote mode imported bundled backend"))
     monkeypatch.setattr(launcher, "_mount_frontend", lambda _app: pytest.fail("remote mode mounted FastAPI frontend"))
-    monkeypatch.setattr(launcher, "_run_webview_in_subprocess", lambda url: opened.append(url) or True)
+    monkeypatch.setattr(launcher, "_run_native_session", lambda url: (opened.append(url) or True, None))
 
     launcher.main()
 
@@ -204,6 +209,10 @@ def test_remote_health_failure_is_honest_and_does_not_start_ui(monkeypatch):
 
 def test_headless_local_runs_backend_on_the_same_validated_origin(monkeypatch):
     calls = []
+    fake_thread = type(
+        "T", (), {"join": lambda self, timeout=None: None, "is_alive": lambda self: False}
+    )()
+    runtime = ("http://127.0.0.1:8125", "uvicorn", object(), fake_thread)
     monkeypatch.setattr(
         sys,
         "argv",
@@ -211,15 +220,18 @@ def test_headless_local_runs_backend_on_the_same_validated_origin(monkeypatch):
     )
     monkeypatch.delenv("NETGEO_ENGINE_ORIGIN", raising=False)
     monkeypatch.setenv("NETGEO_NO_BROWSER", "1")
-    fake_uvicorn = type(
-        "Uvicorn", (), {"run": staticmethod(lambda _app, **kwargs: calls.append(kwargs))}
-    )()
-    monkeypatch.setattr(launcher, "_bundled_backend", lambda: (fake_uvicorn, object()))
-    monkeypatch.setattr(launcher, "_mount_frontend", lambda _app: None)
+    monkeypatch.setattr(
+        launcher,
+        "_start_runtime",
+        lambda profile, args, headless_ui=False: calls.append((profile, args, headless_ui)) or runtime,
+    )
+    monkeypatch.setattr(launcher, "_stop_runtime", lambda stopped: calls.append(("stopped", stopped)))
 
     launcher.main()
 
-    assert calls == [{"host": "127.0.0.1", "port": 8125, "log_level": "info"}]
+    assert calls[0][0] == {"mode": "native-offline", "engineOrigin": ""}
+    assert calls[0][2] is False
+    assert calls[1] == ("stopped", runtime)
 
 
 def test_remote_frontend_server_is_static_only_and_bootstraps_one_engine(monkeypatch, tmp_path):
@@ -236,6 +248,242 @@ def test_remote_frontend_server_is_static_only_and_bootstraps_one_engine(monkeyp
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+
+
+@pytest.mark.parametrize(
+    ("initial", "requested"),
+    [
+        (
+            {"mode": "native-offline", "engineOrigin": ""},
+            {"mode": "native-remote", "engineOrigin": "https://engine.test:9443"},
+        ),
+        (
+            {"mode": "native-remote", "engineOrigin": "https://engine.test:9443"},
+            {"mode": "native-offline", "engineOrigin": ""},
+        ),
+    ],
+)
+def test_native_ui_switch_starts_new_runtime_before_stopping_old(monkeypatch, initial, requested):
+    events = []
+    runtimes = iter(
+        [
+            ("http://old", "uvicorn", object(), object()),
+            ("http://new", "static", object(), object()),
+        ]
+    )
+    windows = iter([(True, requested), (True, None)])
+    monkeypatch.setattr(sys, "argv", ["netgeo"])
+    for name in ("NETGEO_NO_BROWSER", "NETGEO_NO_WINDOW"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(launcher, "_load_runtime_profile", lambda _args: initial)
+    monkeypatch.setattr(
+        launcher,
+        "_start_runtime",
+        lambda profile, _args, headless_ui=False: events.append(("start", profile.copy())) or next(runtimes),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_run_native_session",
+        lambda url: events.append(("window", url)) or next(windows),
+    )
+    monkeypatch.setattr(launcher, "_save_runtime_profile", lambda profile: events.append(("save", profile.copy())))
+    monkeypatch.setattr(launcher, "_stop_runtime", lambda runtime: events.append(("stop", runtime[0])))
+
+    launcher.main()
+
+    assert events[:5] == [
+        ("start", initial),
+        ("window", "http://old"),
+        ("start", requested),
+        ("save", requested),
+        ("stop", "http://old"),
+    ]
+    assert events[-2:] == [("window", "http://new"), ("stop", "http://new")]
+
+
+def test_failed_native_switch_stops_candidate_and_keeps_current_runtime(monkeypatch):
+    events = []
+    old_runtime = ("http://old", "uvicorn", object(), object())
+    candidate = ("http://candidate", "static", object(), object())
+    runtimes = iter([old_runtime, candidate])
+    windows = iter(
+        [
+            (True, {"mode": "native-remote", "engineOrigin": "https://engine.test"}),
+            (True, None),
+        ]
+    )
+    monkeypatch.setattr(sys, "argv", ["netgeo"])
+    for name in ("NETGEO_NO_BROWSER", "NETGEO_NO_WINDOW"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(
+        launcher, "_load_runtime_profile", lambda _args: {"mode": "native-offline", "engineOrigin": ""}
+    )
+    monkeypatch.setattr(launcher, "_start_runtime", lambda *_args, **_kwargs: next(runtimes))
+    monkeypatch.setattr(
+        launcher,
+        "_run_native_session",
+        lambda url: events.append(("window", url)) or next(windows),
+    )
+    monkeypatch.setattr(
+        launcher,
+        "_save_runtime_profile",
+        lambda _profile: (_ for _ in ()).throw(OSError("config read-only")),
+    )
+    monkeypatch.setattr(launcher, "_stop_runtime", lambda runtime: events.append(("stop", runtime[0])))
+
+    launcher.main()
+
+    assert events == [
+        ("window", "http://old"),
+        ("stop", "http://candidate"),
+        ("window", "http://old"),
+        ("stop", "http://old"),
+    ]
+
+
+def test_local_readiness_failure_requests_graceful_exit(monkeypatch):
+    class FakeConfig:
+        def __init__(self, app, **kwargs):
+            self.app = app
+            self.kwargs = kwargs
+
+    class FakeServer:
+        latest = None
+
+        def __init__(self, config):
+            self.config = config
+            self.should_exit = False
+            FakeServer.latest = self
+
+        def run(self):
+            return None
+
+    fake_uvicorn = type("Uvicorn", (), {"Config": FakeConfig, "Server": FakeServer})
+    monkeypatch.setattr(launcher, "_bundled_backend", lambda: (fake_uvicorn, object()))
+    monkeypatch.setattr(launcher, "_mount_frontend", lambda _app: None)
+    monkeypatch.setattr(launcher, "_wait_until_ready", lambda *args, **kwargs: False)
+
+    with pytest.raises(RuntimeError, match="failed readiness"):
+        launcher._start_local_backend("127.0.0.1", 8126, "native-offline")
+    assert FakeServer.latest.should_exit is True
+
+
+def test_static_readiness_failure_closes_and_joins_server(monkeypatch, tmp_path):
+    events = []
+
+    class FakeServer:
+        def __init__(self, *_args):
+            pass
+
+        def serve_forever(self):
+            return None
+
+        def shutdown(self):
+            events.append("shutdown")
+
+        def server_close(self):
+            events.append("close")
+
+    class FakeThread:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            events.append("start")
+
+        def join(self, timeout=None):
+            events.append(("join", timeout))
+
+        def is_alive(self):
+            return False
+
+    (tmp_path / "index.html").write_text("ok", encoding="utf-8")
+    monkeypatch.setattr(launcher, "FRONTEND_DIST", tmp_path)
+    monkeypatch.setattr(launcher, "ThreadingHTTPServer", FakeServer)
+    monkeypatch.setattr(launcher.threading, "Thread", FakeThread)
+    monkeypatch.setattr(launcher, "_wait_until_ready", lambda *args, **kwargs: False)
+    with pytest.raises(RuntimeError, match="failed readiness"):
+        launcher._start_remote_frontend("https://engine.test")
+    assert events == ["start", "shutdown", "close", ("join", 2)]
+
+
+def test_uvicorn_shutdown_sets_should_exit_and_joins():
+    server = type("Server", (), {"should_exit": False, "force_exit": False})()
+
+    class Thread:
+        def __init__(self):
+            self.joins = []
+            self.alive = True
+
+        def join(self, timeout=None):
+            self.joins.append(timeout)
+            self.alive = False
+
+        def is_alive(self):
+            return self.alive
+
+    thread = Thread()
+    launcher._stop_uvicorn(server, thread)
+    assert server.should_exit is True
+    assert thread.joins == [10]
+
+
+def test_remote_health_rejects_redirects():
+    class RedirectHandler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", "http://example.test/api/health")
+            self.end_headers()
+
+        def log_message(self, _format, *_args):
+            return
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        with pytest.raises(SystemExit, match="redirect"):
+            launcher._check_remote_health(f"http://127.0.0.1:{server.server_port}")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
+
+def test_remote_health_rejects_changed_final_origin(monkeypatch):
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def geturl(self):
+            return "https://other.test/api/health"
+
+    opener = type("Opener", (), {"open": lambda self, *_args, **_kwargs: Response()})()
+    monkeypatch.setattr(launcher, "build_opener", lambda *_args: opener)
+    with pytest.raises(SystemExit, match="changed URL/origin"):
+        launcher._check_remote_health("https://engine.test")
+
+
+def test_window_bridge_writes_switch_request_then_closes(monkeypatch, tmp_path):
+    control = tmp_path / "switch.json"
+    window = type("Window", (), {"destroy": lambda self: setattr(self, "destroyed", True)})()
+    window.destroyed = False
+    bridge = launcher._WindowBridge(control)
+    bridge.bind(window)
+    monkeypatch.setattr(bridge, "_run_on_gui_thread", lambda callback: callback())
+    monkeypatch.setattr(launcher, "_check_remote_health", lambda _origin: "1.2.126")
+
+    result = bridge.switch_runtime_profile("native-remote", "https://engine.test:9443/path")
+
+    assert result == {"restarting": True, "version": "1.2.126"}
+    assert json.loads(control.read_text(encoding="utf-8")) == {
+        "mode": "native-remote",
+        "engineOrigin": "https://engine.test:9443",
+    }
+    assert window.destroyed is True
 
 
 def test_run_webview_in_subprocess_true_on_clean_exit(monkeypatch):
@@ -260,7 +508,7 @@ def test_window_child_flag_runs_try_webview_and_exits(monkeypatch):
     """`--window-child <url>` must call _try_webview(url) and exit via its
     result, without mounting the frontend or starting uvicorn."""
     monkeypatch.setattr(sys, "argv", ["netgeo", "--window-child", "http://x"])
-    monkeypatch.setattr(launcher, "_try_webview", lambda url: url == "http://x")
+    monkeypatch.setattr(launcher, "_try_webview", lambda url, control_path=None: url == "http://x")
     monkeypatch.setattr(launcher, "_mount_frontend", lambda: (_ for _ in ()).throw(
         AssertionError("--window-child must not mount/serve anything")
     ))

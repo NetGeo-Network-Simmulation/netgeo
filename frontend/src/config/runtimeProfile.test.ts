@@ -12,7 +12,10 @@ import {
   saveRuntimeProfile,
 } from './runtimeProfile';
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  delete window.pywebview;
+});
 
 describe('runtime profile', () => {
   it('keeps local API and socket defaults for the offline profile', () => {
@@ -129,6 +132,29 @@ describe('runtime profile', () => {
     expect(readRuntimeProfile().mode).toBe('native-remote');
     await expect(applyRuntimeProfile({ mode: 'full-online', remoteOrigin: 'ftp://bad.test' }, reload)).rejects.toThrow();
     expect(reload).toHaveBeenCalledOnce();
+    fetchMock.mockRestore();
+  });
+
+  it('hands both native local and remote switches to the launcher lifecycle', async () => {
+    const reload = vi.fn();
+    const switchRuntime = vi.fn().mockResolvedValue({ restarting: true, version: '1.2.126' });
+    window.pywebview = {
+      api: { switch_runtime_profile: switchRuntime } as never,
+      platform: 'qt',
+      token: 'test',
+    };
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: 'ok', app: 'NetGeo', version: '1.2.126' }),
+    } as Response);
+
+    await applyRuntimeProfile({ mode: 'native-remote', remoteOrigin: 'https://engine.test:9443/path' }, reload);
+    await applyRuntimeProfile({ mode: 'native-offline', remoteOrigin: '' }, reload);
+
+    expect(switchRuntime).toHaveBeenNthCalledWith(1, 'native-remote', 'https://engine.test:9443');
+    expect(switchRuntime).toHaveBeenNthCalledWith(2, 'native-offline', '');
+    expect(reload).not.toHaveBeenCalled();
+    expect(localStorage.length).toBe(0);
     fetchMock.mockRestore();
   });
 });
