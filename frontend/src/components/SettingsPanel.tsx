@@ -191,7 +191,7 @@ function RuntimeSection() {
       <div>
         <SectionHeading>Distribution Runtime</SectionHeading>
         <p className="mt-1 text-xs text-fg/45">
-          Choose how this client reaches NetGeo. Applying reloads the app so REST and WebSocket clients reconnect together.
+          Choose how this client reaches NetGeo. Native mode restarts its engine lifecycle; browser mode reloads so REST and WebSocket reconnect together.
         </p>
       </div>
 

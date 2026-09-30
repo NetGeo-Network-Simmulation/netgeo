@@ -163,7 +163,9 @@ native app directly against a remote engine without running the bundled backend,
 `netgeo --engine-origin https://host:port` or
 `NETGEO_ENGINE_ORIGIN=https://host:port netgeo`. The launcher verifies `/api/health`, serves only the
 local frontend, and pairs REST and WebSocket with the same remote origin. Headless-local can pin its
-endpoint with `--engine-host` and `--engine-port` (or their environment equivalents).
+endpoint with `--engine-host` and `--engine-port` (or their environment equivalents). Switching in
+Settings inside the native window starts and readies the new runtime, persists the profile, then
+gracefully stops the old runtime; a failed transition keeps the current runtime alive.
 
 ### Offline map region
 

@@ -50,6 +50,7 @@ interface NetGeoWindowApi {
   begin_move(): void;
   begin_resize(edge: ResizeEdge): void;
   button_layout(): Promise<ButtonLayout>;
+  switch_runtime_profile(mode: string, engineOrigin?: string): Promise<{ restarting: boolean; version: string }>;
 }
 
 declare global {
