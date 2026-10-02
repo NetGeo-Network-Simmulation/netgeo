@@ -32,6 +32,9 @@ describe('optional device brand assets', () => {
     ]);
     const scene = getVisualChassis('chassis-mikrotik-rb5009-k79')!;
     expect(scene).toBeDefined();
+    const desktopAfterMount = getVisualChassis('chassis-mikrotik-rb5009-k79', false)!;
+    expect(desktopAfterMount.getObjectByName('k79-left-ear')).toBeUndefined();
+    expect(new THREE.Box3().setFromObject(desktopAfterMount).getSize(new THREE.Vector3()).x).toBeCloseTo(0.220, 3);
     const size = new THREE.Box3().setFromObject(scene).getSize(new THREE.Vector3());
     expect(size.x).toBeCloseTo(0.4826, 3);
     expect(size.y).toBeCloseTo(0.04445, 3);
