@@ -87,8 +87,9 @@ export function chassisFamilyForDeviceSlug(slug: string): ChassisFamily | undefi
 
 const cache: Partial<Record<AssetFamily, THREE.BufferGeometry>> = {};
 const visualCache: Partial<Record<ChassisFamily, THREE.Group>> = {};
+const accessoryCache: Partial<Record<ChassisFamily, THREE.Group>> = {};
+const mountedVisualCache: Partial<Record<ChassisFamily, THREE.Group>> = {};
 const brandInflight: Partial<Record<ChassisFamily, Promise<void>>> = {};
-const rackmountAccessoryLoaded = new Set<ChassisFamily>();
 const unavailableBrands = new Set<ChassisFamily>();
 const inflight: Partial<Record<Exclude<AssetFamily, ChassisFamily>, Promise<void>>> = {};
 
@@ -150,7 +151,7 @@ export function loadBrandAssets(
   return Promise.all([...new Set(families)].map((fam) => {
     const source = BRAND_URLS[fam];
     const needsAccessory = !!source.rackmountAccessory && rackmountAccessories.has(fam);
-    if ((cache[fam] || visualCache[fam]) && (!needsAccessory || rackmountAccessoryLoaded.has(fam))) return Promise.resolve();
+    if ((cache[fam] || visualCache[fam]) && (!needsAccessory || accessoryCache[fam])) return Promise.resolve();
     if (unavailableBrands.has(fam)) return Promise.resolve();
     if (!brandInflight[fam]) {
       brandInflight[fam] = (async () => {
@@ -162,19 +163,11 @@ export function loadBrandAssets(
           new GLTFLoader().parseAsync(await fetchArrayBuffer(url), '')
         )));
         if (fam === 'chassis-mikrotik-rb5009-k79' || fam === 'chassis-cisco-c9300-48p-nm8x') {
-          if (appendAccessory) {
-            const packageGroup = new THREE.Group();
-            packageGroup.name = fam + '-packages';
-            packageGroup.add(visualCache[fam]!, gltfs[0]!.scene);
-            visualCache[fam] = packageGroup;
-          } else if (gltfs.length === 1) visualCache[fam] = gltfs[0]!.scene;
+          if (appendAccessory) accessoryCache[fam] = gltfs[0]!.scene;
           else {
-            const packageGroup = new THREE.Group();
-            packageGroup.name = fam + '-packages';
-            for (const gltf of gltfs) packageGroup.add(gltf.scene);
-            visualCache[fam] = packageGroup;
+            visualCache[fam] = gltfs[0]!.scene;
+            if (needsAccessory) accessoryCache[fam] = gltfs[1]!.scene;
           }
-          if (needsAccessory) rackmountAccessoryLoaded.add(fam);
         } else cache[fam] = mergedGeometry(gltfs[0]!);
       })().catch((error) => {
         // Optional brand art never blocks the procedural chassis and ports.
@@ -184,12 +177,22 @@ export function loadBrandAssets(
         brandInflight[fam] = undefined;
       });
     }
-    return brandInflight[fam];
+    return brandInflight[fam]!.then(() => needsAccessory && !accessoryCache[fam]
+      ? loadBrandAssets([fam], fetchArrayBuffer, rackmountAccessories)
+      : undefined);
   })).then(() => undefined);
 }
 
-export function getVisualChassis(fam: ChassisFamily): THREE.Group | undefined {
-  return visualCache[fam];
+export function getVisualChassis(fam: ChassisFamily, rackMounted = true): THREE.Group | undefined {
+  const body = visualCache[fam];
+  if (!body || !rackMounted || !accessoryCache[fam]) return body;
+  if (!mountedVisualCache[fam]) {
+    const packageGroup = new THREE.Group();
+    packageGroup.name = fam + '-packages';
+    packageGroup.add(body.clone(true), accessoryCache[fam]!.clone(true));
+    mountedVisualCache[fam] = packageGroup;
+  }
+  return mountedVisualCache[fam];
 }
 
 export function getBootGeometry(fam: AssetFamily): THREE.BufferGeometry | undefined {

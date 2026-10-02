@@ -1128,7 +1128,7 @@ export function buildScene(opts: BuildOptions): BuiltScene {
     // body is the sheet-metal box between the rack ears — narrower than the
     // 482.6mm faceplate/ears (CHASSIS_BODY_W, see its own comment above).
     const chassisGeo = def.chassisAsset ? getBootGeometry(def.chassisAsset) : undefined;
-    const visualChassis = def.chassisAsset ? getVisualChassis(def.chassisAsset) : undefined;
+    const visualChassis = def.chassisAsset ? getVisualChassis(def.chassisAsset, rackMounted) : undefined;
     // Cached GLB geometry is shared across scene rebuilds and therefore is
     // deliberately not registered in this scene's disposable list.
     const body = visualChassis ? visualChassis.clone(true)

@@ -83,6 +83,27 @@ describe('rack3d Blender chassis envelope', () => {
       expect(chassis.getObjectByName('ether1-2p5g-mouth')?.userData.dev).toBe('rb');
     } finally { disposeScene(built); }
   });
+  it.each([['desktop', 'mounted'], ['mounted', 'desktop']])(
+    'keeps K79 on the mounted instance when %s is built before %s', (first, second) => {
+      const devices = [first, second].map((kind, index): DeviceDef => ({
+        ...base, id: kind, u: index * 2 + 1, model: 'RB5009UG+S+IN',
+        chassisAsset: 'chassis-mikrotik-rb5009-k79',
+        bodyWidthM: 0.220, bodyDepthM: 0.125, ports: 9,
+        rackMounted: kind === 'mounted',
+      }));
+      const built = buildScene({
+        racks: [{ key: 'r1', enclosure: 'apc', ruHeight: 42, devices }], links: [],
+      });
+      try {
+        const desktop = built.registry.devices.desktop!.group.getObjectByName('chassis')!;
+        const mounted = built.registry.devices.mounted!.group.getObjectByName('chassis')!;
+        expect(desktop.getObjectByName('k79-left-ear')).toBeUndefined();
+        expect(mounted.getObjectByName('k79-left-ear')).toBeDefined();
+        expect(new THREE.Box3().setFromObject(desktop).getSize(new THREE.Vector3()).x).toBeCloseTo(0.220, 3);
+        expect(new THREE.Box3().setFromObject(mounted).getSize(new THREE.Vector3()).x).toBeCloseTo(0.4826, 3);
+      } finally { disposeScene(built); }
+    },
+  );
   it('retains curated dimensions/layout when an exact SKU arrives from the pack API', () => {
     const pack = {
       id: 'onu:actiontec-xg-99m', name: 'Actiontec XG-99M', category: 'onu',
