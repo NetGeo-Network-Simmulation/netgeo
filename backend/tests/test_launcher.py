@@ -244,6 +244,10 @@ def test_remote_frontend_server_is_static_only_and_bootstraps_one_engine(monkeyp
             assert b"NetGeo remote" in response.read()
         query = parse_qs(urlsplit(url).query)
         assert query == {"netgeoRuntime": ["native-remote"], "netgeoEngine": ["http://127.0.0.1:9001"]}
+        for path in ("/api/health", "/api/projects", "/ws/topology"):
+            with pytest.raises(Exception) as exc:
+                urlopen(f"http://127.0.0.1:{server.server_port}{path}", timeout=2)
+            assert getattr(exc.value, "code", None) == 404
     finally:
         server.shutdown()
         server.server_close()
@@ -295,8 +299,8 @@ def test_native_ui_switch_starts_new_runtime_before_stopping_old(monkeypatch, in
         ("start", initial),
         ("window", "http://old"),
         ("start", requested),
-        ("save", requested),
         ("stop", "http://old"),
+        ("save", requested),
     ]
     assert events[-2:] == [("window", "http://new"), ("stop", "http://new")]
 
@@ -305,7 +309,8 @@ def test_failed_native_switch_stops_candidate_and_keeps_current_runtime(monkeypa
     events = []
     old_runtime = ("http://old", "uvicorn", object(), object())
     candidate = ("http://candidate", "static", object(), object())
-    runtimes = iter([old_runtime, candidate])
+    restored = ("http://restored", "uvicorn", object(), object())
+    runtimes = iter([old_runtime, candidate, restored])
     windows = iter(
         [
             (True, {"mode": "native-remote", "engineOrigin": "https://engine.test"}),
@@ -335,10 +340,71 @@ def test_failed_native_switch_stops_candidate_and_keeps_current_runtime(monkeypa
 
     assert events == [
         ("window", "http://old"),
-        ("stop", "http://candidate"),
-        ("window", "http://old"),
         ("stop", "http://old"),
+        ("stop", "http://candidate"),
+        ("window", "http://restored"),
+        ("stop", "http://restored"),
     ]
+
+
+def test_failed_old_shutdown_rolls_back_candidate_without_saving(monkeypatch):
+    events = []
+    old = ("http://old", "uvicorn", object(), object())
+    candidate = ("http://candidate", "static", object(), object())
+    runtimes = iter([old, candidate])
+    windows = iter([(True, {"mode": "native-remote", "engineOrigin": "https://engine.test"}), (True, None)])
+    monkeypatch.setattr(sys, "argv", ["netgeo"])
+    monkeypatch.delenv("NETGEO_NO_BROWSER", raising=False)
+    monkeypatch.delenv("NETGEO_NO_WINDOW", raising=False)
+    monkeypatch.setattr(launcher, "_load_runtime_profile", lambda _args: {"mode": "native-offline", "engineOrigin": ""})
+    monkeypatch.setattr(launcher, "_start_runtime", lambda *_args, **_kwargs: next(runtimes))
+    monkeypatch.setattr(launcher, "_run_native_session", lambda url: events.append(("window", url)) or next(windows))
+    monkeypatch.setattr(launcher, "_save_runtime_profile", lambda _profile: pytest.fail("failed switch was saved"))
+
+    failed_once = False
+    def stop(runtime):
+        nonlocal failed_once
+        events.append(("stop", runtime[0]))
+        if runtime is old and not failed_once:
+            failed_once = True
+            raise RuntimeError("old server still running")
+
+    monkeypatch.setattr(launcher, "_stop_runtime", stop)
+    launcher.main()
+    assert events == [
+        ("window", "http://old"), ("stop", "http://old"),
+        ("stop", "http://candidate"), ("window", "http://old"), ("stop", "http://old"),
+    ]
+
+
+def test_real_local_remote_local_runtime_lifecycle(monkeypatch, tmp_path):
+    (tmp_path / "index.html").write_text("NetGeo UI", encoding="utf-8")
+    monkeypatch.setattr(launcher, "FRONTEND_DIST", tmp_path)
+    local = launcher._start_runtime({"mode": "native-offline", "engineOrigin": ""}, [])
+    try:
+        with urlopen(f"{urlsplit(local[0]).scheme}://{urlsplit(local[0]).netloc}/api/health", timeout=2) as response:
+            assert json.load(response)["app"] == "NetGeo"
+        monkeypatch.setattr(launcher, "_check_remote_health", lambda _origin: "test")
+        remote = launcher._start_runtime({"mode": "native-remote", "engineOrigin": "http://127.0.0.1:9001"}, [])
+        try:
+            with urlopen(remote[0], timeout=2) as response:
+                assert b"NetGeo UI" in response.read()
+            launcher._stop_runtime(local)
+            local = None
+            replacement = launcher._start_runtime({"mode": "native-offline", "engineOrigin": ""}, [])
+            try:
+                with urlopen(f"{urlsplit(replacement[0]).scheme}://{urlsplit(replacement[0]).netloc}/api/health", timeout=2) as response:
+                    assert json.load(response)["app"] == "NetGeo"
+                launcher._stop_runtime(remote)
+                remote = None
+            finally:
+                launcher._stop_runtime(replacement)
+        finally:
+            if remote is not None:
+                launcher._stop_runtime(remote)
+    finally:
+        if local is not None:
+            launcher._stop_runtime(local)
 
 
 def test_local_readiness_failure_requests_graceful_exit(monkeypatch):
@@ -484,6 +550,14 @@ def test_window_bridge_writes_switch_request_then_closes(monkeypatch, tmp_path):
         "engineOrigin": "https://engine.test:9443",
     }
     assert window.destroyed is True
+
+
+@pytest.mark.parametrize("mode", ["headless", "full-online", "native-google"])
+def test_native_bridge_rejects_modes_it_cannot_apply(tmp_path, mode):
+    bridge = launcher._WindowBridge(tmp_path / "switch.json")
+    with pytest.raises(RuntimeError, match="Unsupported native runtime mode"):
+        bridge.switch_runtime_profile(mode, "https://engine.test")
+    assert not (tmp_path / "switch.json").exists()
 
 
 def test_run_webview_in_subprocess_true_on_clean_exit(monkeypatch):
