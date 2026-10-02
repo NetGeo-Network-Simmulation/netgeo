@@ -100,30 +100,50 @@ describe('runtime profile', () => {
   });
 
   it('checks a remote backend before applying and does not persist failures', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({
       ok: true,
+      url: String(url),
       json: async () => ({ status: 'ok', app: 'NetGeo', version: '1.2.126' }),
-    } as Response);
+    } as Response));
     expect(await checkRemoteEngine('https://netgeo.example.test/path')).toBe('1.2.126');
     expect(fetchMock).toHaveBeenCalledWith('https://netgeo.example.test/api/health', expect.any(Object));
     expect(localStorage.length).toBe(0);
     expect(await checkRemoteEngine('http://localhost:8000')).toBe('1.2.126');
     expect(fetchMock).toHaveBeenLastCalledWith('http://localhost:8000/api/health', expect.any(Object));
-    fetchMock.mockResolvedValue({ ok: true, json: async () => ({ status: 'ok', app: 'Other' }) } as Response);
+    fetchMock.mockResolvedValue({ ok: true, url: 'https://netgeo.example.test/api/health', json: async () => ({ status: 'ok', app: 'Other' }) } as Response);
     await expect(checkRemoteEngine('https://netgeo.example.test')).rejects.toThrow('healthy NetGeo');
-    fetchMock.mockResolvedValue({ ok: false, status: 401 } as Response);
+    fetchMock.mockResolvedValue({ ok: false, status: 401, url: 'https://netgeo.example.test/api/health' } as Response);
     await expect(checkRemoteEngine('https://netgeo.example.test')).rejects.toThrow('authentication');
     fetchMock.mockRejectedValue(new TypeError('Failed to fetch'));
     await expect(checkRemoteEngine('https://netgeo.example.test')).rejects.toThrow('CORS');
     fetchMock.mockRestore();
   });
 
+  it('rejects redirected health responses before accepting a server', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch');
+    for (const url of ['https://other.test/api/health', 'https://engine.test/login']) {
+      fetchMock.mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        url,
+        redirected: true,
+        json: async () => ({ status: 'ok', app: 'NetGeo' }),
+      } as Response);
+      await expect(checkRemoteEngine('https://engine.test')).rejects.toThrow('redirected');
+    }
+    fetchMock.mockResolvedValueOnce({ type: 'opaqueredirect', status: 0 } as Response);
+    await expect(checkRemoteEngine('https://engine.test')).rejects.toThrow('redirected');
+    expect(fetchMock).toHaveBeenCalledWith('https://engine.test/api/health', expect.objectContaining({ redirect: 'manual' }));
+    fetchMock.mockRestore();
+  });
+
   it('health-checks configured endpoints before persistence and reload', async () => {
     const reload = vi.fn();
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({
       ok: true,
+      url: String(url),
       json: async () => ({ status: 'ok', app: 'NetGeo' }),
-    } as Response);
+    } as Response));
     await applyRuntimeProfile({ mode: 'native-remote', remoteOrigin: 'https://netgeo.example.test/path' }, reload);
     expect(readRuntimeProfile().remoteOrigin).toBe('https://netgeo.example.test');
     expect(reload).toHaveBeenCalledOnce();
@@ -143,10 +163,11 @@ describe('runtime profile', () => {
       platform: 'qt',
       token: 'test',
     };
-    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => ({
       ok: true,
+      url: String(url),
       json: async () => ({ status: 'ok', app: 'NetGeo', version: '1.2.126' }),
-    } as Response);
+    } as Response));
 
     await applyRuntimeProfile({ mode: 'native-remote', remoteOrigin: 'https://engine.test:9443/path' }, reload);
     await applyRuntimeProfile({ mode: 'native-offline', remoteOrigin: '' }, reload);

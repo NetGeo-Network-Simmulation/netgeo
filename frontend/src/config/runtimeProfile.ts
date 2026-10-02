@@ -85,14 +85,18 @@ function consumeLauncherProfile(): RuntimeProfile | null {
 export async function checkRemoteEngine(origin: string): Promise<string> {
   const normalized = normalizeRemoteOrigin(origin);
   if (!normalized) throw new Error('Enter a valid http:// or https:// server origin.');
+  const healthUrl = `${normalized}/api/health`;
   let response: Response;
   try {
-    response = await fetch(`${normalized}/api/health`, { signal: AbortSignal.timeout(5000) });
+    response = await fetch(healthUrl, { redirect: 'manual', signal: AbortSignal.timeout(5000) });
   } catch (cause) {
     if (cause instanceof Error && cause.name === 'TimeoutError') {
       throw new Error('Server did not respond within 5 seconds. Check its address and network connection.');
     }
     throw new Error('Could not reach the server. Check its address, HTTPS compatibility, and whether it allows this app origin through CORS.');
+  }
+  if (response.redirected || response.type === 'opaqueredirect' || response.url !== healthUrl || (response.status >= 300 && response.status < 400)) {
+    throw new Error('Server health check redirected. Use the final NetGeo server origin directly.');
   }
   if (response.status === 401 || response.status === 403) {
     throw new Error('Server denied the health check. Check its authentication or proxy configuration.');
