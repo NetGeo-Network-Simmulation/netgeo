@@ -6,6 +6,17 @@
     "switches"
   ],
   "device_count": 16,
+  "assets": {
+    "chassis-cisco-c9300-48p-nm8x": {
+      "body": "/3d/brands/cisco/c9300-48p-nm8x.glb"
+    }
+  },
+  "provenance": [
+    { "source": "NetGeo Blender-built C9300-48P/NM-8X chassis", "note": "Geometry authored for NetGeo; no vendor mesh or logo" }
+  ],
+  "licenses": [
+    { "name": "Apache-2.0", "scope": "NetGeo-authored chassis GLB" }
+  ],
   "enabled_by_default": true,
   "source_note": "Migrated from network/devices/library/switches.json — see docs/design/15-DEVICE-LIBRARY-PACKS.md §3.4."
 }

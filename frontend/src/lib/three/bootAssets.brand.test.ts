@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
-import { getVisualChassis, loadBootAssets, loadBrandAssets } from './bootAssets';
+import { getVisualChassis, invalidatePackAssetRegistry, loadBootAssets, loadBrandAssets } from './bootAssets';
+import { devicePacksApi } from '@/api/client';
 
 const fetched: string[] = [];
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
@@ -13,7 +14,18 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 }
 
 describe('optional device brand assets', () => {
+  it('resolves the Cisco GLB from the enabled pack manifest on demand', async () => {
+    const manifest = JSON.parse(await readFile(path.resolve(__dirname, '../../../../network/devices/packs/switches/manifest.json'), 'utf8'));
+    const list = vi.spyOn(devicePacksApi, 'list').mockResolvedValue([{ ...manifest, enabled: true }]);
+    invalidatePackAssetRegistry();
+    await loadBrandAssets(['chassis-cisco-c9300-48p-nm8x'], nodeFetch);
+    expect(fetched).toContain(manifest.assets['chassis-cisco-c9300-48p-nm8x'].body);
+    expect(getVisualChassis('chassis-cisco-c9300-48p-nm8x')).toBeDefined();
+    list.mockRestore();
+    invalidatePackAssetRegistry();
+  });
   it('loads core parts without fetching any brand device, then only the requested SKU', async () => {
+    fetched.length = 0;
     await loadBootAssets(nodeFetch);
     expect(fetched.some((url) => url.includes('/brands/') || url.includes('/chassis-'))).toBe(false);
     await loadBrandAssets(['chassis-mikrotik-rb5009-k79'], nodeFetch);

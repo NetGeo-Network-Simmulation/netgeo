@@ -29,13 +29,18 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import struct
+import zipfile
 from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from app.services.device_pack_archive import MAX_ARCHIVE, install_archive
+from app.store import get_repo
 from app.utils.ids import new_id
 
 router = APIRouter(tags=["device-types"])
@@ -139,6 +144,8 @@ _custom: dict[str, DeviceType] = {}
 _DEVICES_DIR = Path(__file__).resolve().parents[3] / "network" / "devices"
 _PACKS_DIR = _DEVICES_DIR / "packs"
 _PACKS_STATE_FILE = _DEVICES_DIR / "packs_enabled.json"
+_USER_PACKS_DIR = Path("~/.config/netgeo/device-packs").expanduser()
+_USER_PACKS_STATE_FILE = _USER_PACKS_DIR / "enabled.json"
 
 # node.kind -> DeviceType.category, matching the styling _BUILTIN already uses.
 # Unknown kinds fall back to the kind string itself — the frontend's category
@@ -153,10 +160,8 @@ _KIND_CATEGORY = {
 
 def _iter_pack_manifests() -> list[tuple[Path, dict]]:
     """Scan ``packs/*/manifest.json``, skipping unreadable/invalid ones."""
-    if not _PACKS_DIR.is_dir():
-        return []
     found: list[tuple[Path, dict]] = []
-    for manifest_path in sorted(_PACKS_DIR.glob("*/manifest.json")):
+    for manifest_path in sorted(_PACKS_DIR.glob("*/manifest.json")) + sorted(_USER_PACKS_DIR.glob("*/manifest.json")):
         try:
             manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError) as exc:
@@ -169,19 +174,26 @@ def _iter_pack_manifests() -> list[tuple[Path, dict]]:
 
 def _load_pack_overrides() -> dict[str, bool]:
     """Explicit enable/disable overrides on top of each manifest's default."""
-    if not _PACKS_STATE_FILE.exists():
-        return {}
-    try:
-        data = json.loads(_PACKS_STATE_FILE.read_text(encoding="utf-8"))
-    except (json.JSONDecodeError, OSError) as exc:
-        logger.warning("packs_enabled.json: unreadable, ignoring overrides: %s", exc)
-        return {}
-    return data.get("overrides", {})
+    overrides = {}
+    for path in (_PACKS_STATE_FILE, _USER_PACKS_STATE_FILE):
+        if path.exists():
+            try:
+                values = json.loads(path.read_text(encoding="utf-8")).get("overrides", {})
+                if path == _USER_PACKS_STATE_FILE:
+                    values = {key: value for key, value in values.items()
+                              if (_USER_PACKS_DIR / key / "manifest.json").is_file()}
+                overrides.update(values)
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning("%s: unreadable, ignoring overrides: %s", path, exc)
+    return overrides
 
 
-def _save_pack_overrides(overrides: dict[str, bool]) -> None:
-    _PACKS_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _PACKS_STATE_FILE.write_text(json.dumps({"overrides": overrides}, indent=2) + "\n", encoding="utf-8")
+def _save_pack_overrides(overrides: dict[str, bool], path: Path | None = None) -> None:
+    path = path or _USER_PACKS_STATE_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_suffix(".tmp")
+    temporary.write_text(json.dumps({"overrides": overrides}, indent=2) + "\n", encoding="utf-8")
+    temporary.replace(path)
 
 
 def _pack_enabled(pack_id: str, manifest: dict, overrides: dict[str, bool]) -> bool:
@@ -256,6 +268,13 @@ class DevicePack(BaseModel):
     enabled_by_default: bool = False
     source_note: str = ""
     enabled: bool
+    type: str | None = None
+    app_compatibility: dict | None = None
+    dependencies: list[str] = []
+    provenance: list[dict] = []
+    licenses: list[dict] = []
+    assets: dict[str, dict] = {}
+    removable: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +290,65 @@ async def list_device_types() -> list[DeviceType]:
 @router.get("/device-packs", response_model=list[DevicePack])
 async def list_device_packs() -> list[DevicePack]:
     """List every discovered device library pack and its enabled state."""
-    return [DevicePack(**p) for p in list_packs()]
+    overrides = _load_pack_overrides()
+    return [DevicePack(**{**manifest, "enabled": _pack_enabled(manifest["id"], manifest, overrides),
+                          "removable": pack_dir.is_relative_to(_USER_PACKS_DIR)})
+            for pack_dir, manifest in _iter_pack_manifests()]
+
+
+@router.post("/device-packs/install", response_model=DevicePack, status_code=status.HTTP_201_CREATED)
+async def install_device_pack(file: Annotated[UploadFile, File()]) -> DevicePack:
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix=".zip") as temporary:
+        size = 0
+        while chunk := await file.read(1024 * 1024):
+            size += len(chunk)
+            if size > MAX_ARCHIVE:
+                raise HTTPException(413, "Pack archive exceeds size limit")
+            temporary.write(chunk)
+        temporary.flush()
+        try:
+            manifest = install_archive(Path(temporary.name), _USER_PACKS_DIR,
+                                       {p["id"] for _, p in _iter_pack_manifests()})
+        except (ValueError, TypeError, OSError, zipfile.BadZipFile, UnicodeError) as exc:
+            raise HTTPException(400, str(exc)) from exc
+    return DevicePack(**{**manifest, "enabled": bool(manifest.get("enabled_by_default", False)), "removable": True})
+
+
+@router.delete("/device-packs/{pack_id}")
+async def uninstall_device_pack(pack_id: str) -> dict:
+    manifests = {m["id"]: (path, m) for path, m in _iter_pack_manifests()}
+    if pack_id not in manifests:
+        raise HTTPException(404, "Device pack not found")
+    path, _ = manifests[pack_id]
+    if not path.is_relative_to(_USER_PACKS_DIR):
+        raise HTTPException(403, "Bundled packs cannot be uninstalled")
+    dependents = [m["id"] for _, m in manifests.values() if pack_id in m.get("dependencies", [])]
+    if dependents:
+        raise HTTPException(409, f"Required by packs: {', '.join(dependents)}")
+    # Stable prefixed ids are retained in saved projects. Refuse removal while
+    # any saved node names this pack; disabling remains reversible.
+    repo = get_repo()
+    if any(node.device_type_id and node.device_type_id.startswith(pack_id + ":")
+           for node in repo._nodes.values()):
+        raise HTTPException(409, "Saved projects reference this pack; remove or change those devices first")
+    shutil.rmtree(path)
+    overrides = _load_pack_overrides()
+    overrides.pop(pack_id, None)
+    _save_pack_overrides(overrides)
+    return {"deleted": pack_id}
+
+
+@router.get("/device-packs/{pack_id}/assets/{asset_path:path}")
+async def device_pack_asset(pack_id: str, asset_path: str) -> FileResponse:
+    for path, manifest in _iter_pack_manifests():
+        if (manifest["id"] == pack_id and path.is_relative_to(_USER_PACKS_DIR)
+                and _pack_enabled(pack_id, manifest, _load_pack_overrides())):
+            declared = {entry["path"] for entry in manifest.get("files", [])}
+            relative = "assets/" + asset_path
+            if relative in declared and (path / relative).is_file():
+                return FileResponse(path / relative, media_type="model/gltf-binary")
+    raise HTTPException(404, "Pack asset not found")
 
 
 @router.post("/device-packs/{pack_id}/enable", response_model=DevicePack)
@@ -288,10 +365,21 @@ def _set_pack_enabled(pack_id: str, enabled: bool) -> DevicePack:
     manifests = {m["id"]: m for _, m in _iter_pack_manifests()}
     if pack_id not in manifests:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Device pack '{pack_id}' not found.")
+    if enabled:
+        missing = [dep for dep in manifests[pack_id].get("dependencies", [])
+                   if dep not in manifests or not _pack_enabled(dep, manifests[dep], _load_pack_overrides())]
+        if missing:
+            raise HTTPException(409, f"Enable dependencies first: {', '.join(missing)}")
+    else:
+        dependents = [m["id"] for m in manifests.values()
+                      if pack_id in m.get("dependencies", []) and _pack_enabled(m["id"], m, _load_pack_overrides())]
+        if dependents:
+            raise HTTPException(409, f"Disable dependent packs first: {', '.join(dependents)}")
     overrides = _load_pack_overrides()
     overrides[pack_id] = enabled
-    _save_pack_overrides(overrides)
-    return DevicePack(**manifests[pack_id], enabled=enabled)
+    _save_pack_overrides(overrides, _USER_PACKS_STATE_FILE if (_USER_PACKS_DIR / pack_id).exists() else _PACKS_STATE_FILE)
+    return DevicePack(**{**manifests[pack_id], "enabled": enabled,
+                          "removable": (_USER_PACKS_DIR / pack_id).exists()})
 
 
 @router.post("/device-types", response_model=DeviceType, status_code=status.HTTP_201_CREATED)

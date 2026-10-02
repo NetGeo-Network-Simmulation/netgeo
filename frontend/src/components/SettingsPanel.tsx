@@ -25,6 +25,7 @@ import { useUiStore } from '@/store/uiStore';
 import { useAuthStore } from '@/store/authStore';
 import { useNosStore, type CustomNosEntry } from '@/store/nosStore';
 import { devicePacksApi, mapsApi, type ApiError, type DevicePack } from '@/api/client';
+import { invalidatePackAssetRegistry } from '@/lib/three/bootAssets';
 import { cn } from '@/lib/cn';
 import { Select } from '@/components/ui/Select';
 import { ConfirmDialog } from '@/components/shell/ConfirmDialog';
@@ -896,11 +897,13 @@ function DevicePacksSection() {
     queryFn: devicePacksApi.list,
   });
   const [toggleError, setToggleError] = useState<string | null>(null);
+  const [installFile, setInstallFile] = useState<File | null>(null);
 
   const toggle = useMutation({
     mutationFn: (pack: DevicePack) =>
       pack.enabled ? devicePacksApi.disable(pack.id) : devicePacksApi.enable(pack.id),
     onSuccess: () => {
+      invalidatePackAssetRegistry();
       setToggleError(null);
       qc.invalidateQueries({ queryKey: ['device-packs'] });
       qc.invalidateQueries({ queryKey: ['device-types'] });
@@ -909,6 +912,27 @@ function DevicePacksSection() {
       console.error('Failed to toggle device pack', pack.id, e);
       setToggleError(`Could not ${pack.enabled ? 'disable' : 'enable'} "${pack.name}". Try again.`);
     },
+  });
+  const install = useMutation({
+    mutationFn: devicePacksApi.install,
+    onSuccess: () => {
+      invalidatePackAssetRegistry();
+      setInstallFile(null);
+      setToggleError(null);
+      qc.invalidateQueries({ queryKey: ['device-packs'] });
+      qc.invalidateQueries({ queryKey: ['device-types'] });
+    },
+    onError: (e: ApiError) => setToggleError(e.message || 'Pack installation failed.'),
+  });
+  const uninstall = useMutation({
+    mutationFn: devicePacksApi.uninstall,
+    onSuccess: () => {
+      invalidatePackAssetRegistry();
+      setToggleError(null);
+      qc.invalidateQueries({ queryKey: ['device-packs'] });
+      qc.invalidateQueries({ queryKey: ['device-types'] });
+    },
+    onError: (e: ApiError) => setToggleError(e.message || 'Pack removal failed.'),
   });
 
   return (
@@ -919,6 +943,10 @@ function DevicePacksSection() {
         device catalog. Disabled packs are never parsed, so only enable the brands
         relevant to the project you're working on — this keeps the catalog fast.
       </p>
+      <div className="flex items-center gap-2">
+        <input aria-label="Device pack archive" type="file" accept=".zip" onChange={(e) => setInstallFile(e.target.files?.[0] ?? null)} className="text-xs text-fg/70" />
+        <button type="button" disabled={!installFile || install.isPending} onClick={() => installFile && install.mutate(installFile)} className="rounded-md border border-fg/20 px-3 py-1.5 text-xs text-fg/80 disabled:opacity-50">Install pack</button>
+      </div>
 
       {isLoading && <p className="text-xs text-fg/40">Loading packs…</p>}
       {isError && (
@@ -955,7 +983,10 @@ function DevicePacksSection() {
                 <p className="mt-0.5 text-xs text-fg/40">
                   {p.device_count} device{p.device_count !== 1 ? 's' : ''} · v{p.version}
                 </p>
+                {p.provenance?.map((entry, i) => <p key={`source-${i}`} className="text-[11px] text-fg/45">Source: {entry.source}{entry.note ? ` · ${entry.note}` : ''}</p>)}
+                {p.licenses?.map((entry, i) => <p key={`license-${i}`} className="text-[11px] text-fg/45">License: {entry.name}{entry.scope ? ` · ${entry.scope}` : ''}</p>)}
               </div>
+              {p.removable && <button type="button" disabled={uninstall.isPending} onClick={() => { if (window.confirm(`Uninstall ${p.name}?`)) uninstall.mutate(p.id); }} className="mr-2 rounded-md border border-danger/30 px-2 py-1.5 text-xs text-danger">Uninstall</button>}
               <button
                 onClick={() => toggle.mutate(p)}
                 disabled={toggle.isPending}

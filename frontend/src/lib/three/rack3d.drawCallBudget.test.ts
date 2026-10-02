@@ -18,12 +18,13 @@
  * own (slightly different link topology) fixture — same order, both well
  * under budget; the two aren't required to match exactly.
  */
-import { describe, expect, it, beforeAll } from 'vitest';
+import { describe, expect, it, beforeAll, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
 import { buildScene, disposeScene, type BuildOptions, type DeviceDef, type LinkDef } from './rack3d';
 import { loadBootAssets, loadBrandAssets } from './bootAssets';
+import { devicePacksApi } from '@/api/client';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
   const file = path.resolve(__dirname, '../../../public', url.replace(/^\//, ''));
@@ -38,6 +39,8 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 // tested, transient state — see rack3d.cageInstancing.test.ts /
 // rack3d.instancing.test.ts).
 beforeAll(async () => {
+  const manifest = JSON.parse(await readFile(path.resolve(__dirname, '../../../../network/devices/packs/switches/manifest.json'), 'utf8'));
+  vi.spyOn(devicePacksApi, 'list').mockResolvedValue([{ ...manifest, enabled: true }]);
   await loadBootAssets(nodeFetch);
   await loadBrandAssets(['chassis-cisco-c9300-48p-nm8x'], nodeFetch);
 });
