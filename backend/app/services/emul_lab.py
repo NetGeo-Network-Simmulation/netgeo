@@ -8,7 +8,12 @@ import json
 from app.exceptions.base import SimulationError
 from app.models import NodeMode, Topology
 from engine.emulation.ip_alloc import link_subnet
-from engine.emulation.podman_adaptor import PodmanAdaptor
+from engine.emulation.podman_adaptor import (
+    CONTAINER_PREFIX,
+    LINK_NETWORK_PREFIX,
+    PodmanAdaptor,
+    socket_reachable,
+)
 from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
 
@@ -24,6 +29,58 @@ class EmulLabManager:
     async def destroy(self, project_id: str) -> None:
         async with self._lock(project_id):
             await self._destroy(project_id)
+
+    async def shutdown_all(self) -> None:
+        """Try every lab even if one project fails to clean up."""
+        errors = []
+        for project_id in list(self._labs):
+            try:
+                await self.destroy(project_id)
+            except Exception as exc:  # noqa: BLE001 - isolate per-project cleanup
+                errors.append(f"{project_id}: {exc}")
+        if errors:
+            raise SimulationError("emulation shutdown cleanup failed: " + "; ".join(errors))
+
+    async def reconcile_stale(self) -> None:
+        """Remove only our labeled containers and link networks after a forced exit.
+
+        Names and all three ownership labels must match. Older/unlabeled
+        resources and other Podman workloads are never touched.
+        """
+        if not socket_reachable():
+            return
+        adaptor = PodmanAdaptor()
+        client = adaptor._get_client()
+
+        def owned(labels) -> bool:
+            return bool(labels and labels.get("netgeo.managed") == "true"
+                        and labels.get("netgeo.project") and labels.get("netgeo.lab"))
+
+        def network_labels(network):
+            attrs = network.attrs or {}
+            return attrs.get("Labels") or attrs.get("labels") or {}
+
+        networks = [n for n in client.networks.list()
+                    if n.name.startswith(LINK_NETWORK_PREFIX)
+                    and owned(network_labels(n))
+                    and network_labels(n).get("netgeo.link") == n.name[len(LINK_NETWORK_PREFIX):]]
+        containers = [c for c in client.containers.list(all=True)
+                      if c.name.startswith(CONTAINER_PREFIX)
+                      and owned(c.labels)
+                      and (c.labels or {}).get("netgeo.kind") == "frr"]
+        errors = []
+        for network in networks:
+            try:
+                await adaptor.destroy_link(network.name[len(LINK_NETWORK_PREFIX):])
+            except Exception as exc:  # noqa: BLE001 - continue with other resources
+                errors.append(f"network {network.name}: {exc}")
+        for container in containers:
+            try:
+                await adaptor.destroy(container.name[len(CONTAINER_PREFIX):])
+            except Exception as exc:  # noqa: BLE001 - continue with other resources
+                errors.append(f"container {container.name}: {exc}")
+        if errors:
+            raise SimulationError("stale NetGeo cleanup failed: " + "; ".join(errors))
 
     async def _destroy(self, project_id: str) -> None:
         lab = self._labs.get(project_id)
