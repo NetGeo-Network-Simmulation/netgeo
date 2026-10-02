@@ -18,6 +18,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
+import { devicePacksApi } from '@/api/client';
 
 export type BootFamily =
   | 'rj45' | 'lc' | 'mpo'
@@ -61,7 +62,7 @@ const URLS: Record<Exclude<AssetFamily, ChassisFamily>, string> = {
 
 // Brand packs are optional. A Plant mount fetches the shared connector and
 // cabinet assets above; only a visible SKU requests its brand GLB below.
-const BRAND_URLS: Record<ChassisFamily, { body: string; rackmountAccessory?: string }> = {
+const BRAND_URLS: Partial<Record<ChassisFamily, { body: string; rackmountAccessory?: string }>> = {
   'chassis-mikrotik-ccr2004': { body: '/3d/chassis-mikrotik-ccr2004.glb' },
   'chassis-mikrotik-crs317': { body: '/3d/chassis-mikrotik-crs317.glb' },
   'chassis-mikrotik-crs328': { body: '/3d/chassis-mikrotik-crs328.glb' },
@@ -69,8 +70,26 @@ const BRAND_URLS: Record<ChassisFamily, { body: string; rackmountAccessory?: str
     body: '/3d/brands/mikrotik/rb5009ug-s-in.glb',
     rackmountAccessory: '/3d/brands/mikrotik/k79-rackmount.glb',
   },
-  'chassis-cisco-c9300-48p-nm8x': { body: '/3d/brands/cisco/c9300-48p-nm8x.glb' },
 };
+let packAssetRegistry: Promise<Record<string, { body: string; rackmountAccessory?: string }>> | undefined;
+const dynamicFamilies = new Set<ChassisFamily>();
+export function invalidatePackAssetRegistry(): void {
+  packAssetRegistry = undefined;
+  for (const family of dynamicFamilies) {
+    delete cache[family];
+    delete visualCache[family];
+    delete accessoryCache[family];
+    delete mountedVisualCache[family];
+    unavailableBrands.delete(family);
+  }
+  dynamicFamilies.clear();
+}
+function getPackAssetRegistry() {
+  packAssetRegistry ??= devicePacksApi.list().then((packs) => Object.assign({}, ...packs
+    .filter((pack) => pack.enabled)
+    .map((pack) => pack.assets ?? {}))).catch(() => ({}));
+  return packAssetRegistry;
+}
 
 const CHASSIS_BY_DEVICE_SLUG: Record<string, ChassisFamily> = {
   'mikrotik-ccr2004-1g-12s-2xs': 'chassis-mikrotik-ccr2004',
@@ -148,8 +167,13 @@ export function loadBrandAssets(
   },
   rackmountAccessories: ReadonlySet<ChassisFamily> = new Set(),
 ): Promise<void> {
-  return Promise.all([...new Set(families)].map((fam) => {
-    const source = BRAND_URLS[fam];
+  const requested = [...new Set(families)];
+  const registry = requested.some((family) => !BRAND_URLS[family])
+    ? getPackAssetRegistry() : Promise.resolve({} as Record<string, { body: string; rackmountAccessory?: string }>);
+  return registry.then((packAssets) => Promise.all(requested.map((fam) => {
+    const source = BRAND_URLS[fam] ?? packAssets[fam];
+    if (!source) return Promise.resolve();
+    if (!BRAND_URLS[fam]) dynamicFamilies.add(fam);
     const needsAccessory = !!source.rackmountAccessory && rackmountAccessories.has(fam);
     if ((cache[fam] || visualCache[fam]) && (!needsAccessory || accessoryCache[fam])) return Promise.resolve();
     if (unavailableBrands.has(fam)) return Promise.resolve();
@@ -180,7 +204,7 @@ export function loadBrandAssets(
     return brandInflight[fam]!.then(() => needsAccessory && !accessoryCache[fam]
       ? loadBrandAssets([fam], fetchArrayBuffer, rackmountAccessories)
       : undefined);
-  })).then(() => undefined);
+  })).then(() => undefined));
 }
 
 export function getVisualChassis(fam: ChassisFamily, rackMounted = true): THREE.Group | undefined {

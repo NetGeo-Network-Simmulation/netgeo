@@ -1,8 +1,8 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
-import type { DeviceType as CatalogEntry } from '@/api/client';
+import { devicePacksApi, type DeviceType as CatalogEntry } from '@/api/client';
 import { resolveDeviceType } from '@/components/rack/deviceTypes';
 import { chassisFamilyForDeviceSlug, loadBrandAssets } from './bootAssets';
 import { buildScene, disposeScene, type DeviceDef } from './rack3d';
@@ -13,10 +13,14 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
   return buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength);
 }
 
-beforeAll(() => loadBrandAssets([
+beforeAll(async () => {
+  const manifest = JSON.parse(await readFile(path.resolve(__dirname, '../../../../network/devices/packs/switches/manifest.json'), 'utf8'));
+  vi.spyOn(devicePacksApi, 'list').mockResolvedValue([{ ...manifest, enabled: true }]);
+  await loadBrandAssets([
   'chassis-mikrotik-ccr2004', 'chassis-mikrotik-crs317',
   'chassis-mikrotik-rb5009-k79', 'chassis-cisco-c9300-48p-nm8x',
-], nodeFetch, new Set(['chassis-mikrotik-rb5009-k79'])));
+], nodeFetch, new Set(['chassis-mikrotik-rb5009-k79']));
+});
 
 function build(device: DeviceDef) {
   return buildScene({

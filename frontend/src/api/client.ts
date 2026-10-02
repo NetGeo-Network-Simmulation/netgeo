@@ -1084,6 +1084,11 @@ export interface DevicePack {
   enabled_by_default: boolean;
   source_note: string;
   enabled: boolean;
+  type?: 'core' | 'vendor' | 'accessory' | 'nos';
+  provenance?: { source: string; note?: string }[];
+  licenses?: { name: string; scope?: string }[];
+  assets?: Record<string, { body: string; rackmountAccessory?: string }>;
+  removable?: boolean;
 }
 
 export const devicePacksApi = {
@@ -1092,6 +1097,13 @@ export const devicePacksApi = {
     http.post<DevicePack>(`/device-packs/${id}/enable`).then((r) => r.data),
   disable: (id: string) =>
     http.post<DevicePack>(`/device-packs/${id}/disable`).then((r) => r.data),
+  install: (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    return http.post<DevicePack>('/device-packs/install', form, { headers: { 'Content-Type': 'multipart/form-data' } }).then((r) => r.data);
+  },
+  uninstall: (id: string) =>
+    http.delete(`/device-packs/${id}`).then((r) => r.data),
 };
 
 /* --------------------------- Host system / NICs -------------------------- */

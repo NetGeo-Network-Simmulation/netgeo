@@ -5,12 +5,13 @@
  * bounding box against the verified numbers in
  * docs/design/24-DEVICE-PHYSICAL-SPEC.md §2.a/§2.c.
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { chassisFamilyForDeviceSlug, loadAssetFamilies, loadBootAssets, loadBrandAssets, getBootGeometry, getVisualChassis } from './bootAssets';
+import { chassisFamilyForDeviceSlug, invalidatePackAssetRegistry, loadAssetFamilies, loadBootAssets, loadBrandAssets, getBootGeometry, getVisualChassis } from './bootAssets';
+import { devicePacksApi } from '@/api/client';
 
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
   const file = path.resolve(__dirname, '../../../public', url.replace(/^\//, ''));
@@ -167,7 +168,11 @@ describe('bootAssets (NG-PH3D 3a pipeline reproducibility)', () => {
   });
 
   it('loads the official C9300-48P chassis envelope with separate 19-inch ears', async () => {
+    const manifest = JSON.parse(await readFile(path.resolve(__dirname, '../../../../network/devices/packs/switches/manifest.json'), 'utf8'));
+    const list = vi.spyOn(devicePacksApi, 'list').mockResolvedValue([{ ...manifest, enabled: true }]);
+    invalidatePackAssetRegistry();
     await loadBrandAssets(['chassis-cisco-c9300-48p-nm8x'], nodeFetch);
+    list.mockRestore();
     expect(chassisFamilyForDeviceSlug('cisco-c9300-48p')).toBe('chassis-cisco-c9300-48p-nm8x');
     expect(chassisFamilyForDeviceSlug('cisco-c9300-48p-access')).toBe('chassis-cisco-c9300-48p-nm8x');
     const scene = getVisualChassis('chassis-cisco-c9300-48p-nm8x')!;
