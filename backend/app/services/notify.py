@@ -34,6 +34,8 @@ async def _publish_plan(repo: MemoryRepository, project_id: str) -> None:
 
 async def node_changed(repo: MemoryRepository, node: Node) -> None:
     """A node was created or updated."""
+    from app.services.emul_lab import get_emul_lab_manager
+    await get_emul_lab_manager().destroy(node.project_id)
     try:
         get_bus().publish(
             {"type": "node.updated", "node": node.model_dump(mode="json")},
@@ -45,6 +47,8 @@ async def node_changed(repo: MemoryRepository, node: Node) -> None:
 
 
 async def node_removed(repo: MemoryRepository, project_id: str, node_id: str) -> None:
+    from app.services.emul_lab import get_emul_lab_manager
+    await get_emul_lab_manager().destroy(project_id)
     try:
         get_bus().publish(
             {"type": "node.deleted", "node_id": node_id}, project_id
@@ -55,6 +59,8 @@ async def node_removed(repo: MemoryRepository, project_id: str, node_id: str) ->
 
 
 async def link_changed(repo: MemoryRepository, link: Link) -> None:
+    from app.services.emul_lab import get_emul_lab_manager
+    await get_emul_lab_manager().destroy(link.project_id)
     try:
         get_bus().publish(
             {"type": "link.updated", "link": link.model_dump(mode="json")},
@@ -65,6 +71,9 @@ async def link_changed(repo: MemoryRepository, link: Link) -> None:
 
 
 async def link_removed(project_id: str | None, link_id: str) -> None:
+    if project_id:
+        from app.services.emul_lab import get_emul_lab_manager
+        await get_emul_lab_manager().destroy(project_id)
     try:
         get_bus().publish({"type": "link.deleted", "link_id": link_id}, project_id)
     except Exception:  # pragma: no cover

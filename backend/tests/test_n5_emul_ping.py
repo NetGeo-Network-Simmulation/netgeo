@@ -49,6 +49,20 @@ def _podman_state(container_name: str) -> str | None:
     return out or None
 
 
+def _podman_id(container_name: str) -> str:
+    return subprocess.run(
+        ["podman", "inspect", container_name, "--format", "{{.Id}}"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
+def _podman_label(container_name: str, label: str) -> str:
+    return subprocess.run(
+        ["podman", "inspect", container_name, "--format", f"{{{{index .Config.Labels \"{label}\"}}}}"],
+        capture_output=True, text=True, check=True,
+    ).stdout.strip()
+
+
 def _iface(name: str, ips: list[str]):
     return {"id": "", "node_id": "", "name": name, "ip": ips}
 
@@ -109,8 +123,22 @@ async def test_ping_between_two_emul_nodes_reaches_real_containers(client, _clea
     assert data["received"] == 2, data
     assert data["loss_pct"] == 0.0
 
-    # The endpoint owns spawn+destroy for the call — no orphaned container or
-    # link network once the response has been returned.
+    # A second ping must use the same containers and direct link.
+    ids = [_podman_id(f"{CONTAINER_PREFIX}{n['id']}") for n in (r1, r2)]
+    assert all(_podman_state(f"{CONTAINER_PREFIX}{n['id']}") == "running" for n in (r1, r2))
+    assert _network_exists(f"{LINK_NETWORK_PREFIX}{link['id']}")
+    for node in (r1, r2):
+        name = f"{CONTAINER_PREFIX}{node['id']}"
+        assert _podman_label(name, "netgeo.managed") == "true"
+        assert _podman_label(name, "netgeo.project") == pid
+        assert _podman_label(name, "netgeo.lab")
+    second = await client.post(f"/api/lab/{pid}/ping", json={"src": "r2", "dst": "r1", "count": 1})
+    assert second.status_code == 200, second.text
+    assert second.json()["received"] == 1
+    assert ids == [_podman_id(f"{CONTAINER_PREFIX}{n['id']}") for n in (r1, r2)]
+
+    deleted = await client.delete(f"/api/projects/{pid}")
+    assert deleted.status_code == 204, deleted.text
     assert _podman_state(f"{CONTAINER_PREFIX}{r1['id']}") is None
     assert _podman_state(f"{CONTAINER_PREFIX}{r2['id']}") is None
     assert not _network_exists(f"{LINK_NETWORK_PREFIX}{link['id']}")
