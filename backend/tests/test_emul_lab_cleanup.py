@@ -1,6 +1,8 @@
 """Startup failure tears down even partially created emulation resources."""
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.models import Interface, Link, Node, Project, Topology
@@ -46,3 +48,61 @@ async def test_failed_wire_cleans_partial_network_and_nodes(monkeypatch):
         ("unlink", "l"), ("destroy", "b"), ("destroy", "a"),
     ]
     assert not manager._labs
+
+
+async def test_shutdown_attempts_every_project_after_failure():
+    events = []
+
+    class FakeAdaptor:
+        async def destroy_link(self, link_id):
+            events.append(("link", link_id))
+            if link_id == "bad-link":
+                raise RuntimeError("unavailable")
+
+        async def destroy(self, node_id):
+            events.append(("node", node_id))
+
+    manager = EmulLabManager()
+    manager._labs = {
+        "bad": ("fp", FakeAdaptor(), ["bad-node"], ["bad-link"]),
+        "good": ("fp", FakeAdaptor(), ["good-node"], ["good-link"]),
+    }
+    with pytest.raises(Exception, match="bad:.*unavailable"):
+        await manager.shutdown_all()
+    assert events == [("link", "bad-link"), ("node", "bad-node"),
+                      ("link", "good-link"), ("node", "good-node")]
+    assert "good" not in manager._labs
+
+
+async def test_reconciler_only_touches_labeled_netgeo_resources(monkeypatch):
+    events = []
+    owned = {"netgeo.managed": "true", "netgeo.project": "p", "netgeo.lab": "lab"}
+    networks = [
+        SimpleNamespace(name="netgeo-link-owned", attrs={"labels": {**owned, "netgeo.link": "owned"}}),
+        SimpleNamespace(name="netgeo-link-other", attrs={"labels": {"netgeo.managed": "true"}}),
+    ]
+    containers = [
+        SimpleNamespace(name="netgeo-owned", labels={**owned, "netgeo.kind": "frr"}),
+        SimpleNamespace(name="netgeo-other", labels={"netgeo.managed": "true"}),
+    ]
+
+    class FakeAdaptor:
+        def __init__(self):
+            pass
+
+        def _get_client(self):
+            return SimpleNamespace(
+                networks=SimpleNamespace(list=lambda: networks),
+                containers=SimpleNamespace(list=lambda all: containers),
+            )
+
+        async def destroy_link(self, link_id):
+            events.append(("link", link_id))
+
+        async def destroy(self, node_id):
+            events.append(("node", node_id))
+
+    monkeypatch.setattr("app.services.emul_lab.socket_reachable", lambda: True)
+    monkeypatch.setattr("app.services.emul_lab.PodmanAdaptor", FakeAdaptor)
+    await EmulLabManager().reconcile_stale()
+    assert events == [("link", "owned"), ("node", "owned")]

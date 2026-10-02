@@ -250,12 +250,12 @@ def _init_admin_from_settings() -> None:
 async def lifespan(_: FastAPI):
     configure_logging()
     _init_admin_from_settings()
-    logger.info("NetGeo backend started (environment=%s)", settings.ENVIRONMENT)
-    yield
     from app.services.emul_lab import get_emul_lab_manager
     manager = get_emul_lab_manager()
-    for project_id in list(manager._labs):
-        await manager.destroy(project_id)
+    await manager.reconcile_stale()
+    logger.info("NetGeo backend started (environment=%s)", settings.ENVIRONMENT)
+    yield
+    await manager.shutdown_all()
     logger.info("NetGeo backend shutting down.")
 
 

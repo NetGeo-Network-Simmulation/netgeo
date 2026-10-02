@@ -9,15 +9,20 @@ cleanup against ``podman ps`` rather than trusting the API's own response.
 from __future__ import annotations
 
 import subprocess
+from uuid import uuid4
 
 import pytest
 
+from app.services.emul_lab import EmulLabManager
 from app.services.netlab import get_lab_manager
 from engine.emulation.podman_adaptor import (
     CONTAINER_PREFIX,
     LINK_NETWORK_PREFIX,
+    PodmanAdaptor,
     socket_reachable,
 )
+from engine.model import InterfaceModel, LinkModel
+from engine.netstack.device import Device
 
 pytestmark = pytest.mark.podman
 
@@ -61,6 +66,14 @@ def _podman_label(container_name: str, label: str) -> str:
         ["podman", "inspect", container_name, "--format", f"{{{{index .Config.Labels \"{label}\"}}}}"],
         capture_output=True, text=True, check=True,
     ).stdout.strip()
+
+
+def _force_cleanup(node_ids: tuple[str, str], link_id: str) -> None:
+    for node_id in node_ids:
+        subprocess.run(["podman", "rm", "-f", f"{CONTAINER_PREFIX}{node_id}"],
+                       capture_output=True, check=False)
+    subprocess.run(["podman", "network", "rm", "-f", f"{LINK_NETWORK_PREFIX}{link_id}"],
+                   capture_output=True, check=False)
 
 
 def _iface(name: str, ips: list[str]):
@@ -158,3 +171,29 @@ async def test_mixed_mode_ping_rejected_clearly(client):
     )
     assert resp.status_code != 200
     assert "mixed-mode" in resp.text or "mode=emul" in resp.text
+
+
+@skip_no_podman
+async def test_reconcile_stale_labeled_lab_leaves_other_resources_alone():
+    suffix = uuid4().hex[:12]
+    project_id = f"reconcile-{suffix}"
+    node_a, node_b, link_id = f"a-{suffix}", f"b-{suffix}", f"l-{suffix}"
+    adaptor = PodmanAdaptor(project_id=project_id, lab_id="stale-test")
+    try:
+        for node_id in (node_a, node_b):
+            await adaptor.spawn(Device(name=node_id, node_id=node_id, nos="frr", mode="emul"))
+        await adaptor.wire_link(
+            LinkModel(id=link_id, a_iface="ia", b_iface="ib"),
+            InterfaceModel(id="ia", node_id=node_a, name="eth1"),
+            InterfaceModel(id="ib", node_id=node_b, name="eth1"),
+        )
+        assert _network_exists(f"{LINK_NETWORK_PREFIX}{link_id}")
+        await EmulLabManager().reconcile_stale()
+        assert not _network_exists(f"{LINK_NETWORK_PREFIX}{link_id}")
+        assert _podman_state(f"{CONTAINER_PREFIX}{node_a}") is None
+        assert _podman_state(f"{CONTAINER_PREFIX}{node_b}") is None
+        # Podman's own default bridge is outside the NetGeo ownership labels.
+        assert _network_exists("podman")
+        await EmulLabManager().reconcile_stale()  # idempotent
+    finally:
+        _force_cleanup((node_a, node_b), link_id)
