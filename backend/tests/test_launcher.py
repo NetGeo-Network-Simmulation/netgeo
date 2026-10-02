@@ -347,6 +347,32 @@ def test_failed_native_switch_stops_candidate_and_keeps_current_runtime(monkeypa
     ]
 
 
+def test_failed_save_and_restore_stops_candidate_and_exits(monkeypatch):
+    old = ("http://old", "uvicorn", object(), object())
+    candidate = ("http://candidate", "static", object(), object())
+    events = []
+    runtimes = iter([old, candidate])
+    monkeypatch.setattr(sys, "argv", ["netgeo"])
+    monkeypatch.delenv("NETGEO_NO_BROWSER", raising=False)
+    monkeypatch.delenv("NETGEO_NO_WINDOW", raising=False)
+    monkeypatch.setattr(launcher, "_load_runtime_profile", lambda _args: {"mode": "native-offline", "engineOrigin": ""})
+
+    def start(*_args, **_kwargs):
+        try:
+            return next(runtimes)
+        except StopIteration:
+            raise RuntimeError("old engine cannot restart") from None
+
+    monkeypatch.setattr(launcher, "_start_runtime", start)
+    monkeypatch.setattr(launcher, "_run_native_session", lambda _url: (True, {"mode": "native-remote", "engineOrigin": "https://engine.test"}))
+    monkeypatch.setattr(launcher, "_save_runtime_profile", lambda _profile: (_ for _ in ()).throw(OSError("config read-only")))
+    monkeypatch.setattr(launcher, "_stop_runtime", lambda runtime: events.append(runtime[0]))
+
+    with pytest.raises(RuntimeError, match="candidate runtime will be stopped"):
+        launcher.main()
+    assert events == ["http://old", "http://candidate"]
+
+
 def test_failed_old_shutdown_rolls_back_candidate_without_saving(monkeypatch):
     events = []
     old = ("http://old", "uvicorn", object(), object())

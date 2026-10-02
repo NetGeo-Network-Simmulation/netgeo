@@ -1254,11 +1254,10 @@ def main() -> None:
                 try:
                     restored = _start_runtime(profile, args)
                 except (OSError, RuntimeError, SystemExit) as restore_exc:
-                    print(
-                        f"[netgeo-launcher] runtime profile was not saved ({exc}); "
-                        f"previous engine could not restart ({restore_exc})",
-                        file=sys.stderr,
-                    )
+                    raise RuntimeError(
+                        f"Runtime profile was not saved ({exc}); previous engine could not restart "
+                        f"({restore_exc}). The candidate runtime will be stopped."
+                    ) from restore_exc
                 else:
                     _stop_runtime(next_runtime)
                     runtime = restored
