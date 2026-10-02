@@ -140,6 +140,7 @@ const RUNTIME_MODES: {
 
 function RuntimeSection() {
   const [profile, setProfile] = useState(readRuntimeProfile);
+  const managedNative = Boolean(window.pywebview?.api.switch_runtime_profile);
   const [error, setError] = useState<string | null>(null);
   const [health, setHealth] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
@@ -215,11 +216,12 @@ function RuntimeSection() {
       <div className="space-y-2">
         {RUNTIME_MODES.map((option) => {
           const selected = profile.mode === option.mode;
+          const disabled = option.disabled || (managedNative && (option.mode === 'headless' || option.mode === 'full-online'));
           return (
             <button
               key={option.mode}
               type="button"
-              disabled={option.disabled}
+              disabled={disabled}
               onClick={() => { setProfile((current) => ({ ...current, mode: option.mode })); setError(null); setHealth(null); }}
               aria-pressed={selected}
               className={cn(
@@ -227,11 +229,11 @@ function RuntimeSection() {
                 selected
                   ? 'border-accent bg-accent/10'
                   : 'border-fg/10 bg-fg/5 hover:border-fg/25',
-                option.disabled && 'cursor-not-allowed opacity-45',
+                disabled && 'cursor-not-allowed opacity-45',
               )}
             >
               <p className="text-sm font-medium text-fg/85">{option.label}</p>
-              <p className="mt-0.5 text-xs text-fg/45">{option.description}</p>
+              <p className="mt-0.5 text-xs text-fg/45">{option.description}{managedNative && option.mode === 'headless' ? ' Launch with --no-window to use this mode.' : ''}{managedNative && option.mode === 'full-online' ? ' Open the server in a browser for this mode.' : ''}</p>
             </button>
           );
         })}

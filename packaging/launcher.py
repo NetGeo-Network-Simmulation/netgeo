@@ -203,6 +203,9 @@ class _FrontendOnlyHandler(SimpleHTTPRequestHandler):
 
     def do_GET(self) -> None:
         path = urlsplit(self.path).path
+        if path == "/api" or path.startswith("/api/") or path.startswith("/ws"):
+            self.send_error(404)
+            return
         target = Path(self.directory) / path.lstrip("/")
         if path != "/" and not target.is_file():
             self.path = "/"
@@ -654,14 +657,14 @@ class _WindowBridge:
         """Validate a native runtime transition, then hand it to the parent launcher."""
         if self._control_path is None:
             raise RuntimeError("Runtime switching is unavailable outside the managed native launcher.")
-        if mode in {"native-remote", "full-online"}:
+        if mode == "native-remote":
             try:
                 origin = _normalize_engine_origin(engine_origin)
                 version = _check_remote_health(origin)
             except SystemExit as exc:
                 raise RuntimeError(str(exc)) from exc
             command = {"mode": "native-remote", "engineOrigin": origin}
-        elif mode in {"native-offline", "native-google"}:
+        elif mode == "native-offline":
             version = "local"
             command = {"mode": "native-offline", "engineOrigin": ""}
         else:
@@ -1232,15 +1235,36 @@ def main() -> None:
             try:
                 command = _validated_switch_command(command)
                 next_runtime = _start_runtime(command, args)
-                _save_runtime_profile(command)
             except (OSError, RuntimeError, SystemExit) as exc:
                 if next_runtime is not None:
                     _stop_runtime(next_runtime)
                 print(f"[netgeo-launcher] runtime switch failed; keeping current engine: {exc}", file=sys.stderr)
                 continue
             previous_runtime = runtime
+            try:
+                _stop_runtime(previous_runtime)
+            except RuntimeError as exc:
+                _stop_runtime(next_runtime)
+                print(f"[netgeo-launcher] runtime switch failed; keeping current engine: {exc}", file=sys.stderr)
+                continue
             runtime = next_runtime
-            _stop_runtime(previous_runtime)
+            try:
+                _save_runtime_profile(command)
+            except OSError as exc:
+                try:
+                    restored = _start_runtime(profile, args)
+                except (OSError, RuntimeError, SystemExit) as restore_exc:
+                    print(
+                        f"[netgeo-launcher] runtime profile was not saved ({exc}); "
+                        f"previous engine could not restart ({restore_exc})",
+                        file=sys.stderr,
+                    )
+                else:
+                    _stop_runtime(next_runtime)
+                    runtime = restored
+                    print(f"[netgeo-launcher] runtime switch rolled back: {exc}", file=sys.stderr)
+                    continue
+            profile = command
     finally:
         _stop_runtime(runtime)
 
