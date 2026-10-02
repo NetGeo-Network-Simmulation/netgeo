@@ -91,8 +91,13 @@ class PodmanAdaptor(EmulationAdaptor):
 
     name = "podman"
 
-    def __init__(self) -> None:
+    def __init__(self, project_id: str | None = None, lab_id: str | None = None) -> None:
         self._client = None  # lazy: only import/connect podman on first use
+        self._labels = {"netgeo.managed": "true"}
+        if project_id:
+            self._labels["netgeo.project"] = project_id
+        if lab_id:
+            self._labels["netgeo.lab"] = lab_id
 
     def _get_client(self):
         if self._client is None:
@@ -119,7 +124,7 @@ class PodmanAdaptor(EmulationAdaptor):
             name=name,
             cap_add=spec.caps,
             mem_limit=f"{spec.mem_limit_mb}m",
-            labels={"netgeo.managed": "true", "netgeo.kind": kind},
+            labels={**self._labels, "netgeo.kind": kind},
             detach=True,
             # bridge, not the rootless default (pasta) — pasta-mode containers
             # can't join the extra per-link networks wire_link() attaches (N-3).
@@ -160,7 +165,7 @@ class PodmanAdaptor(EmulationAdaptor):
         network = client.networks.create(
             f"{LINK_NETWORK_PREFIX}{link.id}",
             driver="bridge",
-            labels={"netgeo.managed": "true", "netgeo.link": link.id},
+            labels={**self._labels, "netgeo.link": link.id},
             ipam={"Config": [{"Subnet": cidr, "Gateway": gateway}]},
         )
         container_a = client.containers.get(f"{CONTAINER_PREFIX}{a.node_id}")

@@ -77,10 +77,12 @@ async def get_project(project_id: str, r: Annotated[MemoryRepository, Depends(re
 
 @router.delete("/projects/{project_id}", status_code=204)
 async def delete_project(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
+    from app.services.emul_lab import get_emul_lab_manager
     try:
         await r.delete_project(project_id)
     except StoreNotFound as exc:
         raise translate_not_found(exc) from exc
+    await get_emul_lab_manager().destroy(project_id)
 
 
 @router.get("/projects/{project_id}/topology", response_model=Topology)

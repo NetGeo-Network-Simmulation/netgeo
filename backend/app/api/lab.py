@@ -144,57 +144,15 @@ def _direct_link(topo: Topology, a: Node, b: Node) -> Link | None:
     return None
 
 
-async def _emul_ping(src: Node, dst: Node, link: Link, count: int) -> dict:
-    """N-5: real ICMP echo between two ``mode=emul`` nodes over a real podman
-    container pair. Ephemeral by design — the containers and the per-link
-    network this spawns exist only for this call and are always torn down in
-    ``finally``, so there is no lifecycle to manage and no way to leak a
-    container: a crash mid-ping still lets ``destroy``/``destroy_link`` run
-    (both are idempotent — see ``test_podman_adaptor.py``/``test_link_e2e.py``).
-    Deliberately bypasses ``Lab``/the journal entirely: this never touches the
-    DES kernel, so it can't leave a false record for ``/seek`` to replay.
-    """
-    from podman.errors import APIError
-
-    from engine.emulation.ip_alloc import link_subnet
-    from engine.emulation.podman_adaptor import (
-        ImageNotLocal,
-        PodmanAdaptor,
-        PodmanSocketUnreachable,
-        UnknownKind,
-    )
-    from engine.model import InterfaceModel, LinkModel
-    from engine.netstack.device import Device as EmulDevice
-
-    src_iface = next(
-        (i for i in src.interfaces if i.id in (link.a_iface, link.b_iface)), None
-    )
-    dst_iface = next(
-        (i for i in dst.interfaces if i.id in (link.a_iface, link.b_iface)), None
-    )
-    if src_iface is None or dst_iface is None:
-        raise SimulationError(f"link {link.id!r} does not wire {src.name!r} to {dst.name!r}")
-
-    adaptor = PodmanAdaptor()
-    src_dev = EmulDevice(name=src.name, node_id=src.id, nos=str(src.nos), mode="emul")
-    dst_dev = EmulDevice(name=dst.name, node_id=dst.id, nos=str(dst.nos), mode="emul")
+async def _emul_ping(topo: Topology, src: Node, dst: Node, link: Link, count: int) -> dict:
+    """Ping over the project's living FRR lab; no DES journal is recorded."""
+    from app.services.emul_lab import get_emul_lab_manager
     try:
-        await adaptor.spawn(src_dev)
-        await adaptor.spawn(dst_dev)
-        await adaptor.wire_link(
-            LinkModel(id=link.id, a_iface=src_iface.id, b_iface=dst_iface.id),
-            InterfaceModel(id=src_iface.id, node_id=src.id, name=src_iface.name),
-            InterfaceModel(id=dst_iface.id, node_id=dst.id, name=dst_iface.name),
-        )
-        _cidr, _gw, _ip_a, ip_b = link_subnet(link.id)
-        result = await adaptor.ping(src.id, ip_b, count=count)
-        return {**result, "src": src.id, "dst": dst.id, "path": "emulation"}
-    except (PodmanSocketUnreachable, UnknownKind, ImageNotLocal, APIError) as exc:
+        return await get_emul_lab_manager().ping(topo, src.id, dst.id, link.id, count)
+    except SimulationError:
+        raise
+    except Exception as exc:
         raise SimulationError(f"emulation ping failed: {exc}") from exc
-    finally:
-        await adaptor.destroy_link(link.id)
-        await adaptor.destroy(src_dev.node_id)
-        await adaptor.destroy(dst_dev.node_id)
 
 
 @router.post("/{project_id}/ping")
@@ -218,7 +176,9 @@ async def lab_ping(
                 f"no direct link between {src_node.name!r} and {dst_node.name!r}: "
                 "multi-hop emulation ping is out of scope (N-5)"
             )
-        return await _emul_ping(src_node, dst_node, link, min(body.count, 50))
+        return await _emul_ping(topo, src_node, dst_node, link, min(body.count, 50))
+    if src_node is not None and any(n.mode == NodeMode.emul for n in topo.nodes):
+        raise SimulationError("mixed-mode forwarding unsupported: sim-to-emul ping")
 
     def work():
         lab = _lab_for(topo)
@@ -570,6 +530,8 @@ async def lab_status(project_id: str, r: Annotated[MemoryRepository, Depends(rep
 async def lab_rebuild(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     """Force a fresh lab (drops live CLI state and captures)."""
     topo = await _topo(r, project_id)
+    from app.services.emul_lab import get_emul_lab_manager
+    await get_emul_lab_manager().destroy(project_id)
     netlab.get_lab_manager().invalidate(project_id)
 
     def work():
@@ -687,6 +649,8 @@ async def lab_run_step(project_id: str, r: Annotated[MemoryRepository, Depends(r
 
 @router.post("/{project_id}/run/stop")
 async def lab_run_stop(project_id: str):
+    from app.services.emul_lab import get_emul_lab_manager
+    await get_emul_lab_manager().destroy(project_id)
     return await netlab.get_lab_run_manager().stop(project_id)
 
 
