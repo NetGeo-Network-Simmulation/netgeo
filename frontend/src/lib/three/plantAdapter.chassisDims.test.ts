@@ -7,6 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 import type { NodeModel, Rack, Topology } from '@/api/types';
+import type { DeviceType as CatalogEntry } from '@/api/client';
 import { adaptTopology } from './plantAdapter';
 
 function node(id: string, nos: NodeModel['nos'], ruStart: number): NodeModel {
@@ -32,6 +33,18 @@ function node(id: string, nos: NodeModel['nos'], ruStart: number): NodeModel {
 const rack: Rack = { id: 'r1', project_id: 'p1', site_id: null, name: 'Rack1', ru_height: 42, enclosure_profile: null };
 
 describe('plantAdapter — per-SKU chassis dimensions (§8.1)', () => {
+  it('uses a removable pack asset binding for an arbitrary device slug', () => {
+    const mounted = { ...node('n-pack', 'forgeos', 1), device_type_id: 'sample:novel-switch' };
+    const catalog: CatalogEntry = {
+      id: 'sample:novel-switch', name: 'Novel Switch', category: 'wired', icon: 'switch',
+      description: '', builtin: true, vendor: 'Fixture',
+      ports: [{ pattern: 'eth0', count: 1, type: 'eth' }],
+      chassis_asset: 'sample:novel-switch',
+    };
+    const topology: Topology = { nodes: [mounted], links: [], racks: [rack] };
+    const adapted = adaptTopology(topology, ['r1'], new Map([[catalog.id, catalog]]))!;
+    expect(adapted.racks[0]!.devices[0]!.chassisAsset).toBe('sample:novel-switch');
+  });
   it('a model with verified chassisMm (MikroTik CRS317) gets real body dims and no approximate marker', () => {
     const topology: Topology = { nodes: [node('n1', 'routeros', 1)], links: [], racks: [rack] };
     const adapted = adaptTopology(topology, ['r1'])!;

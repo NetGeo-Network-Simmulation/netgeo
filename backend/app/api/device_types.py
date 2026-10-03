@@ -27,6 +27,7 @@ cache, no plugin engine: enable/disable is just an entry in
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 import shutil
@@ -36,10 +37,10 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 
-from app.services.device_pack_archive import MAX_ARCHIVE, install_archive
+from app.services.device_pack_archive import MAX_ARCHIVE, install_archive, validate_glb
 from app.store import get_repo
 from app.utils.ids import new_id
 
@@ -95,6 +96,7 @@ class DeviceType(BaseModel):
     physical: dict | None = Field(
         default=None, description="Rack-unit height / form factor straight from the pack JSON"
     )
+    chassis_asset: str | None = Field(default=None, description="Pack-scoped visual asset family")
 
 
 class DeviceTypeCreate(BaseModel):
@@ -209,9 +211,20 @@ def list_packs() -> list[dict]:
     ]
 
 
-def _device_json_to_type(pack_id: str, dev: dict) -> DeviceType:
+def _pack_asset_urls(manifest: dict) -> dict[str, dict]:
+    """Normalize removable v1 bindings into the existing lazy asset registry."""
+    assets = manifest.get("assets", {})
+    if isinstance(assets, dict):
+        return assets  # bundled/repo pack format
+    return {f"{manifest['id']}:{item['device_id']}":
+            {"body": f"/api/device-packs/{manifest['id']}/{item['path']}"}
+            for item in assets if item.get("kind") == "chassis-glb"}
+
+
+def _device_json_to_type(pack_id: str, dev: dict, manifest: dict | None = None) -> DeviceType:
     kind = dev.get("kind", "custom")
     power = dev.get("power") or {}
+    family = f"{pack_id}:{dev['id']}"
     return DeviceType(
         id=f"{pack_id}:{dev['id']}",
         name=dev.get("display_name", dev["id"]),
@@ -226,6 +239,7 @@ def _device_json_to_type(pack_id: str, dev: dict) -> DeviceType:
         vendor=dev.get("vendor"),
         ports=dev.get("ports"),
         physical=dev.get("physical"),
+        chassis_asset=family if manifest and family in _pack_asset_urls(manifest) else None,
     )
 
 
@@ -255,7 +269,7 @@ def _load_enabled_pack_devices() -> list[DeviceType]:
                         pack_id, device_file.name,
                     )
                     continue
-                out.append(_device_json_to_type(pack_id, dev))
+                out.append(_device_json_to_type(pack_id, dev, manifest))
     return out
 
 
@@ -291,7 +305,8 @@ async def list_device_types() -> list[DeviceType]:
 async def list_device_packs() -> list[DevicePack]:
     """List every discovered device library pack and its enabled state."""
     overrides = _load_pack_overrides()
-    return [DevicePack(**{**manifest, "enabled": _pack_enabled(manifest["id"], manifest, overrides),
+    return [DevicePack(**{**manifest, "assets": _pack_asset_urls(manifest),
+                          "enabled": _pack_enabled(manifest["id"], manifest, overrides),
                           "removable": pack_dir.is_relative_to(_USER_PACKS_DIR)})
             for pack_dir, manifest in _iter_pack_manifests()]
 
@@ -312,7 +327,8 @@ async def install_device_pack(file: Annotated[UploadFile, File()]) -> DevicePack
                                        {p["id"] for _, p in _iter_pack_manifests()})
         except (ValueError, TypeError, OSError, zipfile.BadZipFile, UnicodeError) as exc:
             raise HTTPException(400, str(exc)) from exc
-    return DevicePack(**{**manifest, "enabled": bool(manifest.get("enabled_by_default", False)), "removable": True})
+    return DevicePack(**{**manifest, "assets": _pack_asset_urls(manifest),
+                         "enabled": False, "removable": True})
 
 
 @router.delete("/device-packs/{pack_id}")
@@ -340,14 +356,24 @@ async def uninstall_device_pack(pack_id: str) -> dict:
 
 
 @router.get("/device-packs/{pack_id}/assets/{asset_path:path}")
-async def device_pack_asset(pack_id: str, asset_path: str) -> FileResponse:
+async def device_pack_asset(pack_id: str, asset_path: str) -> Response:
     for path, manifest in _iter_pack_manifests():
         if (manifest["id"] == pack_id and path.is_relative_to(_USER_PACKS_DIR)
                 and _pack_enabled(pack_id, manifest, _load_pack_overrides())):
-            declared = {entry["path"] for entry in manifest.get("files", [])}
+            declared = {entry["path"]: entry for entry in manifest.get("files", [])}
             relative = "assets/" + asset_path
-            if relative in declared and (path / relative).is_file():
-                return FileResponse(path / relative, media_type="model/gltf-binary")
+            assets = manifest.get("assets", [])
+            if (isinstance(assets, list) and any(a.get("kind") == "chassis-glb" and a.get("path") == relative for a in assets)
+                    and relative in declared and (path / relative).is_file()):
+                raw = (path / relative).read_bytes()
+                entry = declared[relative]
+                if len(raw) == entry["size"] and hashlib.sha256(raw).hexdigest() == entry["sha256"]:
+                    try:
+                        validate_glb(raw, relative)
+                    except ValueError:
+                        pass
+                    else:
+                        return Response(raw, media_type="model/gltf-binary")
     raise HTTPException(404, "Pack asset not found")
 
 
@@ -378,7 +404,8 @@ def _set_pack_enabled(pack_id: str, enabled: bool) -> DevicePack:
     overrides = _load_pack_overrides()
     overrides[pack_id] = enabled
     _save_pack_overrides(overrides, _USER_PACKS_STATE_FILE if (_USER_PACKS_DIR / pack_id).exists() else _PACKS_STATE_FILE)
-    return DevicePack(**{**manifests[pack_id], "enabled": enabled,
+    return DevicePack(**{**manifests[pack_id], "assets": _pack_asset_urls(manifests[pack_id]),
+                          "enabled": enabled,
                           "removable": (_USER_PACKS_DIR / pack_id).exists()})
 
 
