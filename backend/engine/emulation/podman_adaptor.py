@@ -26,14 +26,14 @@ from engine.emulation.kinds import KINDS
 from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
 
-SOCKET_PATH = f"/run/user/{os.getuid()}/podman/podman.sock"
+SOCKET_PATH = f"/run/user/{os.getuid()}/podman/podman.sock" if hasattr(os, "getuid") else ""
 CONTAINER_PREFIX = "netgeo-"
 LINK_NETWORK_PREFIX = "netgeo-link-"
 
 
 def socket_reachable(path: str = SOCKET_PATH) -> bool:
     """True if the rootless Podman REST socket exists and accepts a connection."""
-    if not os.path.exists(path):
+    if not path or not os.path.exists(path):
         return False
     sock = _socket.socket(_socket.AF_UNIX, _socket.SOCK_STREAM)
     try:
