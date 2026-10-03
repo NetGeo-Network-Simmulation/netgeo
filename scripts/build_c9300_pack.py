@@ -39,7 +39,8 @@ def build(destination: Path) -> None:
             {"source": "https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/hardware/install/b_c9300_hig/Product-overview.html", "note": "Reference for port, PSU, fan, and chassis arrangement facts only."},
             {"source": "https://www.cisco.com/c/en/us/td/docs/switches/lan/catalyst9300/hardware/install/b_c9300_hig/Installing-a-network-module.html", "note": "Reference for C9300-NM-8X eight SFP+ slots only."},
         ],
-        "licenses": [{"name": "Apache-2.0", "scope": "NetGeo-authored device metadata and Blender GLB; no vendor artwork, CAD, logo, or texture included"}],
+        "licenses": [{"name": "Apache-2.0", "scope": "Original NetGeo schema arrangement and Blender-authored GLB geometry only"}],
+        "rights_note": "Cisco and Catalyst product names are Cisco trademarks used to identify the device. Technical specifications are factual references attributed in provenance; NetGeo does not claim ownership of or relicense these names or facts. No vendor artwork, CAD, logo, texture, or documentation text is included.",
         "files": [
             {"path": path, "size": len(raw), "sha256": hashlib.sha256(raw).hexdigest()}
             for path, raw in sorted(documents.items())
