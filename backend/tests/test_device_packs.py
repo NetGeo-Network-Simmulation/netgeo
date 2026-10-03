@@ -13,7 +13,6 @@ from __future__ import annotations
 import json
 
 import pytest
-
 from app.api import device_types as dt
 
 # Every real pack under network/devices/packs/ and its expected device_count
@@ -107,7 +106,10 @@ async def test_pack_device_type_carries_vendor_ports_physical(client):
     by_id = {d["id"]: d for d in resp.json()}
     sw = by_id["switches:cisco-c9300-48p-access"]
     assert sw["vendor"] == "Cisco"
-    assert sw["physical"] == {"ru": 1, "form_factor": "1U-stackable"}
+    assert sw["physical"] == {
+        "ru": 1, "form_factor": "1U-stackable-19in-rackmount",
+        "width_mm": 445, "depth_mm": 488, "height_mm": 44,
+    }
     assert sw["ports"], "pack device must carry its ports[] through to the API"
     assert all("type" in p and "count" in p for p in sw["ports"])
 

@@ -4,6 +4,20 @@ Backend NetGeo: **FastAPI (async) + engine simulasi discrete-event**.
 Mengimplementasikan permukaan REST/WebSocket pada MASTER_SPEC §4 dan
 men-*generate* config multi-vendor (ForgeOS: satu intent → banyak NOS, §5).
 
+Paket vendor C9300-48P + NM-8X yang dapat dilepas dibangun dari entri katalog
+`switches` dan GLB Blender NetGeo yang sudah ada:
+
+```sh
+python scripts/build_c9300_pack.py /tmp/cisco-c9300-48p-nm8x.ngpack
+python scripts/build_c9300_pack.py --help
+```
+
+Unggah `.ngpack` melalui `POST /api/device-packs/install`, lalu aktifkan lewat
+`POST /api/device-packs/cisco-c9300-48p-nm8x/enable`. Paket dimulai nonaktif;
+`disable` dan `DELETE /api/device-packs/cisco-c9300-48p-nm8x` melepasnya.
+Arsip hasil build bersifat generated dan tidak perlu di-commit. Entri asli
+`switches` tetap tersedia selama tahap migrasi katalog.
+
 > Ada **dua jalur simulasi live** di belakang API ini — `/api/simulate`
 > (flow engine sederhana, §4 di bawah) dan `/api/lab` (netstack
 > packet-realistic dengan protokol penuh — OSPF/IS-IS/BGP/MPLS/VRRP/VXLAN,

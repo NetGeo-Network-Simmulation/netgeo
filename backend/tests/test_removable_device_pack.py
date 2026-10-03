@@ -2,17 +2,71 @@ import hashlib
 import io
 import json
 import struct
+import subprocess
+import sys
 import time
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import pytest
-from fastapi import HTTPException
-
 from app.api import device_types as dt
 from app.models import Node
 from app.services.device_pack_archive import install_archive
 from app.store.memory import MemoryRepository
+from fastapi import HTTPException
+
+
+def test_c9300_pack_build_install_lifecycle(tmp_path, monkeypatch):
+    """The shipped builder must produce an installable pack from core sources."""
+    import asyncio
+    from types import SimpleNamespace
+
+    repo_root = Path(__file__).resolve().parents[2]
+    script = repo_root / "scripts/build_c9300_pack.py"
+    outputs = [tmp_path / f"build-{number}.ngpack" for number in (1, 2)]
+    for output in outputs:
+        subprocess.run([sys.executable, str(script), str(output)], check=True)
+    assert outputs[0].read_bytes() == outputs[1].read_bytes()
+    with zipfile.ZipFile(outputs[0]) as archive:
+        manifest = json.loads(archive.read("manifest.json"))
+        source = json.loads((repo_root / "network/devices/packs/switches/devices/switches.json").read_text())
+        device = json.loads(archive.read("devices/c9300-48p-nm8x.json"))["devices"][0]
+        assert device == next(item for item in source["devices"] if item["id"] == device["id"])
+        assert device["physical"]["depth_mm"] == 488
+        assert device["physical"]["width_mm"] == 445
+        assert device["physical"]["height_mm"] == 44
+        assert [port["count"] for port in device["ports"]] == [48, 8]
+        assert device["network_module"] == "C9300-NM-8X"
+        assert all(entry["sha256"] == hashlib.sha256(archive.read(entry["path"])).hexdigest()
+                   for entry in manifest["files"])
+
+    root = tmp_path / "installed"
+    pack_id = "cisco-c9300-48p-nm8x"
+    assert install_archive(outputs[0], root, {"switches"}) == manifest
+    monkeypatch.setattr(dt, "_PACKS_DIR", tmp_path / "bundled")
+    monkeypatch.setattr(dt, "_USER_PACKS_DIR", root)
+    monkeypatch.setattr(dt, "_USER_PACKS_STATE_FILE", root / "enabled.json")
+    monkeypatch.setattr(dt, "_PACKS_STATE_FILE", tmp_path / "bundled-state.json")
+    monkeypatch.setattr(dt, "get_repo", lambda: SimpleNamespace(_nodes={}))
+    device_type_id = f"{pack_id}:cisco-c9300-48p-access"
+    def visible():
+        return [item for item in asyncio.run(dt.list_device_types()) if item.id == device_type_id]
+    assert not visible()
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(dt.device_pack_asset(pack_id, "c9300-48p-nm8x.glb"))
+    assert error.value.status_code == 404
+    dt._set_pack_enabled(pack_id, True)
+    assert len(visible()) == 1
+    assert visible()[0].chassis_asset == device_type_id
+    assert asyncio.run(dt.device_pack_asset(pack_id, "c9300-48p-nm8x.glb")).body == (
+        repo_root / "frontend/public/3d/brands/cisco/c9300-48p-nm8x.glb").read_bytes()
+    dt._set_pack_enabled(pack_id, False)
+    assert not visible()
+    with pytest.raises(HTTPException):
+        asyncio.run(dt.device_pack_asset(pack_id, "c9300-48p-nm8x.glb"))
+    assert asyncio.run(dt.uninstall_device_pack(pack_id)) == {"deleted": pack_id}
+    assert not (root / pack_id).exists()
 
 DEVICE = {"$schema": "netgeo.device.v2", "devices": [{
     "id": "novel-switch", "display_name": "Novel Switch", "vendor": "Fixture", "kind": "switch",
