@@ -17,6 +17,12 @@ Unggah `.ngpack` melalui `POST /api/device-packs/install`, lalu aktifkan lewat
 `disable` dan `DELETE /api/device-packs/cisco-c9300-48p-nm8x` melepasnya.
 Arsip hasil build bersifat generated dan tidak perlu di-commit. Entri asli
 `switches` tetap tersedia selama tahap migrasi katalog.
+Lisensi Apache-2.0 pada manifest hanya mencakup susunan data orisinal NetGeo
+dan geometri GLB yang dibuat lewat Blender. Nama produk/merek Cisco dipakai
+untuk identifikasi, sementara spesifikasi teknis adalah fakta yang dirujuk
+dari dokumentasi resmi Cisco; NetGeo tidak mengklaim kepemilikan atau melisensikan
+ulang nama maupun fakta tersebut. Tidak ada teks, logo, CAD, atau tekstur vendor
+di dalam paket.
 
 > Ada **dua jalur simulasi live** di belakang API ini — `/api/simulate`
 > (flow engine sederhana, §4 di bawah) dan `/api/lab` (netstack

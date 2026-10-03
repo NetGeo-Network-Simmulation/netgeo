@@ -40,6 +40,12 @@ def test_c9300_pack_build_install_lifecycle(tmp_path, monkeypatch):
         assert device["network_module"] == "C9300-NM-8X"
         assert all(entry["sha256"] == hashlib.sha256(archive.read(entry["path"])).hexdigest()
                    for entry in manifest["files"])
+        assert manifest["licenses"] == [{
+            "name": "Apache-2.0",
+            "scope": "Original NetGeo schema arrangement and Blender-authored GLB geometry only",
+        }]
+        assert "does not claim ownership of or relicense these names or facts" in manifest["rights_note"]
+        assert all(source["source"].startswith("https://www.cisco.com/") for source in manifest["provenance"])
 
     root = tmp_path / "installed"
     pack_id = "cisco-c9300-48p-nm8x"
