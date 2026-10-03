@@ -92,7 +92,7 @@ def validate_device_documents(pack_id: str, documents: dict[str, bytes], declare
     for name, raw in documents.items():
         try:
             data = json.loads(raw)
-        except (UnicodeError, ValueError) as exc:
+        except (UnicodeError, ValueError, RecursionError) as exc:
             raise ValueError(f"Unreadable device JSON: {name}") from exc
         if not isinstance(data, dict) or data.get("$schema") not in ("netgeo.device.v1", "netgeo.device.v2"):
             raise ValueError(f"Invalid device schema: {name}")
@@ -116,29 +116,178 @@ def validate_device_documents(pack_id: str, documents: dict[str, bytes], declare
 
 
 def validate_glb(raw: bytes, name: str) -> None:
+    def invalid(reason: str) -> None:
+        raise ValueError(f"Invalid GLB {reason}: {name}")
+
+    def array(doc: dict, key: str) -> list:
+        value = doc.get(key, [])
+        if not isinstance(value, list):
+            invalid(key)
+        return value
+
+    def index(value: object, values: list, label: str) -> int:
+        if not isinstance(value, int) or isinstance(value, bool) or not 0 <= value < len(values):
+            invalid(label)
+        return value
+
     if len(raw) < 20 or raw[:4] != b"glTF":
-        raise ValueError(f"Invalid GLB header: {name}")
+        invalid("header")
     version, total = struct.unpack_from("<II", raw, 4)
     if version != 2 or total != len(raw):
-        raise ValueError(f"Invalid GLB version/length: {name}")
+        invalid("version/length")
     chunk_length, chunk_type = struct.unpack_from("<I4s", raw, 12)
     if chunk_type != b"JSON" or chunk_length == 0 or 20 + chunk_length > len(raw):
-        raise ValueError(f"Invalid GLB JSON chunk: {name}")
+        invalid("JSON chunk")
     cursor = 20 + chunk_length
     if chunk_length % 4 or cursor % 4:
-        raise ValueError(f"Unaligned GLB JSON chunk: {name}")
+        invalid("JSON chunk alignment")
+    bin_length = 0
     if cursor < total:
         if cursor + 8 > total:
-            raise ValueError(f"Invalid GLB BIN chunk: {name}")
+            invalid("BIN chunk")
         bin_length, bin_type = struct.unpack_from("<I4s", raw, cursor)
         if bin_type != b"BIN\x00" or bin_length % 4 or cursor + 8 + bin_length != total:
-            raise ValueError(f"Invalid GLB BIN chunk: {name}")
+            invalid("BIN chunk")
     try:
         metadata = json.loads(raw[20:20 + chunk_length])
-    except (ValueError, UnicodeError) as exc:
+    except (ValueError, UnicodeError, RecursionError) as exc:
         raise ValueError(f"Invalid GLB JSON: {name}") from exc
     if not isinstance(metadata, dict) or not isinstance(metadata.get("asset"), dict) or metadata["asset"].get("version") != "2.0":
-        raise ValueError(f"Invalid GLB asset metadata: {name}")
+        invalid("asset metadata")
+    # A chassis must be self-contained: GLTFLoader must never fetch resources
+    # from a URI embedded in an otherwise valid-looking binary container.
+    pending: list[object] = [metadata]
+    while pending:
+        value = pending.pop()
+        if isinstance(value, dict):
+            if "uri" in value:
+                invalid("external URI")
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    if any(metadata.get(key) for key in ("extensionsRequired", "animations", "skins", "cameras")):
+        invalid("unsupported chassis feature")
+
+    scenes = array(metadata, "scenes")
+    nodes = array(metadata, "nodes")
+    meshes = array(metadata, "meshes")
+    accessors = array(metadata, "accessors")
+    views = array(metadata, "bufferViews")
+    buffers = array(metadata, "buffers")
+    if len(buffers) != 1 or not isinstance(buffers[0], dict):
+        invalid("embedded buffer")
+    buffer_size = buffers[0].get("byteLength")
+    if not isinstance(buffer_size, int) or isinstance(buffer_size, bool) or buffer_size <= 0 or buffer_size > bin_length or bin_length - buffer_size > 3:
+        invalid("buffer length")
+    for view in views:
+        if not isinstance(view, dict) or view.get("buffer") != 0:
+            invalid("buffer view")
+        offset, size = view.get("byteOffset", 0), view.get("byteLength")
+        if (not isinstance(offset, int) or isinstance(offset, bool) or offset < 0
+                or not isinstance(size, int) or isinstance(size, bool) or size <= 0
+                or offset + size > buffer_size):
+            invalid("buffer view bounds")
+    component_sizes = {5120: 1, 5121: 1, 5122: 2, 5123: 2, 5125: 4, 5126: 4}
+    component_counts = {"SCALAR": 1, "VEC2": 2, "VEC3": 3, "VEC4": 4, "MAT2": 4, "MAT3": 9, "MAT4": 16}
+    for accessor in accessors:
+        if not isinstance(accessor, dict) or "sparse" in accessor:
+            invalid("accessor")
+        view = views[index(accessor.get("bufferView"), views, "accessor buffer view")]
+        if (not isinstance(accessor.get("count"), int) or isinstance(accessor["count"], bool) or accessor["count"] <= 0
+                or accessor.get("componentType") not in component_sizes
+                or accessor.get("type") not in component_counts):
+            invalid("accessor metadata")
+        element_size = component_sizes[accessor["componentType"]] * component_counts[accessor["type"]]
+        stride = view.get("byteStride", element_size)
+        offset = accessor.get("byteOffset", 0)
+        if (not isinstance(stride, int) or isinstance(stride, bool) or stride < element_size
+                or not isinstance(offset, int) or isinstance(offset, bool) or offset < 0
+                or offset + (accessor["count"] - 1) * stride + element_size > view["byteLength"]):
+            invalid("accessor bounds")
+    images = array(metadata, "images")
+    for image in images:
+        if not isinstance(image, dict) or "bufferView" not in image:
+            invalid("embedded image")
+        index(image["bufferView"], views, "image buffer view")
+        if image.get("mimeType") not in ("image/png", "image/jpeg"):
+            invalid("image mime type")
+    samplers = array(metadata, "samplers")
+    textures = array(metadata, "textures")
+    for texture in textures:
+        if not isinstance(texture, dict):
+            invalid("texture")
+        index(texture.get("source"), images, "texture source")
+        if "sampler" in texture:
+            index(texture["sampler"], samplers, "texture sampler")
+    for material in array(metadata, "materials"):
+        if not isinstance(material, dict):
+            invalid("material")
+        pbr = material.get("pbrMetallicRoughness", {})
+        if not isinstance(pbr, dict):
+            invalid("PBR material")
+        for owner, keys in ((pbr, ("baseColorTexture", "metallicRoughnessTexture")),
+                            (material, ("normalTexture", "occlusionTexture", "emissiveTexture"))):
+            for key in keys:
+                if key in owner:
+                    texture = owner[key]
+                    if not isinstance(texture, dict):
+                        invalid("material texture")
+                    index(texture.get("index"), textures, "material texture index")
+    if not scenes or not nodes or not meshes:
+        invalid("renderable scene")
+    scene = scenes[index(metadata.get("scene", 0), scenes, "scene index")]
+    if not isinstance(scene, dict) or not isinstance(scene.get("nodes"), list):
+        invalid("scene nodes")
+    renderable = False
+    visiting: set[int] = set()
+    visited: set[int] = set()
+    def visit(node_id: int) -> None:
+        nonlocal renderable
+        if node_id in visiting:
+            invalid("node cycle")
+        if node_id in visited:
+            return
+        visiting.add(node_id)
+        node = nodes[node_id]
+        if not isinstance(node, dict):
+            invalid("node")
+        if "mesh" in node:
+            mesh = meshes[index(node["mesh"], meshes, "mesh index")]
+            if not isinstance(mesh, dict) or not isinstance(mesh.get("primitives"), list):
+                invalid("mesh primitives")
+            for primitive in mesh["primitives"]:
+                if not isinstance(primitive, dict) or not isinstance(primitive.get("attributes"), dict):
+                    invalid("primitive")
+                if "targets" in primitive or "extensions" in primitive:
+                    invalid("unsupported primitive feature")
+                for accessor_id in primitive["attributes"].values():
+                    index(accessor_id, accessors, "attribute accessor")
+                if "indices" in primitive:
+                    indexed = accessors[index(primitive["indices"], accessors, "index accessor")]
+                    if indexed["type"] != "SCALAR" or indexed["componentType"] not in (5121, 5123, 5125) or indexed["count"] < 3:
+                        invalid("index accessor metadata")
+                if "material" in primitive:
+                    index(primitive["material"], array(metadata, "materials"), "material index")
+                position = primitive["attributes"].get("POSITION")
+                if (position is not None and primitive.get("mode", 4) in (4, 5, 6)
+                        and accessors[index(position, accessors, "POSITION accessor")]["type"] == "VEC3"
+                        and accessors[position]["componentType"] == 5126
+                        and accessors[position]["count"] >= 3):
+                    renderable = True
+        children = node.get("children", [])
+        if not isinstance(children, list):
+            invalid("node children")
+        for child in children:
+            visit(index(child, nodes, "child node index"))
+        visiting.remove(node_id)
+        visited.add(node_id)
+    try:
+        for root in scene["nodes"]:
+            visit(index(root, nodes, "root node index"))
+    except RecursionError:
+        invalid("node depth")
+    if not renderable:
+        invalid("renderable mesh")
 
 
 def validate_manifest(manifest: dict, files: dict[str, tuple[int, str]],

@@ -1,20 +1,41 @@
 import hashlib
 import io
 import json
+import struct
+import time
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 from app.api import device_types as dt
+from app.models import Node
 from app.services.device_pack_archive import install_archive
+from app.store.memory import MemoryRepository
 from fastapi import HTTPException
 
 DEVICE = {"$schema": "netgeo.device.v2", "devices": [{
     "id": "novel-switch", "display_name": "Novel Switch", "vendor": "Fixture", "kind": "switch",
     "ports": [{"name": "eth0", "type": "eth", "count": 1}],
 }]}
-GLB_JSON = b'{"asset":{"version":"2.0"}}'
-GLB_JSON += b" " * (-len(GLB_JSON) % 4)
-GLB = b"glTF" + (2).to_bytes(4, "little") + (20 + len(GLB_JSON)).to_bytes(4, "little") + len(GLB_JSON).to_bytes(4, "little") + b"JSON" + GLB_JSON
+GLB_BIN = struct.pack("<9f", 0, 0, 0, 1, 0, 0, 0, 1, 0)
+GLB_DOC = {
+    "asset": {"version": "2.0"}, "scene": 0,
+    "scenes": [{"nodes": [0]}], "nodes": [{"mesh": 0}],
+    "meshes": [{"primitives": [{"attributes": {"POSITION": 0}}]}],
+    "accessors": [{"bufferView": 0, "componentType": 5126, "count": 3, "type": "VEC3"}],
+    "bufferViews": [{"buffer": 0, "byteOffset": 0, "byteLength": len(GLB_BIN)}],
+    "buffers": [{"byteLength": len(GLB_BIN)}],
+}
+
+
+def glb(document):
+    encoded = json.dumps(document, separators=(",", ":")).encode()
+    encoded += b" " * (-len(encoded) % 4)
+    total = 20 + len(encoded) + 8 + len(GLB_BIN)
+    return b"glTF" + struct.pack("<II", 2, total) + struct.pack("<I4s", len(encoded), b"JSON") + encoded + struct.pack("<I4s", len(GLB_BIN), b"BIN\x00") + GLB_BIN
+
+
+GLB = glb(GLB_DOC)
 
 
 def archive_bytes(*, name="sample", path="devices/sample.json", payload=None, dependency=None,
@@ -151,6 +172,10 @@ def test_asset_served_only_when_declared_and_enabled(tmp_path, monkeypatch):
     ({"payload": json.dumps({"$schema": "netgeo.device.v2", "devices": [DEVICE["devices"][0]] * 2}).encode(), "device_count": 2}, "Duplicate device id"),
     ({"device_count": 2}, "device_count"),
     ({"asset": b"fake glb"}, "Invalid GLB header"),
+    ({"asset": glb({**GLB_DOC, "scenes": []})}, "Invalid GLB renderable scene"),
+    ({"asset": glb({**GLB_DOC, "buffers": [{"byteLength": len(GLB_BIN), "uri": "https://example.test/data.bin"}]})}, "Invalid GLB external URI"),
+    ({"asset": glb({**GLB_DOC, "images": [{"uri": "https://example.test/logo.png"}]})}, "Invalid GLB external URI"),
+    ({"asset": glb({**GLB_DOC, "scenes": [{"nodes": [99]}]})}, "Invalid GLB root node index"),
     ({"asset": GLB[:4] + (1).to_bytes(4, "little") + GLB[8:]}, "Invalid GLB version/length"),
     ({"asset": GLB[:8] + (999).to_bytes(4, "little") + GLB[12:]}, "Invalid GLB version/length"),
     ({"asset": GLB[:16] + b"BIN\x00" + GLB[20:]}, "Invalid GLB JSON chunk"),
@@ -164,3 +189,50 @@ def test_invalid_pack_rejected_without_install(tmp_path, kwargs, message):
     with pytest.raises(ValueError, match=message):
         install_archive(source, tmp_path / "packs", set())
     assert not (tmp_path / "packs/sample").exists()
+
+
+def test_concurrent_pack_toggles_keep_every_override(tmp_path, monkeypatch):
+    root = tmp_path / "packs"
+    for index in range(20):
+        path = root / f"pack-{index}"
+        path.mkdir(parents=True)
+        (path / "manifest.json").write_text(json.dumps({"id": path.name, "name": path.name}))
+    monkeypatch.setattr(dt, "_PACKS_DIR", tmp_path / "bundled")
+    monkeypatch.setattr(dt, "_USER_PACKS_DIR", root)
+    monkeypatch.setattr(dt, "_USER_PACKS_STATE_FILE", root / "enabled.json")
+    monkeypatch.setattr(dt, "_PACKS_STATE_FILE", tmp_path / "bundled-state.json")
+    original = dt._load_pack_overrides
+    def slow_read():
+        value = original()
+        time.sleep(0.003)
+        return value
+    monkeypatch.setattr(dt, "_load_pack_overrides", slow_read)
+    with ThreadPoolExecutor(max_workers=10) as pool:
+        list(pool.map(lambda index: dt._set_pack_enabled(f"pack-{index}", True), range(20)))
+    data = json.loads((root / "enabled.json").read_text())
+    assert len(data["overrides"]) == 20
+    assert all(data["overrides"].values())
+    assert not list(root.glob(".enabled.json.*.tmp"))
+
+
+def test_uninstall_guard_sees_reloaded_persisted_project(tmp_path, monkeypatch):
+    import asyncio
+
+    root = tmp_path / "packs"
+    source = tmp_path / "pack.zip"
+    source.write_bytes(archive_bytes())
+    install_archive(source, root, set())
+    state = tmp_path / "state.json"
+    repository = MemoryRepository(state_path=state)
+    project = asyncio.run(repository.create_project("Persisted"))
+    asyncio.run(repository.add_node(Node(id="node-1", project_id=project.id, name="Switch", device_type_id="sample:novel-switch")))
+    reloaded = MemoryRepository(state_path=state)
+    monkeypatch.setattr(dt, "_PACKS_DIR", tmp_path / "bundled")
+    monkeypatch.setattr(dt, "_USER_PACKS_DIR", root)
+    monkeypatch.setattr(dt, "_USER_PACKS_STATE_FILE", root / "enabled.json")
+    monkeypatch.setattr(dt, "_PACKS_STATE_FILE", tmp_path / "bundled-state.json")
+    monkeypatch.setattr(dt, "get_repo", lambda: reloaded)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(dt.uninstall_device_pack("sample"))
+    assert error.value.status_code == 409
+    assert (root / "sample").is_dir()
