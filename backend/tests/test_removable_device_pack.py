@@ -7,11 +7,12 @@ import zipfile
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
+from fastapi import HTTPException
+
 from app.api import device_types as dt
 from app.models import Node
 from app.services.device_pack_archive import install_archive
 from app.store.memory import MemoryRepository
-from fastapi import HTTPException
 
 DEVICE = {"$schema": "netgeo.device.v2", "devices": [{
     "id": "novel-switch", "display_name": "Novel Switch", "vendor": "Fixture", "kind": "switch",
