@@ -1017,6 +1017,7 @@ export interface DeviceType {
     | { pattern?: string; count: number; type: string; speed_mbps?: number; role?: string; poe?: boolean }[]
     | null;
   physical?: { ru?: number; form_factor?: string } | null;
+  chassis_asset?: string | null;
 }
 
 export interface DeviceTypeCreate {

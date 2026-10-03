@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import * as THREE from 'three';
-import { getVisualChassis, invalidatePackAssetRegistry, loadBootAssets, loadBrandAssets } from './bootAssets';
-import { devicePacksApi } from '@/api/client';
+import { getBootGeometry, getVisualChassis, invalidatePackAssetRegistry, loadBootAssets, loadBrandAssets } from './bootAssets';
+import { devicePacksApi, http } from '@/api/client';
+import { buildScene, disposeScene } from './rack3d';
 
 const fetched: string[] = [];
 async function nodeFetch(url: string): Promise<ArrayBuffer> {
@@ -14,6 +15,51 @@ async function nodeFetch(url: string): Promise<ArrayBuffer> {
 }
 
 describe('optional device brand assets', () => {
+  it('loads an arbitrary installed family lazily and falls back when disabled', async () => {
+    const body = '/api/device-packs/sample/assets/body.glb';
+    const list = vi.spyOn(devicePacksApi, 'list').mockResolvedValue([{
+      id: 'sample', name: 'Sample', version: '1.0.0', categories: [], device_count: 1,
+      enabled_by_default: false, source_note: '', enabled: true,
+      assets: { 'sample:novel-switch': { body } },
+    }]);
+    invalidatePackAssetRegistry();
+    const reads: string[] = [];
+    await loadBrandAssets(['sample:novel-switch'], async (url) => {
+      reads.push(url);
+      const bytes = await readFile(path.resolve(__dirname, '../../../public/3d/brands/cisco/c9300-48p-nm8x.glb'));
+      return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+    });
+    expect(reads).toEqual([body]);
+    expect(getBootGeometry('sample:novel-switch')).toBeDefined();
+    const scene = buildScene({ racks: [{ key: 'r1', enclosure: 'apc', ruHeight: 42, devices: [{
+      id: 'novel', u: 1, h: 1, kind: 'switch', brand: 'Fixture', model: 'Novel',
+      accent: 0x444444, chassis: 0x222222, ports: 1, chassisAsset: 'sample:novel-switch',
+    }] }], links: [] });
+    expect((scene.root.getObjectByName('chassis') as THREE.Mesh).geometry).toBe(getBootGeometry('sample:novel-switch'));
+    disposeScene(scene);
+    list.mockResolvedValue([]);
+    invalidatePackAssetRegistry();
+    expect(getBootGeometry('sample:novel-switch')).toBeUndefined();
+    await loadBrandAssets(['sample:novel-switch'], async () => { throw new Error('should not fetch disabled pack'); });
+    expect(getBootGeometry('sample:novel-switch')).toBeUndefined();
+    list.mockRestore();
+  });
+  it('fetches installed GLB bytes through the authenticated API client', async () => {
+    const list = vi.spyOn(devicePacksApi, 'list').mockResolvedValue([{
+      id: 'sample', name: 'Sample', version: '1.0.0', categories: [], device_count: 1,
+      enabled_by_default: false, source_note: '', enabled: true,
+      assets: { 'sample:second-switch': { body: '/api/device-packs/sample/assets/second.glb' } },
+    }]);
+    const bytes = await readFile(path.resolve(__dirname, '../../../public/3d/brands/cisco/c9300-48p-nm8x.glb'));
+    const get = vi.spyOn(http, 'get').mockResolvedValue({ data: bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) });
+    invalidatePackAssetRegistry();
+    await loadBrandAssets(['sample:second-switch']);
+    expect(get).toHaveBeenCalledWith('/device-packs/sample/assets/second.glb', { responseType: 'arraybuffer' });
+    expect(getBootGeometry('sample:second-switch')).toBeDefined();
+    get.mockRestore();
+    list.mockRestore();
+    invalidatePackAssetRegistry();
+  });
   it('resolves the Cisco GLB from the enabled pack manifest on demand', async () => {
     const manifest = JSON.parse(await readFile(path.resolve(__dirname, '../../../../network/devices/packs/switches/manifest.json'), 'utf8'));
     const list = vi.spyOn(devicePacksApi, 'list').mockResolvedValue([{ ...manifest, enabled: true }]);

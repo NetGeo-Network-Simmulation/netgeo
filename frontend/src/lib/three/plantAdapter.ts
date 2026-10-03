@@ -186,7 +186,9 @@ function adaptRackDevices(
       bodyWidthM: dt.chassisMm ? dt.chassisMm.widthMm / 1000 : undefined,
       bodyDepthM: dt.chassisMm ? dt.chassisMm.depthMm / 1000 : undefined,
       rackMounted: dt.rackMounted,
-      chassisAsset: chassisFamilyForDeviceSlug(dt.slug),
+      chassisAsset: pack?.chassis_asset?.includes(':')
+        ? pack.chassis_asset as `${string}:${string}`
+        : chassisFamilyForDeviceSlug(dt.slug),
       hasLcd: dt.front.hasLcd,
     });
   }

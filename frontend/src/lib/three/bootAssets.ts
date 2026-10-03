@@ -18,7 +18,7 @@
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { devicePacksApi } from '@/api/client';
+import { devicePacksApi, http } from '@/api/client';
 
 export type BootFamily =
   | 'rj45' | 'lc' | 'mpo'
@@ -33,7 +33,8 @@ export type ChassisFamily =
   | 'chassis-mikrotik-crs317'
   | 'chassis-mikrotik-crs328'
   | 'chassis-mikrotik-rb5009-k79'
-  | 'chassis-cisco-c9300-48p-nm8x';
+  | 'chassis-cisco-c9300-48p-nm8x'
+  | `${string}:${string}`;
 export type AssetFamily = BootFamily | CageFamily | EnclosureFamily | StructureFamily | ChassisFamily;
 
 const URLS: Record<Exclude<AssetFamily, ChassisFamily>, string> = {
@@ -161,6 +162,10 @@ export function loadAssetFamilies(
 export function loadBrandAssets(
   families: Iterable<ChassisFamily>,
   fetchArrayBuffer: (url: string) => Promise<ArrayBuffer> = async (url) => {
+    if (url.startsWith('/api/device-packs/')) {
+      const response = await http.get<ArrayBuffer>(url.slice('/api'.length), { responseType: 'arraybuffer' });
+      return response.data;
+    }
     const response = await fetch(url);
     if (!response.ok) throw new Error(`${url}: HTTP ${response.status}`);
     return response.arrayBuffer();
