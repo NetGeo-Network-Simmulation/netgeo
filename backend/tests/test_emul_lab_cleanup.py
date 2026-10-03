@@ -167,3 +167,37 @@ def test_lease_excludes_a_second_process(tmp_path):
         owner.release_lease()
     available = subprocess.run(probe, env=env, capture_output=True, text=True, check=False)
     assert available.returncode == 0, available.stderr
+
+
+def test_app_starts_without_unix_uid_or_fcntl():
+    script = """
+import asyncio
+import builtins
+import os
+
+del os.getuid
+original_import = builtins.__import__
+def no_fcntl(name, *args, **kwargs):
+    if name == "fcntl":
+        raise ImportError("fcntl unavailable")
+    return original_import(name, *args, **kwargs)
+builtins.__import__ = no_fcntl
+
+import app.main as main
+from app.services import emul_lab
+main._init_admin_from_settings = lambda: None
+emul_lab.PodmanAdaptor = lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("Podman touched"))
+
+async def check():
+    async with main.lifespan(main.app):
+        try:
+            emul_lab.EmulLabManager().acquire_lease()
+        except emul_lab.EmulationLeaseUnavailable as exc:
+            assert "requires Linux" in str(exc)
+        else:
+            raise AssertionError("unsupported emulation accepted")
+
+asyncio.run(check())
+"""
+    result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stderr

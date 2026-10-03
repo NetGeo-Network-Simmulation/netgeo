@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import asyncio
-import fcntl
 import hashlib
 import json
 import os
@@ -21,10 +20,13 @@ from engine.emulation.podman_adaptor import (
 from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
 
-_runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
-if not _runtime_dir.is_dir():
-    _runtime_dir = Path(tempfile.gettempdir()) / f"netgeo-{os.getuid()}"
-LEASE_PATH = _runtime_dir / "netgeo-emulation.lock"
+if os.name == "posix" and hasattr(os, "getuid"):
+    _runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+    if not _runtime_dir.is_dir():
+        _runtime_dir = Path(tempfile.gettempdir()) / f"netgeo-{os.getuid()}"
+    LEASE_PATH: Path | None = _runtime_dir / "netgeo-emulation.lock"
+else:
+    LEASE_PATH = None
 
 
 class EmulationLeaseUnavailable(SimulationError):
@@ -39,6 +41,10 @@ class EmulLabManager:
         self._lease_pid: int | None = None
 
     def acquire_lease(self) -> None:
+        if LEASE_PATH is None or os.name != "posix":
+            raise EmulationLeaseUnavailable("emulation unavailable: Podman rootless requires Linux")
+        import fcntl
+
         if self._lease_fd is not None and self._lease_pid == os.getpid():
             return
         if self._lease_fd is not None:  # inherited across fork; never share the parent's lease
@@ -60,6 +66,8 @@ class EmulLabManager:
 
     def release_lease(self) -> None:
         if self._lease_fd is not None:
+            import fcntl
+
             fd, self._lease_fd = self._lease_fd, None
             if self._lease_pid == os.getpid():
                 fcntl.flock(fd, fcntl.LOCK_UN)
