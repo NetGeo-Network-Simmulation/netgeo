@@ -32,6 +32,8 @@ import json
 import logging
 import shutil
 import struct
+import tempfile
+import threading
 import zipfile
 from pathlib import Path
 from typing import Annotated
@@ -148,6 +150,7 @@ _PACKS_DIR = _DEVICES_DIR / "packs"
 _PACKS_STATE_FILE = _DEVICES_DIR / "packs_enabled.json"
 _USER_PACKS_DIR = Path("~/.config/netgeo/device-packs").expanduser()
 _USER_PACKS_STATE_FILE = _USER_PACKS_DIR / "enabled.json"
+_PACKS_LOCK = threading.RLock()  # One process owns the in-memory repository and pack state.
 
 # node.kind -> DeviceType.category, matching the styling _BUILTIN already uses.
 # Unknown kinds fall back to the kind string itself — the frontend's category
@@ -191,11 +194,18 @@ def _load_pack_overrides() -> dict[str, bool]:
 
 
 def _save_pack_overrides(overrides: dict[str, bool], path: Path | None = None) -> None:
-    path = path or _USER_PACKS_STATE_FILE
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(".tmp")
-    temporary.write_text(json.dumps({"overrides": overrides}, indent=2) + "\n", encoding="utf-8")
-    temporary.replace(path)
+    with _PACKS_LOCK:
+        path = path or _USER_PACKS_STATE_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", prefix=f".{path.name}.",
+                                         suffix=".tmp", dir=path.parent, delete=False) as output:
+            temporary = Path(output.name)
+            try:
+                output.write(json.dumps({"overrides": overrides}, indent=2) + "\n")
+                output.flush()
+                temporary.replace(path)
+            finally:
+                temporary.unlink(missing_ok=True)
 
 
 def _pack_enabled(pack_id: str, manifest: dict, overrides: dict[str, bool]) -> bool:
@@ -313,7 +323,6 @@ async def list_device_packs() -> list[DevicePack]:
 
 @router.post("/device-packs/install", response_model=DevicePack, status_code=status.HTTP_201_CREATED)
 async def install_device_pack(file: Annotated[UploadFile, File()]) -> DevicePack:
-    import tempfile
     with tempfile.NamedTemporaryFile(suffix=".zip") as temporary:
         size = 0
         while chunk := await file.read(1024 * 1024):
@@ -323,9 +332,10 @@ async def install_device_pack(file: Annotated[UploadFile, File()]) -> DevicePack
             temporary.write(chunk)
         temporary.flush()
         try:
-            manifest = install_archive(Path(temporary.name), _USER_PACKS_DIR,
-                                       {p["id"] for _, p in _iter_pack_manifests()})
-        except (ValueError, TypeError, OSError, zipfile.BadZipFile, UnicodeError) as exc:
+            with _PACKS_LOCK:
+                manifest = install_archive(Path(temporary.name), _USER_PACKS_DIR,
+                                           {p["id"] for _, p in _iter_pack_manifests()})
+        except (ValueError, TypeError, OSError, zipfile.BadZipFile, UnicodeError, RecursionError) as exc:
             raise HTTPException(400, str(exc)) from exc
     return DevicePack(**{**manifest, "assets": _pack_asset_urls(manifest),
                          "enabled": False, "removable": True})
@@ -333,6 +343,11 @@ async def install_device_pack(file: Annotated[UploadFile, File()]) -> DevicePack
 
 @router.delete("/device-packs/{pack_id}")
 async def uninstall_device_pack(pack_id: str) -> dict:
+    with _PACKS_LOCK:
+        return _uninstall_device_pack(pack_id)
+
+
+def _uninstall_device_pack(pack_id: str) -> dict:
     manifests = {m["id"]: (path, m) for path, m in _iter_pack_manifests()}
     if pack_id not in manifests:
         raise HTTPException(404, "Device pack not found")
@@ -342,8 +357,9 @@ async def uninstall_device_pack(pack_id: str) -> dict:
     dependents = [m["id"] for _, m in manifests.values() if pack_id in m.get("dependencies", [])]
     if dependents:
         raise HTTPException(409, f"Required by packs: {', '.join(dependents)}")
-    # Stable prefixed ids are retained in saved projects. Refuse removal while
-    # any saved node names this pack; disabling remains reversible.
+    # The current store is MemoryRepository, which reloads saved state.json on
+    # startup. This guards all nodes loaded in this process, including persisted
+    # projects; a future PostgreSQL repository needs its own reference query.
     repo = get_repo()
     if any(node.device_type_id and node.device_type_id.startswith(pack_id + ":")
            for node in repo._nodes.values()):
@@ -388,6 +404,11 @@ async def disable_device_pack(pack_id: str) -> DevicePack:
 
 
 def _set_pack_enabled(pack_id: str, enabled: bool) -> DevicePack:
+    with _PACKS_LOCK:
+        return _set_pack_enabled_locked(pack_id, enabled)
+
+
+def _set_pack_enabled_locked(pack_id: str, enabled: bool) -> DevicePack:
     manifests = {m["id"]: m for _, m in _iter_pack_manifests()}
     if pack_id not in manifests:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Device pack '{pack_id}' not found.")
