@@ -43,7 +43,7 @@
         {
           "pattern": "TenGigabitEthernet1/1/{n}",
           "count": 8,
-          "type": "sfp",
+          "type": "sfp+",
           "speed_mbps": 10000
         }
       ],
@@ -56,8 +56,12 @@
       },
       "physical": {
         "ru": 1,
-        "form_factor": "1U-stackable"
+        "form_factor": "1U-stackable-19in-rackmount",
+        "width_mm": 445,
+        "depth_mm": 488,
+        "height_mm": 44
       },
+      "network_module": "C9300-NM-8X",
       "datasheet_note": "Catalyst 9300 stackable access; PoE+ 740W; uplink modular 8x10G."
     },
     {
