@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import pytest
 
-from app.services.emul_lab import EmulLabManager
+from app.services.emul_lab import EmulLabManager, get_emul_lab_manager
 from app.services.netlab import get_lab_manager
 from engine.emulation.podman_adaptor import (
     CONTAINER_PREFIX,
@@ -36,6 +36,7 @@ def _fresh_labs():
     get_lab_manager()._labs.clear()
     yield
     get_lab_manager()._labs.clear()
+    get_emul_lab_manager().release_lease()
 
 
 def _network_exists(name: str) -> bool:
@@ -179,6 +180,7 @@ async def test_reconcile_stale_labeled_lab_leaves_other_resources_alone():
     project_id = f"reconcile-{suffix}"
     node_a, node_b, link_id = f"a-{suffix}", f"b-{suffix}", f"l-{suffix}"
     adaptor = PodmanAdaptor(project_id=project_id, lab_id="stale-test")
+    manager = EmulLabManager()
     try:
         for node_id in (node_a, node_b):
             await adaptor.spawn(Device(name=node_id, node_id=node_id, nos="frr", mode="emul"))
@@ -188,12 +190,13 @@ async def test_reconcile_stale_labeled_lab_leaves_other_resources_alone():
             InterfaceModel(id="ib", node_id=node_b, name="eth1"),
         )
         assert _network_exists(f"{LINK_NETWORK_PREFIX}{link_id}")
-        await EmulLabManager().reconcile_stale()
+        await manager.reconcile_stale()
         assert not _network_exists(f"{LINK_NETWORK_PREFIX}{link_id}")
         assert _podman_state(f"{CONTAINER_PREFIX}{node_a}") is None
         assert _podman_state(f"{CONTAINER_PREFIX}{node_b}") is None
         # Podman's own default bridge is outside the NetGeo ownership labels.
         assert _network_exists("podman")
-        await EmulLabManager().reconcile_stale()  # idempotent
+        await manager.reconcile_stale()  # idempotent
     finally:
+        manager.release_lease()
         _force_cleanup((node_a, node_b), link_id)

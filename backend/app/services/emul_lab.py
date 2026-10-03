@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import hashlib
 import json
+import os
+import tempfile
+from pathlib import Path
 
 from app.exceptions.base import SimulationError
 from app.models import NodeMode, Topology
@@ -17,11 +21,50 @@ from engine.emulation.podman_adaptor import (
 from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
 
+_runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
+if not _runtime_dir.is_dir():
+    _runtime_dir = Path(tempfile.gettempdir()) / f"netgeo-{os.getuid()}"
+LEASE_PATH = _runtime_dir / "netgeo-emulation.lock"
+
+
+class EmulationLeaseUnavailable(SimulationError):
+    pass
+
 
 class EmulLabManager:
     def __init__(self) -> None:
         self._labs: dict[str, tuple[str, PodmanAdaptor, list[str], list[str]]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        self._lease_fd: int | None = None
+        self._lease_pid: int | None = None
+
+    def acquire_lease(self) -> None:
+        if self._lease_fd is not None and self._lease_pid == os.getpid():
+            return
+        if self._lease_fd is not None:  # inherited across fork; never share the parent's lease
+            os.close(self._lease_fd)
+            self._lease_fd = None
+            self._lease_pid = None
+        LEASE_PATH.parent.mkdir(mode=0o700, exist_ok=True)
+        runtime_stat = LEASE_PATH.parent.stat()
+        if runtime_stat.st_uid != os.getuid() or runtime_stat.st_mode & 0o077:
+            raise EmulationLeaseUnavailable("emulation unavailable: insecure runtime directory")
+        fd = os.open(LEASE_PATH, os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            os.close(fd)
+            raise EmulationLeaseUnavailable("emulation unavailable: another NetGeo backend owns the Podman lab") from exc
+        self._lease_fd = fd
+        self._lease_pid = os.getpid()
+
+    def release_lease(self) -> None:
+        if self._lease_fd is not None:
+            fd, self._lease_fd = self._lease_fd, None
+            if self._lease_pid == os.getpid():
+                fcntl.flock(fd, fcntl.LOCK_UN)
+            os.close(fd)
+            self._lease_pid = None
 
     def _lock(self, project_id: str) -> asyncio.Lock:
         return self._locks.setdefault(project_id, asyncio.Lock())
@@ -33,11 +76,14 @@ class EmulLabManager:
     async def shutdown_all(self) -> None:
         """Try every lab even if one project fails to clean up."""
         errors = []
-        for project_id in list(self._labs):
-            try:
-                await self.destroy(project_id)
-            except Exception as exc:  # noqa: BLE001 - isolate per-project cleanup
-                errors.append(f"{project_id}: {exc}")
+        try:
+            for project_id in list(self._labs):
+                try:
+                    await self.destroy(project_id)
+                except Exception as exc:  # noqa: BLE001 - isolate per-project cleanup
+                    errors.append(f"{project_id}: {exc}")
+        finally:
+            self.release_lease()
         if errors:
             raise SimulationError("emulation shutdown cleanup failed: " + "; ".join(errors))
 
@@ -47,6 +93,7 @@ class EmulLabManager:
         Names and all three ownership labels must match. Older/unlabeled
         resources and other Podman workloads are never touched.
         """
+        self.acquire_lease()
         if not socket_reachable():
             return
         adaptor = PodmanAdaptor()
@@ -86,6 +133,7 @@ class EmulLabManager:
         lab = self._labs.get(project_id)
         if lab is None:
             return
+        self.acquire_lease()
         _, adaptor, nodes, links = lab
         errors = []
         for link_id in reversed(links):
@@ -103,6 +151,8 @@ class EmulLabManager:
         self._labs.pop(project_id, None)
 
     async def _get(self, topo: Topology) -> PodmanAdaptor:
+        if self._lease_fd is None or self._lease_pid != os.getpid():
+            await self.reconcile_stale()
         pid = topo.project.id
         fingerprint = hashlib.sha256(json.dumps(
             {"nodes": [n.model_dump(mode="json") for n in topo.nodes],
