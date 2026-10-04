@@ -281,11 +281,16 @@ def test_real_websocket_console_and_api_apply():
     manager.acquire_lease()
     client = TestClient(app)
     project = client.post("/api/projects", json={"name": "emul"}, headers=make_auth_headers()).json()
-    node = client.post("/api/nodes", json={"project_id": project["id"], "name": "r1", "nos": "frr", "mode": "emul"}, headers=make_auth_headers()).json()
+    node = client.post("/api/nodes", json={
+        "project_id": project["id"], "name": "r1", "nos": "frr", "mode": "emul",
+        "interfaces": [{"id": "r1-eth0", "node_id": "", "name": "eth0", "ip": ["10.253.77.1/24"], "mtu": 1400}],
+    }, headers=make_auth_headers()).json()
     try:
         generated = client.post("/api/configs/generate", json={"node_id": node["id"]}, headers=make_auth_headers())
         assert generated.status_code == 201, generated.text
         artifact = generated.json()
+        assert "interface eth0\n ip address 10.253.77.1/24" in artifact["content"]
+        assert " mtu 1400" not in artifact["content"]
         response = client.post(
             f"/api/projects/{project['id']}/nodes/{node['id']}/configs/{artifact['id']}/apply",
             headers=make_auth_headers(),
@@ -297,6 +302,7 @@ def test_real_websocket_console_and_api_apply():
             ws.send_json({"type": "input", "data": "show running-config"})
             answer = ws.receive_json()
             assert "hostname r1" in answer["data"]
+            assert "interface eth0\n ip address 10.253.77.1/24" in answer["data"]
     finally:
         asyncio.run(manager.destroy(project["id"]))
         manager.release_lease()
