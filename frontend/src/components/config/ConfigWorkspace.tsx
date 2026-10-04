@@ -124,6 +124,7 @@ export function ConfigWorkspace() {
     selectionVersion.current += 1;
   }
   const currentApply = applyState?.key === applyKey && applyState.version === selectionVersion.current ? applyState : null;
+  const pendingApply = applyState?.status === 'applying';
   const applyReason = project?.mode !== 'pure-emul' ? 'Requires a pure-emul project.'
     : selected?.mode !== 'emul' ? 'Select an emulated device.'
     : selected.nos !== 'frr' ? 'Select an FRRouting device.'
@@ -145,6 +146,9 @@ export function ConfigWorkspace() {
       if (selectionKey.current === key && selectionVersion.current === version) setApplyState({ key, version, status: 'failed', error: 'Apply failed. Check the FRR lab and backend logs, then retry.' });
     } finally {
       applying.current = false;
+      if (selectionKey.current !== key || selectionVersion.current !== version) {
+        setApplyState((state) => state?.key === key && state.version === version ? null : state);
+      }
     }
   };
 
@@ -212,17 +216,17 @@ export function ConfigWorkspace() {
 
           <HScrollToolbar className="flex-1 gap-3">
             {tab === 'running' && <>
-              <button onClick={() => void apply()} disabled={!!applyReason || currentApply?.status === 'applying'}
-                title={applyReason ?? 'Apply stored FRR CLI config to the lab'}
+              <button onClick={() => void apply()} disabled={!!applyReason || pendingApply}
+                title={pendingApply && !currentApply ? 'Finish applying to the previous selection first.' : applyReason ?? 'Apply stored FRR CLI config to the lab'}
                 aria-describedby="config-apply-status"
                 className="flex shrink-0 items-center gap-1.5 rounded-full border border-accent/40 px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50">
-                {currentApply?.status === 'applying' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                {pendingApply ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
                   : currentApply?.status === 'failed' ? <AlertCircle className="h-3.5 w-3.5" aria-hidden />
                   : <Check className="h-3.5 w-3.5" aria-hidden />}
                 Apply to FRR lab
               </button>
               <span id="config-apply-status" role="status" className="shrink-0 text-xs text-fg/65">
-                {applyReason ?? (currentApply?.status === 'applying' ? 'Applying' : currentApply?.status === 'applied' ? 'Applied' : currentApply?.status === 'failed' ? 'Failed' : 'Ready')}
+                {pendingApply ? currentApply ? 'Applying' : 'Applying to previous selection…' : applyReason ?? (currentApply?.status === 'applied' ? 'Applied' : currentApply?.status === 'failed' ? 'Failed' : 'Ready')}
               </span>
               {currentApply?.status === 'applied' && <button
                 onClick={() => { selectNode({ nodeId }); setViewMode('topology'); setDrawerTab('console'); }}

@@ -98,9 +98,15 @@ describe('Config Center FRR apply', () => {
     expect(api.apply).toHaveBeenCalledTimes(1);
     const second = Array.from(container.querySelectorAll('[role="option"]')).find((el) => el.textContent?.includes('r2')) as HTMLButtonElement;
     await act(async () => { second.click(); });
+    const pendingButton = container.querySelector('button[aria-describedby="config-apply-status"]') as HTMLButtonElement;
+    expect(pendingButton.disabled).toBe(true);
+    expect(container.querySelector('#config-apply-status')?.textContent).toContain('Applying to previous selection');
+    await act(async () => { pendingButton.click(); });
+    expect(api.apply).toHaveBeenCalledTimes(1);
     await act(async () => { complete({}); await Promise.resolve(); });
     expect(container.textContent).not.toContain('Applied');
     expect(container.textContent).not.toContain('Open console');
+    expect((container.querySelector('button[aria-describedby="config-apply-status"]') as HTMLButtonElement).disabled).toBe(false);
   });
 
   it('disables a non-CLI artifact', async () => {
