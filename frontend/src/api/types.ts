@@ -164,6 +164,13 @@ export interface Project {
   version: string;
   topology_ref: string;
   created_at: string;
+  mode?: 'pure-sim' | 'pure-emul' | 'mixed';
+}
+
+export interface ConfigApplyResult {
+  project_id: string;
+  node_id: string;
+  artifact_id: string;
 }
 
 export interface ScenarioStep {

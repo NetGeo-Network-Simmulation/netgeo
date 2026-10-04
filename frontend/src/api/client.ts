@@ -12,6 +12,7 @@ import type {
   CableCreate,
   CableUpdate,
   ConfigArtifact,
+  ConfigApplyResult,
   GradeReport,
   GradeResult,
   GradeSubmit,
@@ -955,6 +956,8 @@ export interface ProjectConfigExport {
   configs: Record<string, string>;
 }
 export const configsApi = {
+  apply: (projectId: string, nodeId: string, artifactId: string) =>
+    http.post<ConfigApplyResult>(`/projects/${encodeURIComponent(projectId)}/nodes/${encodeURIComponent(nodeId)}/configs/${encodeURIComponent(artifactId)}/apply`).then((r) => r.data),
   generate: (nodeId: string, vendor?: string) =>
     http
       .post<ConfigArtifact>('/configs/generate', { node_id: nodeId, vendor })
