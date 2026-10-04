@@ -16,6 +16,7 @@ import socket as _socket
 import tarfile
 import time
 import uuid
+from collections import Counter, defaultdict
 from collections.abc import Callable
 
 from podman import PodmanClient
@@ -90,6 +91,50 @@ def _parse_busybox_ping(output: str, sent: int) -> dict:
         "max_ms": max(rtts) if rtts else None,
         "errors": [] if received else ["no reply"],
     }
+
+
+def _config_tree(text: str) -> tuple[set[tuple[str, ...]], dict[tuple[str, ...], list[str]]]:
+    """Keep FRR stanza ancestry and command order; ignore display metadata."""
+    scopes: set[tuple[str, ...]] = set()
+    commands: dict[tuple[str, ...], list[str]] = defaultdict(list)
+    stack: list[tuple[int, str]] = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if (not line or line.startswith(("!", "%", "Configuration file[", "frr version ", "frr defaults "))
+                or line in {"Building configuration...", "Current configuration:", "end",
+                            "exit-vrf", "exit-address-family"}):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        while stack and indent <= stack[-1][0]:
+            stack.pop()
+        parent = tuple(name for _, name in stack)
+        if line.startswith(("interface ", "router ", "vrf ", "address-family ")) or line == "line vty":
+            scope = (*parent, line)
+            if line != "line vty":  # an empty line-vty stanza is omitted by FRR
+                scopes.add(scope)
+            stack.append((indent, line))
+        else:
+            commands[parent].append(line)
+    return scopes, commands
+
+
+def _running_contains(config: str, running: str) -> bool:
+    wanted_scopes, wanted = _config_tree(config)
+    actual_scopes, actual = _config_tree(running)
+    if not wanted_scopes and not any(wanted.values()):
+        return False
+    if not wanted_scopes.issubset(actual_scopes):
+        return False
+    for scope, requested in wanted.items():
+        observed = actual.get(scope, [])
+        counts = Counter(requested)
+        seen = Counter(observed)
+        if any(seen[line] != count for line, count in counts.items()):
+            return False
+        remaining = iter(observed)
+        if not all(any(line == candidate for candidate in remaining) for line in requested):
+            return False
+    return True
 
 
 class PodmanAdaptor(EmulationAdaptor):
@@ -223,6 +268,7 @@ class PodmanAdaptor(EmulationAdaptor):
         saved = f"/etc/frr/{backup}"
         moved = False
         applied = False
+        result = {"applied": True, "verified": True}
         keep_backup = False
         had_original = self._exec(container, ["test", "-f", target])[0] == 0
         vtysh_config = "/etc/frr/vtysh.conf"
@@ -253,47 +299,64 @@ class PodmanAdaptor(EmulationAdaptor):
             code, running = self._exec(container, ["vtysh", "-c", "show running-config"])
             if code:
                 raise RuntimeError("FRR running configuration verification failed")
-            # vtysh -b can accept a partial file. Verify meaningful directives
-            # appeared in the actual running state, without returning secrets.
-            directives = [line.strip() for line in config.splitlines()
-                          if line.strip() and not line.lstrip().startswith("!")
-                          and not line.strip().startswith(("frr version ", "frr defaults "))
-                          and line.strip() != "line vty"]
-            actual = {line.strip() for line in running.splitlines()}
-            if not directives or not all(line in actual for line in directives):
+            if not _running_contains(config, running):
                 raise RuntimeError("FRR running configuration differs from artifact")
             applied = True
-            return {"applied": True, "verified": True}
+            return result
         except Exception as exc:
             if moved:
-                code, _ = self._exec(container, ["mv", saved, target] if had_original else ["rm", "-f", target])
+                try:
+                    code, _ = self._exec(container, ["mv", saved, target] if had_original else ["rm", "-f", target])
+                except Exception as rollback_exc:  # noqa: BLE001 - Podman can fail with transport errors
+                    keep_backup = had_original
+                    logger.error("FRR rollback failed for node=%s; backup at %s; cause=%s",
+                                 node_id, saved, type(rollback_exc).__name__)
+                    raise RuntimeError(
+                        f"FRR apply failed and file rollback failed ({type(rollback_exc).__name__})"
+                    ) from exc
                 if code:
                     keep_backup = had_original
                     if keep_backup:
                         logger.error("FRR rollback failed for node=%s; backup preserved at %s", node_id, saved)
                     raise RuntimeError("FRR apply failed and file rollback failed") from exc
                 # Fresh daemons restore the previous running configuration.
-                if had_original:
-                    rollback_code, _ = self._apply_file(container)
-                    if rollback_code:
-                        raise RuntimeError("FRR apply failed and rollback reload failed") from exc
-                else:
-                    self._restart_ready(container)
-                code, _ = self._exec(container, ["vtysh", "-c", "show running-config"])
-                if code:
-                    raise RuntimeError("FRR apply failed and rollback verification failed") from exc
-                _, restored = self._exec(container, ["vtysh", "-c", "show running-config"])
-                old_lines = {line.strip() for line in before.splitlines()
-                             if line.strip() and not line.startswith(("%", "Configuration file["))}
-                new_lines = {line.strip() for line in restored.splitlines()
-                             if line.strip() and not line.startswith(("%", "Configuration file["))}
-                if not old_lines.issubset(new_lines):
-                    raise RuntimeError("FRR apply failed and previous running state was not restored") from exc
+                try:
+                    if had_original:
+                        rollback_code, _ = self._apply_file(container)
+                        if rollback_code:
+                            raise RuntimeError("rollback reload returned a nonzero status")
+                    else:
+                        self._restart_ready(container)
+                    code, restored = self._exec(container, ["vtysh", "-c", "show running-config"])
+                    if code or not _running_contains(before, restored):
+                        raise RuntimeError("previous running state was not restored")
+                except Exception as rollback_exc:  # noqa: BLE001 - include Podman transport failures
+                    logger.error("FRR rollback reload failed for node=%s: %s", node_id, type(rollback_exc).__name__)
+                    raise RuntimeError(
+                        f"FRR apply failed and rollback reload failed ({type(rollback_exc).__name__})"
+                    ) from exc
             raise
         finally:
-            self._exec(container, ["rm", "-f", staged] if keep_backup else ["rm", "-f", staged, saved])
+            cleanup_failed = False
+            try:
+                cleanup_code, _ = self._exec(container, ["rm", "-f", staged] if keep_backup else ["rm", "-f", staged, saved])
+                cleanup_failed = cleanup_code != 0
+                if cleanup_failed:
+                    logger.warning("FRR temporary file cleanup returned %s for node=%s", cleanup_code, node_id)
+            except Exception as cleanup_exc:  # noqa: BLE001 - cleanup must not mask apply/rollback
+                cleanup_failed = True
+                logger.warning("FRR temporary file cleanup failed for node=%s: %s", node_id, type(cleanup_exc).__name__)
             if not had_vtysh and not applied:
-                self._exec(container, ["rm", "-f", vtysh_config])
+                try:
+                    cleanup_code, _ = self._exec(container, ["rm", "-f", vtysh_config])
+                    cleanup_failed |= cleanup_code != 0
+                    if cleanup_code:
+                        logger.warning("FRR vtysh cleanup returned %s for node=%s", cleanup_code, node_id)
+                except Exception as cleanup_exc:  # noqa: BLE001 - cleanup must not mask apply/rollback
+                    cleanup_failed = True
+                    logger.warning("FRR vtysh cleanup failed for node=%s: %s", node_id, type(cleanup_exc).__name__)
+            if cleanup_failed and applied:
+                result["cleanup_verified"] = False
 
     async def command(self, node_id: str, command: str) -> str:
         return await asyncio.to_thread(self._command, node_id, command)
