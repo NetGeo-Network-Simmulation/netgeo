@@ -19,13 +19,14 @@
  *    left, removed lines right, with gap rows — the faithful split of a unified
  *    diff, not two independently stored full configs.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Check, Copy, Download, FileCode2, Router, Network, Server, Cpu, Search } from 'lucide-react';
+import { Check, Copy, Download, FileCode2, Router, Network, Server, Cpu, TerminalSquare, Loader2, AlertCircle } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { projectsApi, configsApi } from '@/api/client';
 import type { NodeModel, Nos, NodeKind } from '@/api/types';
 import { useUiStore } from '@/store/uiStore';
+import { useTopologyStore } from '@/store/topologyStore';
 import { WorkspaceEmptyState } from '@/components/shell/WorkspaceEmptyState';
 import { Select } from '@/components/ui/Select';
 import { HScrollToolbar } from '@/components/shell/HScrollToolbar';
@@ -69,11 +70,23 @@ function kindIcon(kind: NodeKind): LucideIcon {
 
 export function ConfigWorkspace() {
   const projectId = useUiStore((s) => s.projectId);
+  const setViewMode = useUiStore((s) => s.setViewMode);
+  const setDrawerTab = useUiStore((s) => s.setDrawerTab);
+  const selectNode = useTopologyStore((s) => s.select);
   const [tab, setTab] = useState<Tab>('running');
-  const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [vendor, setVendor] = useState('');
   const [copied, setCopied] = useState(false);
+  const [applyState, setApplyState] = useState<{ key: string; version: number; status: 'applying' | 'applied' | 'failed'; error?: string } | null>(null);
+  const applying = useRef(false);
+  const selectionKey = useRef('');
+  const selectionVersion = useRef(0);
+
+  const { data: project } = useQuery({
+    queryKey: ['project', projectId],
+    queryFn: () => projectsApi.get(projectId!),
+    enabled: !!projectId,
+  });
 
   const { data: topo, isLoading } = useQuery({
     queryKey: ['topology', projectId],
@@ -83,13 +96,7 @@ export function ConfigWorkspace() {
   });
 
   const nodes = topo?.nodes ?? [];
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return q
-      ? nodes.filter((n) => n.name.toLowerCase().includes(q) || NOS_LABEL[n.nos].toLowerCase().includes(q))
-      : nodes;
-  }, [nodes, search]);
-  const selected = nodes.find((n) => n.id === selectedId) ?? filtered[0] ?? nodes[0] ?? null;
+  const selected = nodes.find((n) => n.id === selectedId) ?? nodes[0] ?? null;
   const nodeId = selected?.id ?? null;
 
   const runningQ = useQuery({
@@ -110,6 +117,36 @@ export function ConfigWorkspace() {
     enabled: tab === 'export' && !!projectId,
     staleTime: 30_000,
   });
+  const artifact = runningQ.data?.find((a) => a.id === selected?.config_ref) ?? runningQ.data?.[0];
+  const applyKey = `${projectId ?? ''}:${nodeId ?? ''}:${artifact?.id ?? ''}`;
+  if (selectionKey.current !== applyKey) {
+    selectionKey.current = applyKey;
+    selectionVersion.current += 1;
+  }
+  const currentApply = applyState?.key === applyKey && applyState.version === selectionVersion.current ? applyState : null;
+  const applyReason = project?.mode !== 'pure-emul' ? 'Requires a pure-emul project.'
+    : selected?.mode !== 'emul' ? 'Select an emulated device.'
+    : selected.nos !== 'frr' ? 'Select an FRRouting device.'
+    : !artifact ? 'Generate and store a config first.'
+    : artifact.vendor.toLowerCase() !== 'frr' || artifact.format !== 'cli' ? 'Requires a stored FRR CLI config.'
+    : null;
+
+  const apply = async () => {
+    if (applyReason || !projectId || !nodeId || !artifact || applying.current) return;
+    applying.current = true;
+    const key = applyKey;
+    const version = selectionVersion.current;
+    setApplyState({ key, version, status: 'applying' });
+    try {
+      await configsApi.apply(projectId, nodeId, artifact.id);
+      if (selectionKey.current === key && selectionVersion.current === version) setApplyState({ key, version, status: 'applied' });
+    } catch {
+      // Backend/runtime failures may contain config text; never display server details.
+      if (selectionKey.current === key && selectionVersion.current === version) setApplyState({ key, version, status: 'failed', error: 'Apply failed. Check the FRR lab and backend logs, then retry.' });
+    } finally {
+      applying.current = false;
+    }
+  };
 
   if (!projectId) {
     return (
@@ -123,7 +160,7 @@ export function ConfigWorkspace() {
     );
   }
 
-  const runningText = runningQ.data?.[0]?.content ?? '';
+  const runningText = artifact?.content ?? '';
   const exportText = selected ? exportQ.data?.configs[selected.name] ?? '' : '';
   const copyText = tab === 'running' ? runningText : tab === 'diff' ? diffQ.data?.diff ?? '' : exportText;
 
@@ -174,6 +211,25 @@ export function ConfigWorkspace() {
           )}
 
           <HScrollToolbar className="flex-1 gap-3">
+            {tab === 'running' && <>
+              <button onClick={() => void apply()} disabled={!!applyReason || currentApply?.status === 'applying'}
+                title={applyReason ?? 'Apply stored FRR CLI config to the lab'}
+                aria-describedby="config-apply-status"
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-accent/40 px-3 py-1.5 text-xs font-medium text-accent transition-colors hover:bg-accent/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent disabled:cursor-not-allowed disabled:opacity-50">
+                {currentApply?.status === 'applying' ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                  : currentApply?.status === 'failed' ? <AlertCircle className="h-3.5 w-3.5" aria-hidden />
+                  : <Check className="h-3.5 w-3.5" aria-hidden />}
+                Apply to FRR lab
+              </button>
+              <span id="config-apply-status" role="status" className="shrink-0 text-xs text-fg/65">
+                {applyReason ?? (currentApply?.status === 'applying' ? 'Applying' : currentApply?.status === 'applied' ? 'Applied' : currentApply?.status === 'failed' ? 'Failed' : 'Ready')}
+              </span>
+              {currentApply?.status === 'applied' && <button
+                onClick={() => { selectNode({ nodeId }); setViewMode('topology'); setDrawerTab('console'); }}
+                className="flex shrink-0 items-center gap-1.5 rounded-full border border-fg/15 px-3 py-1.5 text-xs text-fg/80 hover:bg-fg/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent">
+                <TerminalSquare className="h-3.5 w-3.5" aria-hidden />Open console
+              </button>}
+            </>}
             {tab === 'diff' && (
               <span className="shrink-0 rounded-full border border-fg/10 bg-surface px-3 py-1.5 text-xs text-fg/70">
                 Compare: intent vs running
@@ -196,6 +252,7 @@ export function ConfigWorkspace() {
             </button>
           </HScrollToolbar>
         </div>
+        {tab === 'running' && currentApply?.error && <p role="alert" className="border-b border-fg/10 px-4 py-2 text-xs text-danger">{currentApply.error}</p>}
 
         {/* Body */}
         <div className="min-h-0 flex-1 bg-panel">
@@ -240,26 +297,16 @@ export function ConfigWorkspace() {
             <span className="text-xs font-semibold text-fg/85">Devices</span>
             <span className="rounded-full bg-fg/8 px-2 py-0.5 text-[10px] text-fg/60">{nodes.length}</span>
           </div>
-          <label className="flex items-center gap-2 rounded-lg border border-fg/10 bg-surface px-2.5 py-1.5 focus-within:border-accent/50">
-            <Search className="h-4 w-4 text-fg/50" aria-hidden />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter devices…"
-              aria-label="Filter devices"
-              className="w-full bg-transparent text-xs text-fg/85 placeholder:text-fg/50 focus:outline-none"
-            />
-          </label>
         </div>
         <div className="ng-scroll flex-1 overflow-y-auto p-1.5" role="listbox" aria-label="Devices">
           {isLoading ? (
             <p className="p-3 text-xs text-fg/40">Loading devices…</p>
-          ) : filtered.length === 0 ? (
+          ) : nodes.length === 0 ? (
             <p className="p-3 text-xs text-fg/60">
-              {nodes.length === 0 ? 'This project has no devices yet.' : `No device matches “${search}”.`}
+              This project has no devices yet.
             </p>
           ) : (
-            filtered.map((n) => (
+            nodes.map((n) => (
               <DeviceRow
                 key={n.id}
                 node={n}
