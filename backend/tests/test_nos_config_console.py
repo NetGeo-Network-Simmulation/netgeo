@@ -10,7 +10,11 @@ from app.main import app
 from app.models import ConfigArtifact
 from app.services.emul_lab import EmulLabManager, get_emul_lab_manager
 from app.store import get_repo
-from engine.emulation.podman_adaptor import PodmanAdaptor, socket_reachable
+from engine.emulation.podman_adaptor import (
+    PodmanAdaptor,
+    _running_contains,
+    socket_reachable,
+)
 from engine.netstack.device import Device
 from fastapi.testclient import TestClient
 
@@ -91,6 +95,124 @@ def test_failed_rollback_keeps_file_backup(monkeypatch):
         asyncio.run(adaptor.push_config("n", "hostname r1\n"))
     cleanup = [argv for argv in commands if argv[:2] == ["rm", "-f"]][-1]
     assert all(not value.endswith(".backup") for value in cleanup)
+
+
+def test_running_verification_rejects_wrong_stanza_order_and_duplicate():
+    desired = """router bgp 65001
+ address-family ipv4 unicast
+  neighbor 10.0.0.2 activate
+  network 203.0.113.0/24
+ exit-address-family
+router bgp 65002
+ address-family ipv4 unicast
+  network 198.51.100.0/24
+ exit-address-family
+"""
+    wrong_stanza = """router bgp 65001
+ address-family ipv4 unicast
+  network 198.51.100.0/24
+  neighbor 10.0.0.2 activate
+ exit-address-family
+router bgp 65002
+ address-family ipv4 unicast
+  network 203.0.113.0/24
+ exit-address-family
+"""
+    assert {line.strip() for line in desired.splitlines()} == {line.strip() for line in wrong_stanza.splitlines()}
+    assert not _running_contains(desired, wrong_stanza)
+    assert not _running_contains(desired, desired.replace(
+        "  neighbor 10.0.0.2 activate\n  network 203.0.113.0/24",
+        "  network 203.0.113.0/24\n  neighbor 10.0.0.2 activate",
+    ))
+    duplicate = desired.replace("  network 203.0.113.0/24", "  network 203.0.113.0/24\n  network 203.0.113.0/24")
+    assert not _running_contains(duplicate, desired)
+    assert not _running_contains(desired, duplicate)
+    assert _running_contains(desired, desired)
+
+
+def test_cleanup_cannot_mask_restart_and_rollback_failure(monkeypatch, caplog):
+    adaptor = PodmanAdaptor(project_id="p", lab_id="l", lease_guard=lambda: True)
+    container = Mock(
+        labels={"netgeo.managed": "true", "netgeo.project": "p", "netgeo.lab": "l", "netgeo.kind": "frr"},
+        status="running",
+    )
+    container.put_archive.return_value = True
+    adaptor._client = Mock()
+    adaptor._client.containers.get.return_value = container
+
+    def execute(argv, demux=True):
+        if argv[0] == "mv" and argv[1].endswith(".backup"):
+            raise RuntimeError("container stopped during rollback")
+        if argv[0] == "rm":
+            raise RuntimeError("container unreachable during cleanup")
+        if argv[0] == "vtysh":
+            return 0, (b"hostname r1\n", b"")
+        return 0, (b"", b"")
+
+    container.exec_run.side_effect = execute
+
+    def fail_restart(_):
+        raise RuntimeError("restart failed")
+
+    monkeypatch.setattr(adaptor, "_apply_file", fail_restart)
+    with pytest.raises(RuntimeError, match="file rollback failed \\(RuntimeError\\)") as raised:
+        asyncio.run(adaptor.push_config("n", "hostname r1\n"))
+    assert str(raised.value.__cause__) == "restart failed"
+    assert "container unreachable during cleanup" not in str(raised.value)
+    assert "backup at" in caplog.text
+
+
+def test_cleanup_cannot_mask_apply_failure_after_successful_rollback(monkeypatch):
+    adaptor = PodmanAdaptor(project_id="p", lab_id="l", lease_guard=lambda: True)
+    container = Mock(
+        labels={"netgeo.managed": "true", "netgeo.project": "p", "netgeo.lab": "l", "netgeo.kind": "frr"},
+        status="running",
+    )
+    container.put_archive.return_value = True
+    adaptor._client = Mock()
+    adaptor._client.containers.get.return_value = container
+
+    def execute(argv, demux=True):
+        if argv[0] == "test" and argv[-1] == "/etc/frr/frr.conf":
+            return 1, (b"", b"")
+        if argv[0] == "rm" and argv[-1].endswith(".backup"):
+            raise RuntimeError("container stopped during cleanup")
+        if argv[0] == "vtysh":
+            return 0, (b"hostname r1\n", b"")
+        return 0, (b"", b"")
+
+    container.exec_run.side_effect = execute
+
+    def fail_apply(_):
+        raise RuntimeError("initial restart failed")
+
+    monkeypatch.setattr(adaptor, "_apply_file", fail_apply)
+    monkeypatch.setattr(adaptor, "_restart_ready", lambda _: None)
+    with pytest.raises(RuntimeError, match="initial restart failed"):
+        asyncio.run(adaptor.push_config("n", "hostname r1\n"))
+
+
+def test_applied_config_reports_cleanup_failure(monkeypatch):
+    adaptor = PodmanAdaptor(project_id="p", lab_id="l", lease_guard=lambda: True)
+    container = Mock(
+        labels={"netgeo.managed": "true", "netgeo.project": "p", "netgeo.lab": "l", "netgeo.kind": "frr"},
+        status="running",
+    )
+    container.put_archive.return_value = True
+    adaptor._client = Mock()
+    adaptor._client.containers.get.return_value = container
+
+    def execute(argv, demux=True):
+        if argv[0] == "rm":
+            raise RuntimeError("container stopped")
+        if argv[0] == "vtysh":
+            return 0, (b"hostname r1\n", b"")
+        return 0, (b"", b"")
+
+    container.exec_run.side_effect = execute
+    monkeypatch.setattr(adaptor, "_apply_file", lambda _: (0, ""))
+    result = asyncio.run(adaptor.push_config("n", "hostname r1\n"))
+    assert result == {"applied": True, "verified": True, "cleanup_verified": False}
 
 
 @pytest.mark.asyncio
