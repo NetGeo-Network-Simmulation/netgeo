@@ -1,17 +1,22 @@
 """First concrete :class:`EmulationAdaptor`: spawns real NOS containers via
 the rootless Podman REST socket (``podman-py``).
 
-``spawn``/``destroy`` landed in N-2; ``wire_link``/``destroy_link`` land here
-in N-3 (one podman network per link, explicit static IPs — never netavark's
-own IPAM, see ``ip_alloc.py``). ``push_config`` (N-5) and ``attach_console``
-(ws follow-up) are still stubbed to raise ``NotImplementedError`` on purpose
-rather than silently no-op.
+One Podman network per link uses explicit static IPs. FRR configuration and
+single-command console operations are scoped to labeled, leased containers.
+The legacy PTY ``attach_console`` hook remains unsupported.
 """
 from __future__ import annotations
 
+import asyncio
+import io
+import logging
 import os
 import re
 import socket as _socket
+import tarfile
+import time
+import uuid
+from collections.abc import Callable
 
 from podman import PodmanClient
 from podman.errors import APIError, NotFound
@@ -29,6 +34,7 @@ from engine.netstack.device import Device
 SOCKET_PATH = f"/run/user/{os.getuid()}/podman/podman.sock" if hasattr(os, "getuid") else ""
 CONTAINER_PREFIX = "netgeo-"
 LINK_NETWORK_PREFIX = "netgeo-link-"
+logger = logging.getLogger(__name__)
 
 
 def socket_reachable(path: str = SOCKET_PATH) -> bool:
@@ -91,8 +97,12 @@ class PodmanAdaptor(EmulationAdaptor):
 
     name = "podman"
 
-    def __init__(self, project_id: str | None = None, lab_id: str | None = None) -> None:
+    def __init__(
+        self, project_id: str | None = None, lab_id: str | None = None,
+        lease_guard: Callable[[], bool] | None = None,
+    ) -> None:
         self._client = None  # lazy: only import/connect podman on first use
+        self._lease_guard = lease_guard
         self._labels = {"netgeo.managed": "true"}
         if project_id:
             self._labels["netgeo.project"] = project_id
@@ -125,6 +135,7 @@ class PodmanAdaptor(EmulationAdaptor):
             cap_add=spec.caps,
             mem_limit=f"{spec.mem_limit_mb}m",
             labels={**self._labels, "netgeo.kind": kind},
+            hostname=device.name,
             detach=True,
             # bridge, not the rootless default (pasta) — pasta-mode containers
             # can't join the extra per-link networks wire_link() attaches (N-3).
@@ -156,8 +167,145 @@ class PodmanAdaptor(EmulationAdaptor):
         except NotFound:
             pass
 
-    async def push_config(self, node_id: str, config: str, fmt: str = "cli") -> None:
-        raise NotImplementedError("push_config lands in N-5")
+    def _owned_container(self, node_id: str):
+        if not self._labels.get("netgeo.project") or not self._labels.get("netgeo.lab"):
+            raise PermissionError("a project lab is required for console/config access")
+        if self._lease_guard is None or not self._lease_guard():
+            raise PermissionError("NetGeo emulation lease is required")
+        container = self._get_client().containers.get(f"{CONTAINER_PREFIX}{node_id}")
+        container.reload()
+        expected = {**self._labels, "netgeo.kind": "frr"}
+        if any((container.labels or {}).get(k) != v for k, v in expected.items()):
+            raise PermissionError("container ownership mismatch")
+        if container.status != "running":
+            raise RuntimeError("FRR container is not running")
+        return container
+
+    @staticmethod
+    def _exec(container, argv: list[str]) -> tuple[int, str]:
+        code, streams = container.exec_run(argv, demux=True)
+        stdout, stderr = streams if isinstance(streams, tuple) else (streams, None)
+        return code, ((stdout or b"") + (stderr or b"")).decode(errors="replace")
+
+    @classmethod
+    def _restart_ready(cls, container) -> None:
+        # Restart resets daemon state, making the file a replacement instead
+        # of vtysh -b's additive merge. Podman keeps container networks.
+        container.restart()
+        for _ in range(20):
+            code, daemons = cls._exec(container, ["vtysh", "-c", "show daemons"])
+            if code == 0 and {"mgmtd", "zebra", "staticd"}.issubset(daemons.split()):
+                return
+            time.sleep(0.5)
+        raise RuntimeError("FRR daemons did not become ready after restart")
+
+    @classmethod
+    def _apply_file(cls, container) -> tuple[int, str]:
+        cls._restart_ready(container)
+        return cls._exec(container, ["vtysh", "-b"])
+
+    async def push_config(self, node_id: str, config: str, fmt: str = "cli") -> dict:
+        return await asyncio.to_thread(self._push_config, node_id, config, fmt)
+
+    def _push_config(self, node_id: str, config: str, fmt: str = "cli") -> dict:
+        if fmt != "cli":
+            raise ValueError("FRR supports CLI configuration only")
+        if not config.strip() or "\x00" in config or len(config.encode()) > 1024 * 1024:
+            raise ValueError("FRR configuration must be nonempty UTF-8 text under 1 MiB")
+        container = self._owned_container(node_id)
+        before_code, before = self._exec(container, ["vtysh", "-c", "show running-config"])
+        if before_code:
+            raise RuntimeError("FRR running state unavailable before apply")
+        temporary = f".netgeo-{uuid.uuid4().hex}.conf"
+        backup = f"{temporary}.backup"
+        target = "/etc/frr/frr.conf"
+        staged = f"/etc/frr/{temporary}"
+        saved = f"/etc/frr/{backup}"
+        moved = False
+        applied = False
+        keep_backup = False
+        had_original = self._exec(container, ["test", "-f", target])[0] == 0
+        vtysh_config = "/etc/frr/vtysh.conf"
+        had_vtysh = self._exec(container, ["test", "-f", vtysh_config])[0] == 0
+        try:
+            with io.BytesIO() as archive:
+                with tarfile.open(fileobj=archive, mode="w") as tar:
+                    payload = config.encode()
+                    info = tarfile.TarInfo(temporary)
+                    info.size = len(payload)
+                    info.mode = 0o600
+                    tar.addfile(info, io.BytesIO(payload))
+                if not container.put_archive("/etc/frr", archive.getvalue()):
+                    raise RuntimeError("FRR configuration upload failed")
+            if not had_vtysh and self._exec(container, ["touch", vtysh_config])[0]:
+                raise RuntimeError("FRR vtysh initialization failed")
+            operations = (["cp", "-p", target, saved], ["mv", staged, target]) if had_original else (["mv", staged, target],)
+            operations += (["chown", "frr:frr", target], ["chmod", "640", target])
+            for argv in operations:
+                code, _ = self._exec(container, argv)
+                if code:
+                    raise RuntimeError("FRR configuration staging failed")
+                if argv[0] == "mv":
+                    moved = True
+            code, _ = self._apply_file(container)
+            if code:
+                raise RuntimeError("FRR rejected configuration")
+            code, running = self._exec(container, ["vtysh", "-c", "show running-config"])
+            if code:
+                raise RuntimeError("FRR running configuration verification failed")
+            # vtysh -b can accept a partial file. Verify meaningful directives
+            # appeared in the actual running state, without returning secrets.
+            directives = [line.strip() for line in config.splitlines()
+                          if line.strip() and not line.lstrip().startswith("!")
+                          and not line.strip().startswith(("frr version ", "frr defaults "))
+                          and line.strip() != "line vty"]
+            actual = {line.strip() for line in running.splitlines()}
+            if not directives or not all(line in actual for line in directives):
+                raise RuntimeError("FRR running configuration differs from artifact")
+            applied = True
+            return {"applied": True, "verified": True}
+        except Exception as exc:
+            if moved:
+                code, _ = self._exec(container, ["mv", saved, target] if had_original else ["rm", "-f", target])
+                if code:
+                    keep_backup = had_original
+                    if keep_backup:
+                        logger.error("FRR rollback failed for node=%s; backup preserved at %s", node_id, saved)
+                    raise RuntimeError("FRR apply failed and file rollback failed") from exc
+                # Fresh daemons restore the previous running configuration.
+                if had_original:
+                    rollback_code, _ = self._apply_file(container)
+                    if rollback_code:
+                        raise RuntimeError("FRR apply failed and rollback reload failed") from exc
+                else:
+                    self._restart_ready(container)
+                code, _ = self._exec(container, ["vtysh", "-c", "show running-config"])
+                if code:
+                    raise RuntimeError("FRR apply failed and rollback verification failed") from exc
+                _, restored = self._exec(container, ["vtysh", "-c", "show running-config"])
+                old_lines = {line.strip() for line in before.splitlines()
+                             if line.strip() and not line.startswith(("%", "Configuration file["))}
+                new_lines = {line.strip() for line in restored.splitlines()
+                             if line.strip() and not line.startswith(("%", "Configuration file["))}
+                if not old_lines.issubset(new_lines):
+                    raise RuntimeError("FRR apply failed and previous running state was not restored") from exc
+            raise
+        finally:
+            self._exec(container, ["rm", "-f", staged] if keep_backup else ["rm", "-f", staged, saved])
+            if not had_vtysh and not applied:
+                self._exec(container, ["rm", "-f", vtysh_config])
+
+    async def command(self, node_id: str, command: str) -> str:
+        return await asyncio.to_thread(self._command, node_id, command)
+
+    def _command(self, node_id: str, command: str) -> str:
+        if not command.strip() or len(command) > 4096 or any(c in command for c in "\r\n\x00"):
+            raise ValueError("one nonempty console command per request is required")
+        container = self._owned_container(node_id)
+        code, output = self._exec(container, ["vtysh", "-c", command])
+        if code:
+            raise RuntimeError("FRR console command failed")
+        return output
 
     async def wire_link(self, link: LinkModel, a: InterfaceModel, b: InterfaceModel) -> None:
         client = self._get_client()

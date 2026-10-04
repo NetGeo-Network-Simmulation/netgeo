@@ -23,6 +23,10 @@ from app.store import MemoryRepository
 from app.store import NotFound as StoreNotFound
 
 router = APIRouter(prefix="/lab", tags=["lab"])
+_EMUL_CAPTURE_REASON = (
+    "emulated packet capture unsupported in this build: FRR 10.7.0 has no tcpdump/dumpcap; "
+    "use pure-sim captures until a capture-capable image and runtime support are available"
+)
 
 
 class _Body(BaseModel):
@@ -371,6 +375,8 @@ async def lab_captures(
     """Capture records, optionally narrowed by a Wireshark-style display
     filter (NG-CAP-02), e.g. ``icmp && ip.addr==10.0.0.1``."""
     topo = await _topo(r, project_id)
+    if topo.project.mode != "pure-sim":
+        raise SimulationError(_EMUL_CAPTURE_REASON)
 
     def work():
         from engine.netstack.filterlang import compile_filter
@@ -405,6 +411,8 @@ async def lab_pcapng(
     """Export captured frames as a real .pcapng (NG-CAP-01) — opens in
     Wireshark/tshark with native protocol decode."""
     topo = await _topo(r, project_id)
+    if topo.project.mode != "pure-sim":
+        raise SimulationError(_EMUL_CAPTURE_REASON)
 
     def work():
         from engine.netstack.pcapng import write_pcapng
@@ -513,6 +521,9 @@ async def lab_tables(
 @router.get("/{project_id}/status")
 async def lab_status(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     topo = await _topo(r, project_id)
+    capture = {"supported": topo.project.mode == "pure-sim"}
+    if not capture["supported"]:
+        capture["reason"] = _EMUL_CAPTURE_REASON
 
     def work():
         lab = _lab_for(topo)
@@ -521,6 +532,7 @@ async def lab_status(project_id: str, r: Annotated[MemoryRepository, Depends(rep
             "stats": lab.net.stats(),
             "events": lab.net.events_log[-50:],
             "capabilities": project_capabilities(topo.project.mode),
+            "capture": capture,
         }
 
     return await _locked(project_id, work)
