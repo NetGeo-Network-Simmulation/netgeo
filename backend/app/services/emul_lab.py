@@ -8,8 +8,6 @@ import os
 import tempfile
 from pathlib import Path
 
-from app.exceptions.base import SimulationError
-from app.models import NodeMode, Topology
 from engine.emulation.ip_alloc import link_subnet
 from engine.emulation.podman_adaptor import (
     CONTAINER_PREFIX,
@@ -19,6 +17,9 @@ from engine.emulation.podman_adaptor import (
 )
 from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
+
+from app.exceptions.base import SimulationError
+from app.models import NodeMode, Topology
 
 if os.name == "posix" and hasattr(os, "getuid"):
     _runtime_dir = Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
@@ -39,6 +40,9 @@ class EmulLabManager:
         self._locks: dict[str, asyncio.Lock] = {}
         self._lease_fd: int | None = None
         self._lease_pid: int | None = None
+
+    def _holds_lease(self) -> bool:
+        return self._lease_fd is not None and self._lease_pid == os.getpid()
 
     def acquire_lease(self) -> None:
         if LEASE_PATH is None or os.name != "posix":
@@ -159,7 +163,7 @@ class EmulLabManager:
         self._labs.pop(project_id, None)
 
     async def _get(self, topo: Topology) -> PodmanAdaptor:
-        if self._lease_fd is None or self._lease_pid != os.getpid():
+        if not self._holds_lease():
             await self.reconcile_stale()
         pid = topo.project.id
         fingerprint = hashlib.sha256(json.dumps(
@@ -173,7 +177,7 @@ class EmulLabManager:
         await self._destroy(pid)
         if topo.project.mode != "pure-emul" or any(n.mode != NodeMode.emul for n in topo.nodes):
             raise SimulationError("mixed-mode forwarding unsupported: all lab nodes must be emulated")
-        adaptor = PodmanAdaptor(project_id=pid, lab_id=fingerprint[:16])
+        adaptor = PodmanAdaptor(project_id=pid, lab_id=fingerprint[:16], lease_guard=self._holds_lease)
         nodes: list[str] = []
         links: list[str] = []
         self._labs[pid] = (fingerprint, adaptor, nodes, links)
@@ -209,6 +213,26 @@ class EmulLabManager:
             dest_ip = ip_b if link.a_iface in src_ifaces else ip_a
             result = await adaptor.ping(src_id, dest_ip, count=count)
             return {**result, "src": src_id, "dst": dst_id, "path": "emulation"}
+
+    async def push_config(self, topo: Topology, node_id: str, content: str, fmt: str) -> dict:
+        async with self._lock(topo.project.id):
+            if topo.project.mode != "pure-emul" or not any(
+                n.id == node_id and n.mode == NodeMode.emul and str(n.nos) == "frr"
+                for n in topo.nodes
+            ):
+                raise SimulationError("configuration target must be an FRR node in a pure-emul project")
+            adaptor = await self._get(topo)
+            return await adaptor.push_config(node_id, content, fmt)
+
+    async def command(self, topo: Topology, node_id: str, command: str) -> str:
+        async with self._lock(topo.project.id):
+            if topo.project.mode != "pure-emul" or not any(
+                n.id == node_id and n.mode == NodeMode.emul and str(n.nos) == "frr"
+                for n in topo.nodes
+            ):
+                raise SimulationError("console target must be an FRR node in a pure-emul project")
+            adaptor = await self._get(topo)
+            return await adaptor.command(node_id, command)
 
 
 _manager = EmulLabManager()

@@ -25,6 +25,7 @@ from fastapi.concurrency import run_in_threadpool
 from app.api.deps import get_current_user_ws
 from app.services import netlab as netlab_service
 from app.services import wireless as wsvc
+from app.services.emul_lab import get_emul_lab_manager
 from app.services.events import get_bus
 from app.store import NotFound, get_repo
 
@@ -192,11 +193,15 @@ async def ws_console(
         )
         return lab.session_for(node_id)
 
-    try:
-        session = await _session()
-    except Exception:
-        logger.exception("console lab build failed for node=%s", node_id)
+    emulated = str(node.mode) == "emul"
+    if emulated:
         session = None
+    else:
+        try:
+            session = await _session()
+        except Exception:
+            logger.exception("console lab build failed for node=%s", node_id)
+            session = None
 
     prompt = session.prompt if session else f"{node.name}> "
     with contextlib.suppress(WebSocketDisconnect, Exception):
@@ -226,19 +231,30 @@ async def ws_console(
             except json.JSONDecodeError:
                 pass
             try:
-                session = await _session()
-                if session is None:
-                    output, prompt = "% node not present in lab\n", f"{node.name}> "
+                if emulated:
+                    topo = await repo.topology(node.project_id)
+                    if not any(n.id == node_id for n in topo.nodes):
+                        raise ValueError("node no longer belongs to project")
+                    output = await get_emul_lab_manager().command(topo, node_id, cmd)
+                    prompt = f"{node.name}> "
                 else:
-                    output = await run_in_threadpool(
-                        netlab_service.get_lab_manager().call_locked,
-                        node.project_id,
-                        lambda session=session, cmd=cmd: session.execute(cmd),
-                    )
-                    prompt = session.prompt
-            except Exception:
-                logger.exception("console command failed for node=%s", node_id)
-                output = "% internal error executing command\n"
+                    session = await _session()
+                    if session is None:
+                        output, prompt = "% node not present in lab\n", f"{node.name}> "
+                    else:
+                        output = await run_in_threadpool(
+                            netlab_service.get_lab_manager().call_locked,
+                            node.project_id,
+                            lambda session=session, cmd=cmd: session.execute(cmd),
+                        )
+                        prompt = session.prompt
+            except Exception as exc:
+                if emulated:
+                    logger.warning("FRR console failed for node=%s: %s", node_id, type(exc).__name__)
+                    output = "% FRR console unavailable; check node/lab status\n"
+                else:
+                    logger.exception("console command failed for node=%s", node_id)
+                    output = "% internal error executing command\n"
             await ws.send_json(
                 {"type": "output", "node_id": node_id, "data": output, "prompt": prompt}
             )
