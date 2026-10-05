@@ -87,6 +87,33 @@ async def test_storing_config_does_not_recreate_live_lab(monkeypatch):
         manager.release_lease()
 
 
+async def test_ping_uses_destination_observed_link_address(monkeypatch):
+    calls = []
+
+    class FakeAdaptor:
+        async def link_address(self, node_id, link_id):
+            calls.append(("address", node_id, link_id))
+            return "10.201.0.4"
+
+        async def ping(self, node_id, address, count):
+            calls.append(("ping", node_id, address, count))
+            return {"sent": count, "received": count}
+
+    async def fake_get(topo):
+        return FakeAdaptor()
+
+    manager = EmulLabManager()
+    monkeypatch.setattr(manager, "_get", fake_get)
+    result = await manager.ping(SimpleNamespace(project=SimpleNamespace(id="p")), "src", "dst", "link", 2)
+    assert calls == [
+        ("address", "dst", "link"),
+        ("ping", "src", "10.201.0.4", 2),
+    ]
+    assert result == {
+        "sent": 2, "received": 2, "src": "src", "dst": "dst", "path": "emulation",
+    }
+
+
 async def test_shutdown_attempts_every_project_after_failure():
     events = []
 
