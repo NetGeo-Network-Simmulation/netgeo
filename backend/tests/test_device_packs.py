@@ -195,6 +195,25 @@ async def test_disable_then_enable_routers_pack_via_api(client, monkeypatch, tmp
     assert "routers:cisco-asr9006-core" in ids
 
 
+def test_readonly_bundled_pack_override_uses_user_state(monkeypatch, tmp_path):
+    bundled_state = tmp_path / "readonly" / "enabled.json"
+    user_packs = tmp_path / "user-packs"
+    monkeypatch.setattr(dt, "_PACKS_STATE_FILE", bundled_state)
+    monkeypatch.setattr(dt, "_USER_PACKS_DIR", user_packs)
+    monkeypatch.setattr(dt, "_USER_PACKS_STATE_FILE", user_packs / "enabled.json")
+    save = dt._save_pack_overrides
+
+    def readonly_save(overrides, path=None):
+        if path == bundled_state:
+            raise PermissionError("system package is read-only")
+        return save(overrides, path)
+
+    monkeypatch.setattr(dt, "_save_pack_overrides", readonly_save)
+    dt._set_pack_enabled("routers", False)
+    assert dt._load_pack_overrides()["routers"] is False
+    assert not bundled_state.exists()
+
+
 async def test_disable_then_enable_olt_pack_via_api(client, monkeypatch, tmp_path):
     state_file = tmp_path / "packs_enabled.json"
     monkeypatch.setattr(dt, "_PACKS_STATE_FILE", state_file)

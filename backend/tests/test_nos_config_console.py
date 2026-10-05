@@ -67,6 +67,20 @@ def test_local_manager_lease_is_sufficient():
         manager.release_lease()
 
 
+def test_link_address_uses_observed_podman_assignment():
+    adaptor = PodmanAdaptor(project_id="p", lab_id="l", lease_guard=lambda: True)
+    container = Mock(
+        labels={"netgeo.managed": "true", "netgeo.project": "p", "netgeo.lab": "l", "netgeo.kind": "frr"},
+        status="running",
+        attrs={"NetworkSettings": {"Networks": {"netgeo-link-x": {"IPAddress": "10.201.0.4"}}}},
+    )
+    adaptor._client = Mock()
+    adaptor._client.containers.get.return_value = container
+    assert asyncio.run(adaptor.link_address("node", "x")) == "10.201.0.4"
+    with pytest.raises(RuntimeError, match="address unavailable"):
+        asyncio.run(adaptor.link_address("node", "missing"))
+
+
 def test_failed_rollback_keeps_file_backup(monkeypatch):
     adaptor = PodmanAdaptor(project_id="p", lab_id="l", lease_guard=lambda: True)
     container = Mock(

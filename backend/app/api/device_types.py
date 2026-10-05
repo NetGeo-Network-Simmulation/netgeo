@@ -32,6 +32,7 @@ import json
 import logging
 import shutil
 import struct
+import sys
 import tempfile
 import threading
 import zipfile
@@ -145,7 +146,7 @@ _custom: dict[str, DeviceType] = {}
 # ---------------------------------------------------------------------------
 
 # repo-root/network/devices  (backend/app/api/ -> ../../../network/devices)
-_DEVICES_DIR = Path(__file__).resolve().parents[3] / "network" / "devices"
+_DEVICES_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3])) / "network" / "devices"
 _PACKS_DIR = _DEVICES_DIR / "packs"
 _PACKS_STATE_FILE = _DEVICES_DIR / "packs_enabled.json"
 _USER_PACKS_DIR = Path("~/.config/netgeo/device-packs").expanduser()
@@ -186,7 +187,8 @@ def _load_pack_overrides() -> dict[str, bool]:
                 values = json.loads(path.read_text(encoding="utf-8")).get("overrides", {})
                 if path == _USER_PACKS_STATE_FILE:
                     values = {key: value for key, value in values.items()
-                              if (_USER_PACKS_DIR / key / "manifest.json").is_file()}
+                              if (_USER_PACKS_DIR / key / "manifest.json").is_file()
+                              or (_PACKS_DIR / key / "manifest.json").is_file()}
                 overrides.update(values)
             except (json.JSONDecodeError, OSError) as exc:
                 logger.warning("%s: unreadable, ignoring overrides: %s", path, exc)
@@ -424,7 +426,12 @@ def _set_pack_enabled_locked(pack_id: str, enabled: bool) -> DevicePack:
             raise HTTPException(409, f"Disable dependent packs first: {', '.join(dependents)}")
     overrides = _load_pack_overrides()
     overrides[pack_id] = enabled
-    _save_pack_overrides(overrides, _USER_PACKS_STATE_FILE if (_USER_PACKS_DIR / pack_id).exists() else _PACKS_STATE_FILE)
+    path = _USER_PACKS_STATE_FILE if (_USER_PACKS_DIR / pack_id).exists() else _PACKS_STATE_FILE
+    try:
+        _save_pack_overrides(overrides, path)
+    except PermissionError:
+        # System RPM packs live under root-owned /opt; keep the user's override writable.
+        _save_pack_overrides(overrides, _USER_PACKS_STATE_FILE)
     return DevicePack(**{**manifests[pack_id], "assets": _pack_asset_urls(manifests[pack_id]),
                           "enabled": enabled,
                           "removable": (_USER_PACKS_DIR / pack_id).exists()})

@@ -18,6 +18,8 @@ FRONTEND_DIST = REPO_ROOT / "frontend" / "dist"
 ICONS = REPO_ROOT / "packaging" / "icons"
 
 datas = [(str(BACKEND / "app"), "app"), (str(ICONS), "icons")]
+datas += [(str(REPO_ROOT / "config-gen" / "templates"), "config-gen/templates"),
+          (str(REPO_ROOT / "network" / "devices"), "network/devices")]
 if FRONTEND_DIST.is_dir():
     datas.append((str(FRONTEND_DIST), "frontend_dist"))
 

@@ -15,11 +15,9 @@ vrf {{ vrf.name }}
  exit-vrf
 !
 {% endfor %}
-{% for if in interfaces %}
+{% for if in interfaces if if.ip %}
 interface {{ if.name }}
-{% if if.ip %}
  ip address {{ if.ip[0] }}
-{% endif %}
 !
 {% endfor %}
 {% if ospf %}

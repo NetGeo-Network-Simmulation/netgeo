@@ -57,6 +57,8 @@ podman run --rm --network=host \
     -v "$REPO_ROOT/backend/app:/repo-ro/backend/app:ro,Z" \
     -v "$REPO_ROOT/backend/engine:/repo-ro/backend/engine:ro,Z" \
     -v "$REPO_ROOT/backend/requirements.txt:/repo-ro/backend/requirements.txt:ro,Z" \
+    -v "$REPO_ROOT/config-gen/templates:/repo-ro/config-gen/templates:ro,Z" \
+    -v "$REPO_ROOT/network/devices:/repo-ro/network/devices:ro,Z" \
     -v "$REPO_ROOT/packaging:/repo-ro/packaging:ro,Z" \
     -v "$REPO_ROOT/frontend/dist:/repo-ro/frontend/dist:ro,Z" \
     -v "$OUT_DIR:/out:Z" \
@@ -84,9 +86,11 @@ podman run --rm --network=host \
         /build-venv/bin/pip install -q --upgrade pip
         /build-venv/bin/pip install -q -r /repo-ro/backend/requirements.txt
         /build-venv/bin/pip install -q -r /repo-ro/packaging/requirements.txt
-        mkdir -p /work/backend /work/frontend
+        mkdir -p /work/backend /work/frontend /work/config-gen /work/network
         cp -r /repo-ro/backend/app /work/backend/app
         cp -r /repo-ro/backend/engine /work/backend/engine
+        cp -r /repo-ro/config-gen/templates /work/config-gen/templates
+        cp -r /repo-ro/network/devices /work/network/devices
         cp -r /repo-ro/packaging /work/packaging
         cp -r /repo-ro/frontend/dist /work/frontend/dist
         cd /work/packaging

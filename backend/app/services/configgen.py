@@ -16,6 +16,7 @@ security/hardening-guide.md §4 (SSTI mitigation).
 from __future__ import annotations
 
 import difflib
+import sys
 from pathlib import Path
 
 from jinja2 import ChainableUndefined
@@ -25,7 +26,7 @@ from app.models import ConfigArtifact, ConfigFormat, Node
 from app.utils.ids import new_id
 
 # repo-root/config-gen/templates  (backend/app/services/ -> ../../../config-gen)
-_CONFIGGEN_DIR = Path(__file__).resolve().parents[3] / "config-gen"
+_CONFIGGEN_DIR = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parents[3])) / "config-gen"
 _TEMPLATE_DIR = _CONFIGGEN_DIR / "templates"
 
 # node.nos / requested vendor -> template filename

@@ -88,3 +88,12 @@ def test_frr_interface_config_omits_linux_link_mtu():
     assert " mtu 1500" in configgen.render(node, "ios")
     previous = frr.replace(" ip address 10.0.0.1/24\n", " ip address 10.0.0.1/24\n mtu 1500\n")
     assert "- mtu 1500" in configgen.config_diff(previous, frr)
+
+
+def test_frr_skips_empty_link_interface_that_frr_does_not_persist():
+    node = _pe_node()
+    node.intent = None
+    node.interfaces[0].ip = []
+    rendered = configgen.render(node, "frr")
+    assert "hostname pe1\n" in rendered
+    assert "interface eth0" not in rendered

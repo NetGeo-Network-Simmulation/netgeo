@@ -8,7 +8,6 @@ import os
 import tempfile
 from pathlib import Path
 
-from engine.emulation.ip_alloc import link_subnet
 from engine.emulation.podman_adaptor import (
     CONTAINER_PREFIX,
     LINK_NETWORK_PREFIX,
@@ -167,7 +166,7 @@ class EmulLabManager:
             await self.reconcile_stale()
         pid = topo.project.id
         fingerprint = hashlib.sha256(json.dumps(
-            {"nodes": [n.model_dump(mode="json") for n in topo.nodes],
+            {"nodes": [n.model_dump(mode="json", exclude={"config_ref"}) for n in topo.nodes],
              "links": [l.model_dump(mode="json") for l in topo.links]},
             sort_keys=True,
         ).encode()).hexdigest()
@@ -206,11 +205,7 @@ class EmulLabManager:
         pid = topo.project.id
         async with self._lock(pid):
             adaptor = await self._get(topo)
-            _, _, ip_a, ip_b = link_subnet(link_id)
-            link = next(l for l in topo.links if l.id == link_id)
-            src = next(n for n in topo.nodes if n.id == src_id)
-            src_ifaces = {i.id for i in src.interfaces}
-            dest_ip = ip_b if link.a_iface in src_ifaces else ip_a
+            dest_ip = await adaptor.link_address(dst_id, link_id)
             result = await adaptor.ping(src_id, dest_ip, count=count)
             return {**result, "src": src_id, "dst": dst_id, "path": "emulation"}
 

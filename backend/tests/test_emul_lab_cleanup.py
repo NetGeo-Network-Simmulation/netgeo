@@ -60,6 +60,33 @@ async def test_failed_wire_cleans_partial_network_and_nodes(monkeypatch):
     manager.release_lease()
 
 
+async def test_storing_config_does_not_recreate_live_lab(monkeypatch):
+    spawned = []
+
+    class FakeAdaptor:
+        def __init__(self, **kwargs):
+            pass
+
+        async def spawn(self, device):
+            spawned.append(device.node_id)
+
+        async def destroy(self, node_id):
+            raise AssertionError("config_ref must not destroy the live lab")
+
+    monkeypatch.setattr("app.services.emul_lab.PodmanAdaptor", FakeAdaptor)
+    monkeypatch.setattr("app.services.emul_lab.socket_reachable", lambda: False)
+    manager = EmulLabManager()
+    node = Node(id="a", project_id="p", name="a", kind="router", nos="frr", mode="emul")
+    topo = Topology(project=Project(id="p", name="P", mode="pure-emul"), nodes=[node])
+    try:
+        first = await manager._get(topo)
+        topo.nodes[0] = node.model_copy(update={"config_ref": "stored-artifact"})
+        assert await manager._get(topo) is first
+        assert spawned == ["a"]
+    finally:
+        manager.release_lease()
+
+
 async def test_shutdown_attempts_every_project_after_failure():
     events = []
 

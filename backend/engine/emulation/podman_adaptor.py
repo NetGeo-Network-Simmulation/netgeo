@@ -433,5 +433,20 @@ class PodmanAdaptor(EmulationAdaptor):
         text = (stdout or b"").decode(errors="replace")
         return _parse_busybox_ping(text, count)
 
+    async def link_address(self, node_id: str, link_id: str) -> str:
+        """Read the address Podman actually assigned to this link endpoint."""
+        def read() -> str:
+            container = self._owned_container(node_id)
+            container.reload()
+            network = ((container.attrs.get("NetworkSettings") or {}).get("Networks") or {}).get(
+                f"{LINK_NETWORK_PREFIX}{link_id}", {}
+            )
+            address = network.get("IPAddress")
+            if not address:
+                raise RuntimeError("emulation link address unavailable")
+            return address
+
+        return await asyncio.to_thread(read)
+
     async def attach_console(self, node_id: str):
         raise NotImplementedError("attach_console lands with ws.py wiring")
