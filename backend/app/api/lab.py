@@ -87,8 +87,9 @@ async def emul_capture_pcap(project_id: str, capture_id: str,
 async def cancel_emul_capture(project_id: str, capture_id: str,
                               r: Annotated[MemoryRepository, Depends(repo)]):
     from app.services.emul_lab import get_emul_lab_manager
-    await _topo(r, project_id)
-    await get_emul_lab_manager().cancel_capture(project_id, capture_id)
+    manager = get_emul_lab_manager()
+    await manager.capture_status(await _topo(r, project_id), capture_id)
+    await manager.cancel_capture(project_id, capture_id)
     return Response(status_code=204)
 
 
@@ -569,7 +570,10 @@ async def lab_status(project_id: str, r: Annotated[MemoryRepository, Depends(rep
         capture["reason"] = _EMUL_CAPTURE_REASON
     emul_capture = {"supported": get_emul_lab_manager().capture_available(topo)}
     if not emul_capture["supported"]:
-        emul_capture["reason"] = "requires an active rootless lab using the locally built FRR capture image"
+        emul_capture["reason"] = (
+            "requires a rootless lab using the locally built FRR capture image; "
+            f"POST /api/lab/{project_id}/rebuild after building the image"
+        )
 
     def work():
         lab = _lab_for(topo)

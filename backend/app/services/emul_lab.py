@@ -20,7 +20,7 @@ from engine.emulation.podman_adaptor import (
 from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
 
-from app.exceptions.base import SimulationError
+from app.exceptions.base import Conflict, NotFound, SimulationError
 from app.models import NodeMode, Topology
 
 if os.name == "posix" and hasattr(os, "getuid"):
@@ -34,6 +34,9 @@ else:
 
 class EmulationLeaseUnavailable(SimulationError):
     pass
+
+
+CAPTURE_IO_GRACE_SECONDS = 5
 
 
 @dataclass
@@ -249,7 +252,10 @@ class EmulLabManager:
                 raise SimulationError("capture interface is not linked")
             adaptor = await self._get(topo)
             if not adaptor.capture_enabled:
-                raise SimulationError("emulated capture unsupported: local FRR capture image is unavailable; build it explicitly")
+                raise SimulationError(
+                    "emulated capture unavailable in this lab: build the local FRR capture image, "
+                    f"then POST /api/lab/{pid}/rebuild to use it"
+                )
             if sum(s.project_id == pid for s in self._captures.values()) >= 4 or len(self._captures) >= 32:
                 raise SimulationError("capture session limit reached; delete an earlier capture")
             if any(s.project_id == pid and s.node_id == node_id and s.state == "running" for s in self._captures.values()):
@@ -264,7 +270,10 @@ class EmulLabManager:
 
     async def _run_capture(self, adaptor: PodmanAdaptor, session: CaptureSession, interface: str, duration: int) -> None:
         try:
-            data = await asyncio.to_thread(adaptor.capture_pcap, session.node_id, interface, session.path, duration)
+            data = await asyncio.wait_for(
+                asyncio.to_thread(adaptor.capture_pcap, session.node_id, interface, session.path, duration),
+                timeout=duration + CAPTURE_IO_GRACE_SECONDS,
+            )
             if session.state == "running" and self._holds_lease():
                 session.pcap = data
                 session.state = "complete"
@@ -276,29 +285,32 @@ class EmulLabManager:
     async def capture_status(self, topo: Topology, capture_id: str) -> dict:
         session = self._captures.get(capture_id)
         if session is None or session.project_id != topo.project.id:
-            raise SimulationError("capture not found in this project")
+            raise NotFound("capture not found in this project")
         if session.fingerprint != self._fingerprint(topo) or not self._holds_lease():
             await self.cancel_capture(topo.project.id, capture_id)
-            raise SimulationError("capture expired with the lab topology or lease")
+            raise Conflict("capture expired with the lab topology or lease")
         return {"id": capture_id, "node_id": session.node_id, "interface_id": session.interface_id,
                 "state": session.state, "size": len(session.pcap or b""), "error": session.error}
 
     async def capture_bytes(self, topo: Topology, capture_id: str) -> bytes:
         status = await self.capture_status(topo, capture_id)
         if status["state"] != "complete":
-            raise SimulationError("capture result is not complete")
+            raise Conflict("capture result is not complete")
         return self._captures[capture_id].pcap or b""
 
     async def cancel_capture(self, project_id: str, capture_id: str) -> None:
         session = self._captures.get(capture_id)
         if session is None or session.project_id != project_id:
-            raise SimulationError("capture not found in this project")
+            raise NotFound("capture not found in this project")
         session.state = "cancelled"
         session.pcap = None
         lab = self._labs.get(project_id)
         if lab and self._holds_lease():
             try:
-                await asyncio.to_thread(lab[1].stop_capture, session.node_id, session.path)
+                await asyncio.wait_for(
+                    asyncio.to_thread(lab[1].stop_capture, session.node_id, session.path),
+                    timeout=CAPTURE_IO_GRACE_SECONDS,
+                )
             except Exception:
                 pass  # destroy still removes owned container; timeout caps capture at 15s
         if session.task:

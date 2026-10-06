@@ -2,15 +2,17 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import subprocess
 import struct
+import threading
 import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 import pytest
 
-from app.exceptions.base import SimulationError
+from app.exceptions.base import Conflict, NotFound, SimulationError
 from app.models import Interface, Link, Node, Project, Topology
 from app.services.emul_lab import CaptureSession, EmulLabManager
 from app.services.emul_lab import get_emul_lab_manager
@@ -43,7 +45,7 @@ async def test_capture_rejects_wrong_node_interface_project_and_duration(monkeyp
                                  ("a", "missing", 15), ("a", "a-if", 16), ("a", "a-if", 0)):
         with pytest.raises(SimulationError):
             await manager.start_capture(topo, node, iface, seconds)
-    with pytest.raises(SimulationError, match="not found"):
+    with pytest.raises(NotFound, match="not found"):
         await manager.capture_status(topology("other"), "unknown")
 
 
@@ -51,11 +53,13 @@ async def test_capture_rejects_wrong_node_interface_project_and_duration(monkeyp
 async def test_capture_missing_image_and_non_linux_are_unsupported(monkeypatch):
     manager = EmulLabManager()
     topo = topology()
+    cached = SimpleNamespace(capture_enabled=False)
     async def fake_get(_):
-        return SimpleNamespace(capture_enabled=False)
+        return cached
     monkeypatch.setattr(manager, "_get", fake_get)
-    with pytest.raises(SimulationError, match="image is unavailable"):
+    with pytest.raises(SimulationError, match="/api/lab/capture-test/rebuild"):
         await manager.start_capture(topo, "a", "a-if")
+    assert not manager._captures  # starting capture never rebuilds an active lab
     monkeypatch.setattr("app.services.emul_lab.sys.platform", "darwin")
     with pytest.raises(SimulationError, match="requires Linux"):
         await manager.start_capture(topo, "a", "a-if")
@@ -87,10 +91,10 @@ async def test_capture_session_result_cancel_rebuild_and_stale_lease(monkeypatch
     await manager._captures[cid].task
     assert (await manager.capture_status(topo, cid))["state"] == "complete"
     assert await manager.capture_bytes(topo, cid) == data
-    with pytest.raises(SimulationError, match="not found"):
+    with pytest.raises(NotFound, match="not found"):
         await manager.capture_status(topology("other"), cid)
     topo.links.clear()
-    with pytest.raises(SimulationError, match="expired"):
+    with pytest.raises(Conflict, match="expired"):
         await manager.capture_status(topo, cid)
     assert cid not in manager._captures
     topo = topology()
@@ -98,7 +102,7 @@ async def test_capture_session_result_cancel_rebuild_and_stale_lease(monkeypatch
     cid = await manager.start_capture(topo, "a", "a-if")
     await manager._captures[cid].task
     manager._lease_pid = -1
-    with pytest.raises(SimulationError, match="lease"):
+    with pytest.raises(Conflict, match="lease"):
         await manager.capture_status(topo, cid)
     assert cid not in manager._captures
     manager._lease_pid = __import__("os").getpid()
@@ -110,7 +114,8 @@ async def test_capture_session_result_cancel_rebuild_and_stale_lease(monkeypatch
 
 
 @pytest.mark.asyncio
-async def test_shutdown_erases_active_session():
+@pytest.mark.parametrize("stop_fails", [False, True])
+async def test_shutdown_erases_active_session_even_when_signal_fails(stop_fails):
     manager = EmulLabManager()
     topo = topology()
     stopped = asyncio.Event()
@@ -118,6 +123,8 @@ async def test_shutdown_erases_active_session():
     class FakeAdaptor:
         def stop_capture(self, node_id, path):
             loop.call_soon_threadsafe(stopped.set)
+            if stop_fails:
+                raise RuntimeError("signal unavailable")
         async def destroy_link(self, link_id):
             pass
         async def destroy(self, node_id):
@@ -130,6 +137,25 @@ async def test_shutdown_erases_active_session():
     await manager.destroy(topo.project.id)
     assert stopped.is_set() and not manager._captures and not manager._labs
     manager._lease_fd = None
+
+
+@pytest.mark.asyncio
+async def test_capture_exec_transport_stall_has_wall_clock_bound(monkeypatch):
+    manager = EmulLabManager()
+    released = threading.Event()
+    class StalledAdaptor:
+        def capture_pcap(self, node_id, interface, path, duration):
+            released.wait(5)
+            return b"\xd4\xc3\xb2\xa1" + bytes(20)
+    monkeypatch.setattr("app.services.emul_lab.CAPTURE_IO_GRACE_SECONDS", 0.05)
+    session = CaptureSession("p", "a", "a-if", "fingerprint", "/tmp/netgeo-capture-test.pcap")
+    started = time.monotonic()
+    try:
+        await manager._run_capture(StalledAdaptor(), session, "eth1", 1)
+        assert time.monotonic() - started < 2
+        assert session.state == "error" and session.pcap is None
+    finally:
+        released.set()
 
 
 def test_container_interface_requires_owned_link_and_no_client_command():
@@ -174,6 +200,8 @@ async def test_local_capture_image_is_selected_without_pulling_base():
 async def test_capture_api_contract_and_bounds(client, monkeypatch):
     project = (await client.post("/api/projects", json={"name": "capture-api"})).json()
     pid = project["id"]
+    availability = await client.get(f"/api/lab/{pid}/status")
+    assert f"POST /api/lab/{pid}/rebuild" in availability.json()["emul_capture"]["reason"]
     manager = get_emul_lab_manager()
     start = AsyncMock(return_value="abc123")
     status = AsyncMock(return_value={"id": "abc123", "state": "complete", "size": 24})
@@ -196,10 +224,21 @@ async def test_capture_api_contract_and_bounds(client, monkeypatch):
     assert pcap.status_code == 200 and pcap.content[:4] == b"\xd4\xc3\xb2\xa1"
     assert (await client.delete(path + "/abc123")).status_code == 204
     cancel.assert_awaited_once_with(pid, "abc123")
+    status.side_effect = NotFound("capture not found in this project")
+    assert (await client.get(path + "/deleted")).status_code == 404
+    status.side_effect = Conflict("capture expired with the lab topology or lease")
+    assert (await client.get(path + "/expired")).status_code == 409
+    result.side_effect = Conflict("capture result is not complete")
+    assert (await client.get(path + "/pending/pcap")).status_code == 409
+    assert (await client.delete(path + "/expired")).status_code == 409
+    status.side_effect = None
+    cancel.side_effect = NotFound("capture not found in this project")
+    assert (await client.delete(path + "/deleted")).status_code == 404
 
 
 @pytest.mark.podman
-@pytest.mark.skipif(not socket_reachable(), reason="rootless Podman socket unavailable")
+@pytest.mark.skipif(not socket_reachable() and os.getenv("NETGEO_REQUIRE_CAPTURE_PROOF") != "1",
+                    reason="rootless Podman socket unavailable")
 @pytest.mark.asyncio
 async def test_real_rootless_capture_contains_icmp_and_cleans():
     manager = EmulLabManager()
@@ -207,6 +246,8 @@ async def test_real_rootless_capture_contains_icmp_and_cleans():
     try:
         adaptor = await manager._get(topo)
         if not adaptor.capture_enabled:
+            if os.getenv("NETGEO_REQUIRE_CAPTURE_PROOF") == "1":
+                pytest.fail("CI capture image missing")
             pytest.skip("local capture image unavailable")
         cid = await manager.start_capture(topo, "a", "a-if", 5)
         await asyncio.sleep(1)

@@ -55,6 +55,16 @@ jobs:
       - name: Pull FRR image
         run: podman pull quay.io/frrouting/frr:10.7.0
 
+      - name: Build local FRR capture image
+        run: |
+          podman build -t localhost/netgeo/frr-capture:10.7.0 \
+            -f packaging/nos/frr-capture/Containerfile packaging/nos/frr-capture
+          podman image exists localhost/netgeo/frr-capture:10.7.0
+
       - name: Test (pytest -m podman)
         working-directory: backend
-        run: pytest -m podman -q
+        env:
+          NETGEO_REQUIRE_CAPTURE_PROOF: "1"
+        run: |
+          python -c 'from engine.emulation.podman_adaptor import socket_reachable; assert socket_reachable()'
+          pytest -m podman -q
