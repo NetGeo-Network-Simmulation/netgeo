@@ -221,12 +221,12 @@ class PodmanAdaptor(EmulationAdaptor):
         except NotFound:
             pass
 
-    def _owned_container(self, node_id: str):
+    def _owned_container(self, node_id: str, client=None):
         if not self._labels.get("netgeo.project") or not self._labels.get("netgeo.lab"):
             raise PermissionError("a project lab is required for console/config access")
         if self._lease_guard is None or not self._lease_guard():
             raise PermissionError("NetGeo emulation lease is required")
-        container = self._get_client().containers.get(f"{CONTAINER_PREFIX}{node_id}")
+        container = (client or self._get_client()).containers.get(f"{CONTAINER_PREFIX}{node_id}")
         container.reload()
         expected = {**self._labels, "netgeo.kind": "frr"}
         if any((container.labels or {}).get(k) != v for k, v in expected.items()):
@@ -486,39 +486,41 @@ class PodmanAdaptor(EmulationAdaptor):
         raise RuntimeError("container interface for link address unavailable")
 
     def capture_pcap(self, node_id: str, interface: str, path: str, duration: int) -> bytes:
-        container = self._owned_container(node_id)
-        try:
-            # No user-supplied command, filter, path, or interface reaches exec.
-            code, _ = self._exec(container, [
-                "timeout", "-s", "INT", str(duration), "tcpdump", "-i", interface,
-                "-s", "160", "-c", "256", "-U", "-w", path,
-            ])
-            if code not in (0, 124):
-                raise RuntimeError("tcpdump capture failed")
-            code, data = container.exec_run(["head", "-c", "65537", path], demux=True)
-            payload = data[0] if isinstance(data, tuple) else data
-            if code or not isinstance(payload, bytes) or len(payload) > 65536 or payload[:4] not in (
-                b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4",
-            ):
-                raise RuntimeError("bounded PCAP result unavailable")
-            return payload
-        finally:
+        with PodmanClient(base_url=f"unix://{SOCKET_PATH}", timeout=duration + 5) as client:
+            container = self._owned_container(node_id, client)
             try:
-                self._exec(container, ["rm", "-f", path])
-            except Exception:
-                logger.warning("capture file cleanup failed for node=%s", node_id)
+                # No user-supplied command, filter, path, or interface reaches exec.
+                code, _ = self._exec(container, [
+                    "timeout", "-s", "INT", str(duration), "tcpdump", "-i", interface,
+                    "-s", "160", "-c", "256", "-U", "-w", path,
+                ])
+                if code not in (0, 124):
+                    raise RuntimeError("tcpdump capture failed")
+                code, data = container.exec_run(["head", "-c", "65537", path], demux=True)
+                payload = data[0] if isinstance(data, tuple) else data
+                if code or not isinstance(payload, bytes) or len(payload) > 65536 or payload[:4] not in (
+                    b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4",
+                ):
+                    raise RuntimeError("bounded PCAP result unavailable")
+                return payload
+            finally:
+                try:
+                    self._exec(container, ["rm", "-f", path])
+                except Exception:
+                    logger.warning("capture file cleanup failed for node=%s", node_id)
 
     def stop_capture(self, node_id: str, path: str) -> None:
         """Signal only the tcpdump process for this internal capture path."""
-        container = self._owned_container(node_id)
-        code, output = self._exec(container, ["ps", "-o", "pid,args"])
-        if code:
-            raise RuntimeError("capture process inspection failed")
-        for line in output.splitlines():
-            fields = line.strip().split(None, 1)
-            if len(fields) == 2 and fields[0].isdigit() and "tcpdump" in fields[1].split() and path in fields[1].split():
-                self._exec(container, ["kill", "-INT", fields[0]])
-        self._exec(container, ["rm", "-f", path])
+        with PodmanClient(base_url=f"unix://{SOCKET_PATH}", timeout=5) as client:
+            container = self._owned_container(node_id, client)
+            code, output = self._exec(container, ["ps", "-o", "pid,args"])
+            if code:
+                raise RuntimeError("capture process inspection failed")
+            for line in output.splitlines():
+                fields = line.strip().split(None, 1)
+                if len(fields) == 2 and fields[0].isdigit() and "tcpdump" in fields[1].split() and path in fields[1].split():
+                    self._exec(container, ["kill", "-INT", fields[0]])
+            self._exec(container, ["rm", "-f", path])
 
     async def attach_console(self, node_id: str):
         raise NotImplementedError("attach_console lands with ws.py wiring")

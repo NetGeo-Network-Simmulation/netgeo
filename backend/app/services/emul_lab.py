@@ -258,7 +258,8 @@ class EmulLabManager:
                 )
             if sum(s.project_id == pid for s in self._captures.values()) >= 4 or len(self._captures) >= 32:
                 raise SimulationError("capture session limit reached; delete an earlier capture")
-            if any(s.project_id == pid and s.node_id == node_id and s.state == "running" for s in self._captures.values()):
+            if any(s.project_id == pid and s.node_id == node_id and s.state in ("running", "stopping", "cancelling")
+                   for s in self._captures.values()):
                 raise SimulationError("one active capture per node is allowed")
             interface = await asyncio.to_thread(adaptor.capture_interface, node_id, link.id)
             capture_id = uuid.uuid4().hex
@@ -269,14 +270,26 @@ class EmulLabManager:
             return capture_id
 
     async def _run_capture(self, adaptor: PodmanAdaptor, session: CaptureSession, interface: str, duration: int) -> None:
+        worker = asyncio.create_task(asyncio.to_thread(
+            adaptor.capture_pcap, session.node_id, interface, session.path, duration,
+        ))
         try:
             data = await asyncio.wait_for(
-                asyncio.to_thread(adaptor.capture_pcap, session.node_id, interface, session.path, duration),
+                asyncio.shield(worker),
                 timeout=duration + CAPTURE_IO_GRACE_SECONDS,
             )
             if session.state == "running" and self._holds_lease():
                 session.pcap = data
                 session.state = "complete"
+        except TimeoutError:
+            session.state = "stopping"
+            try:
+                await worker  # keep this node occupied until the Podman exec really ends
+            except Exception:
+                pass
+            if session.state == "stopping":
+                session.error = "TimeoutError"
+                session.state = "error"
         except Exception as exc:  # noqa: BLE001 - present bounded failure without leaking container details
             if session.state == "running":
                 session.error = type(exc).__name__
@@ -302,17 +315,21 @@ class EmulLabManager:
         session = self._captures.get(capture_id)
         if session is None or session.project_id != project_id:
             raise NotFound("capture not found in this project")
-        session.state = "cancelled"
+        session.state = "cancelling"
         session.pcap = None
         lab = self._labs.get(project_id)
         if lab and self._holds_lease():
+            worker = asyncio.create_task(asyncio.to_thread(lab[1].stop_capture, session.node_id, session.path))
             try:
                 await asyncio.wait_for(
-                    asyncio.to_thread(lab[1].stop_capture, session.node_id, session.path),
+                    asyncio.shield(worker),
                     timeout=CAPTURE_IO_GRACE_SECONDS,
                 )
             except Exception:
-                pass  # destroy still removes owned container; timeout caps capture at 15s
+                try:
+                    await worker  # no later stop can race a new capture on this node
+                except Exception:
+                    pass  # destroy still removes owned container; timeout caps tcpdump at 15s
         if session.task:
             await session.task
         self._captures.pop(capture_id, None)

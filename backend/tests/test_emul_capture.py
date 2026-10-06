@@ -140,22 +140,75 @@ async def test_shutdown_erases_active_session_even_when_signal_fails(stop_fails)
 
 
 @pytest.mark.asyncio
-async def test_capture_exec_transport_stall_has_wall_clock_bound(monkeypatch):
+async def test_timed_out_capture_keeps_node_occupied_until_worker_exits(monkeypatch):
     manager = EmulLabManager()
+    topo = topology()
     released = threading.Event()
     class StalledAdaptor:
+        capture_enabled = True
+        def capture_interface(self, node_id, link_id):
+            return "eth1"
         def capture_pcap(self, node_id, interface, path, duration):
             released.wait(5)
             return b"\xd4\xc3\xb2\xa1" + bytes(20)
+        def stop_capture(self, node_id, path):
+            pass
+        async def destroy_link(self, link_id):
+            pass
+        async def destroy(self, node_id):
+            pass
     monkeypatch.setattr("app.services.emul_lab.CAPTURE_IO_GRACE_SECONDS", 0.05)
-    session = CaptureSession("p", "a", "a-if", "fingerprint", "/tmp/netgeo-capture-test.pcap")
-    started = time.monotonic()
+    manager._lease_fd, manager._lease_pid = 1, os.getpid()
+    manager._labs[topo.project.id] = (manager._fingerprint(topo), StalledAdaptor(), ["a"], ["capture-link"])
+    cid = await manager.start_capture(topo, "a", "a-if", 1)
     try:
-        await manager._run_capture(StalledAdaptor(), session, "eth1", 1)
-        assert time.monotonic() - started < 2
-        assert session.state == "error" and session.pcap is None
+        await asyncio.sleep(1.15)
+        assert manager._captures[cid].state == "stopping"
+        with pytest.raises(SimulationError, match="one active capture"):
+            await manager.start_capture(topo, "a", "a-if", 1)
     finally:
         released.set()
+    await manager._captures[cid].task
+    assert manager._captures[cid].state == "error" and manager._captures[cid].pcap is None
+    await manager.destroy(topo.project.id)
+    assert not manager._captures and not manager._labs
+    manager._lease_fd = None
+
+
+@pytest.mark.asyncio
+async def test_timed_out_stop_keeps_node_occupied_until_stop_exits(monkeypatch):
+    manager = EmulLabManager()
+    topo = topology()
+    released = threading.Event()
+    class StalledStop:
+        capture_enabled = True
+        def capture_interface(self, node_id, link_id):
+            return "eth1"
+        def capture_pcap(self, node_id, interface, path, duration):
+            return b"\xd4\xc3\xb2\xa1" + bytes(20)
+        def stop_capture(self, node_id, path):
+            released.wait(5)
+        async def destroy_link(self, link_id):
+            pass
+        async def destroy(self, node_id):
+            pass
+    monkeypatch.setattr("app.services.emul_lab.CAPTURE_IO_GRACE_SECONDS", 0.05)
+    manager._lease_fd, manager._lease_pid = 1, os.getpid()
+    manager._labs[topo.project.id] = (manager._fingerprint(topo), StalledStop(), ["a"], ["capture-link"])
+    cid = await manager.start_capture(topo, "a", "a-if", 1)
+    await manager._captures[cid].task
+    cancelling = asyncio.create_task(manager.cancel_capture(topo.project.id, cid))
+    try:
+        await asyncio.sleep(0.15)
+        assert manager._captures[cid].state == "cancelling" and not cancelling.done()
+        with pytest.raises(SimulationError, match="one active capture"):
+            await manager.start_capture(topo, "a", "a-if", 1)
+    finally:
+        released.set()
+    await cancelling
+    await manager.destroy(topo.project.id)
+    assert not manager._captures and not manager._labs
+    manager._lease_fd = None
 
 
 def test_container_interface_requires_owned_link_and_no_client_command():
@@ -180,6 +233,32 @@ def test_container_interface_requires_owned_link_and_no_client_command():
     with pytest.raises(PermissionError):
         adaptor.capture_interface("n", "l")
     assert container.exec_run.call_count == 1
+
+
+def test_capture_podman_requests_have_transport_timeouts(monkeypatch):
+    timeouts = []
+    class Client:
+        def __init__(self, *, base_url, timeout):
+            timeouts.append(timeout)
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+    adaptor = PodmanAdaptor(project_id="p", lab_id="l", lease_guard=lambda: True)
+    pcap = b"\xd4\xc3\xb2\xa1" + bytes(20)
+    container = Mock()
+    def execute(argv, demux=True):
+        if argv[0] == "head":
+            return 0, (pcap, b"")
+        if argv[0] == "ps":
+            return 0, (b"PID COMMAND\n", b"")
+        return 0, (b"", b"")
+    container.exec_run.side_effect = execute
+    monkeypatch.setattr("engine.emulation.podman_adaptor.PodmanClient", Client)
+    monkeypatch.setattr(adaptor, "_owned_container", lambda node_id, client: container)
+    assert adaptor.capture_pcap("a", "eth1", "/tmp/netgeo-capture-test.pcap", 15) == pcap
+    adaptor.stop_capture("a", "/tmp/netgeo-capture-test.pcap")
+    assert timeouts == [20, 5]
 
 
 @pytest.mark.asyncio
