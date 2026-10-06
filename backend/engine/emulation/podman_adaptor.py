@@ -28,7 +28,7 @@ from engine.emulation.adaptor import (
     EmulationStatus,
 )
 from engine.emulation.ip_alloc import link_subnet
-from engine.emulation.kinds import KINDS
+from engine.emulation.kinds import FRR_CAPTURE_IMAGE, KINDS
 from engine.model import InterfaceModel, LinkModel
 from engine.netstack.device import Device
 
@@ -149,6 +149,7 @@ class PodmanAdaptor(EmulationAdaptor):
         self._client = None  # lazy: only import/connect podman on first use
         self._lease_guard = lease_guard
         self._labels = {"netgeo.managed": "true"}
+        self.capture_enabled = False
         if project_id:
             self._labels["netgeo.project"] = project_id
         if lab_id:
@@ -161,6 +162,11 @@ class PodmanAdaptor(EmulationAdaptor):
             self._client = PodmanClient(base_url=f"unix://{SOCKET_PATH}")
         return self._client
 
+    def use_local_capture_image(self) -> bool:
+        """Choose the opt-in local image before spawning this lab's nodes."""
+        self.capture_enabled = self._get_client().images.exists(FRR_CAPTURE_IMAGE)
+        return self.capture_enabled
+
     async def spawn(self, device: Device) -> EmulatedNodeHandle:
         kind = device.nos
         spec = KINDS.get(kind)
@@ -168,14 +174,17 @@ class PodmanAdaptor(EmulationAdaptor):
             raise UnknownKind(f"unregistered emulation kind {kind!r}")
 
         client = self._get_client()
-        if not client.images.exists(spec.image):
+        image = FRR_CAPTURE_IMAGE if kind == "frr" and self.capture_enabled else spec.image
+        if not client.images.exists(image):
+            if image == FRR_CAPTURE_IMAGE:
+                raise RuntimeError("local FRR capture image disappeared before lab startup")
             if not spec.bundlable:
                 raise ImageNotLocal(kind, spec.image)
             client.images.pull(spec.image)
 
         name = f"{CONTAINER_PREFIX}{device.node_id}"
         container = client.containers.create(
-            spec.image,
+            image,
             name=name,
             cap_add=spec.caps,
             mem_limit=f"{spec.mem_limit_mb}m",
@@ -447,6 +456,69 @@ class PodmanAdaptor(EmulationAdaptor):
             return address
 
         return await asyncio.to_thread(read)
+
+    def capture_interface(self, node_id: str, link_id: str) -> str:
+        """Resolve a stored link to the actual interface in its owned container."""
+        container = self._owned_container(node_id)
+        container.reload()
+        network = ((container.attrs.get("NetworkSettings") or {}).get("Networks") or {}).get(
+            f"{LINK_NETWORK_PREFIX}{link_id}", {}
+        )
+        address = network.get("IPAddress")
+        if not address:
+            raise ValueError("interface is not attached to this node and link")
+        network = self._get_client().networks.get(f"{LINK_NETWORK_PREFIX}{link_id}")
+        labels = (network.attrs or {}).get("labels") or (network.attrs or {}).get("Labels") or {}
+        if any(labels.get(k) != v for k, v in {**self._labels, "netgeo.link": link_id}.items()):
+            raise PermissionError("link ownership mismatch")
+        code, output = self._exec(container, ["ip", "-4", "addr", "show"])
+        if code:
+            raise RuntimeError("container interface discovery failed")
+        current = None
+        for line in output.splitlines():
+            match = re.match(r"^\d+: ([^:@]+)(?:@[^:]+)?:", line)
+            if match:
+                current = match.group(1)
+            if current and re.search(rf"\binet {re.escape(address)}/\d+\b", line):
+                if not re.fullmatch(r"[a-zA-Z0-9_.-]{1,15}", current):
+                    break
+                return current
+        raise RuntimeError("container interface for link address unavailable")
+
+    def capture_pcap(self, node_id: str, interface: str, path: str, duration: int) -> bytes:
+        container = self._owned_container(node_id)
+        try:
+            # No user-supplied command, filter, path, or interface reaches exec.
+            code, _ = self._exec(container, [
+                "timeout", "-s", "INT", str(duration), "tcpdump", "-i", interface,
+                "-s", "160", "-c", "256", "-U", "-w", path,
+            ])
+            if code not in (0, 124):
+                raise RuntimeError("tcpdump capture failed")
+            code, data = container.exec_run(["head", "-c", "65537", path], demux=True)
+            payload = data[0] if isinstance(data, tuple) else data
+            if code or not isinstance(payload, bytes) or len(payload) > 65536 or payload[:4] not in (
+                b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4",
+            ):
+                raise RuntimeError("bounded PCAP result unavailable")
+            return payload
+        finally:
+            try:
+                self._exec(container, ["rm", "-f", path])
+            except Exception:
+                logger.warning("capture file cleanup failed for node=%s", node_id)
+
+    def stop_capture(self, node_id: str, path: str) -> None:
+        """Signal only the tcpdump process for this internal capture path."""
+        container = self._owned_container(node_id)
+        code, output = self._exec(container, ["ps", "-o", "pid,args"])
+        if code:
+            raise RuntimeError("capture process inspection failed")
+        for line in output.splitlines():
+            fields = line.strip().split(None, 1)
+            if len(fields) == 2 and fields[0].isdigit() and "tcpdump" in fields[1].split() and path in fields[1].split():
+                self._exec(container, ["kill", "-INT", fields[0]])
+        self._exec(container, ["rm", "-f", path])
 
     async def attach_console(self, node_id: str):
         raise NotImplementedError("attach_console lands with ws.py wiring")

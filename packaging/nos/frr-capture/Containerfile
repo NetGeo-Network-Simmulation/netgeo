@@ -1,0 +1,4 @@
+FROM quay.io/frrouting/frr@sha256:65e5967b922572c0565d968388fb06af69d7e9b3b3eea40ad7e3810687667f68
+
+# Alpine 3.22 base; install once at local build time, never in a running lab.
+RUN apk add --no-cache tcpdump=4.99.5-r1 libpcap=1.10.7-r0

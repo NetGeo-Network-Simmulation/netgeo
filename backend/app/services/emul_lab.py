@@ -5,7 +5,10 @@ import asyncio
 import hashlib
 import json
 import os
+import sys
 import tempfile
+import uuid
+from dataclasses import dataclass
 from pathlib import Path
 
 from engine.emulation.podman_adaptor import (
@@ -33,12 +36,26 @@ class EmulationLeaseUnavailable(SimulationError):
     pass
 
 
+@dataclass
+class CaptureSession:
+    project_id: str
+    node_id: str
+    interface_id: str
+    fingerprint: str
+    path: str
+    task: asyncio.Task | None = None
+    state: str = "running"
+    pcap: bytes | None = None
+    error: str | None = None
+
+
 class EmulLabManager:
     def __init__(self) -> None:
         self._labs: dict[str, tuple[str, PodmanAdaptor, list[str], list[str]]] = {}
         self._locks: dict[str, asyncio.Lock] = {}
         self._lease_fd: int | None = None
         self._lease_pid: int | None = None
+        self._captures: dict[str, CaptureSession] = {}
 
     def _holds_lease(self) -> bool:
         return self._lease_fd is not None and self._lease_pid == os.getpid()
@@ -141,6 +158,9 @@ class EmulLabManager:
             raise SimulationError("stale NetGeo cleanup failed: " + "; ".join(errors))
 
     async def _destroy(self, project_id: str) -> None:
+        for capture_id, session in list(self._captures.items()):
+            if session.project_id == project_id:
+                await self.cancel_capture(project_id, capture_id)
         lab = self._labs.get(project_id)
         if lab is None:
             return
@@ -165,11 +185,7 @@ class EmulLabManager:
         if not self._holds_lease():
             await self.reconcile_stale()
         pid = topo.project.id
-        fingerprint = hashlib.sha256(json.dumps(
-            {"nodes": [n.model_dump(mode="json", exclude={"config_ref"}) for n in topo.nodes],
-             "links": [l.model_dump(mode="json") for l in topo.links]},
-            sort_keys=True,
-        ).encode()).hexdigest()
+        fingerprint = self._fingerprint(topo)
         cached = self._labs.get(pid)
         if cached and cached[0] == fingerprint:
             return cached[1]
@@ -177,6 +193,8 @@ class EmulLabManager:
         if topo.project.mode != "pure-emul" or any(n.mode != NodeMode.emul for n in topo.nodes):
             raise SimulationError("mixed-mode forwarding unsupported: all lab nodes must be emulated")
         adaptor = PodmanAdaptor(project_id=pid, lab_id=fingerprint[:16], lease_guard=self._holds_lease)
+        if hasattr(adaptor, "use_local_capture_image"):
+            adaptor.use_local_capture_image()
         nodes: list[str] = []
         links: list[str] = []
         self._labs[pid] = (fingerprint, adaptor, nodes, links)
@@ -200,6 +218,92 @@ class EmulLabManager:
             await self._destroy(pid)
             raise
         return adaptor
+
+    @staticmethod
+    def _fingerprint(topo: Topology) -> str:
+        return hashlib.sha256(json.dumps(
+            {"nodes": [n.model_dump(mode="json", exclude={"config_ref"}) for n in topo.nodes],
+             "links": [l.model_dump(mode="json") for l in topo.links]},
+            sort_keys=True,
+        ).encode()).hexdigest()
+
+    def capture_available(self, topo: Topology) -> bool:
+        lab = self._labs.get(topo.project.id)
+        return bool(lab and lab[0] == self._fingerprint(topo) and self._holds_lease()
+                    and getattr(lab[1], "capture_enabled", False))
+
+    async def start_capture(self, topo: Topology, node_id: str, interface_id: str, duration: int = 15) -> str:
+        pid = topo.project.id
+        if sys.platform != "linux":
+            raise SimulationError("emulated capture unsupported: rootless Podman requires Linux")
+        if not 1 <= duration <= 15:
+            raise SimulationError("capture duration must be 1 to 15 seconds")
+        async with self._lock(pid):
+            node = next((n for n in topo.nodes if n.id == node_id), None)
+            if topo.project.mode != "pure-emul" or node is None or node.mode != NodeMode.emul or str(node.nos) != "frr":
+                raise SimulationError("capture target must be an FRR node in this pure-emul project")
+            if not any(i.id == interface_id for i in node.interfaces):
+                raise SimulationError("interface does not belong to capture node")
+            link = next((l for l in topo.links if interface_id in (l.a_iface, l.b_iface)), None)
+            if link is None:
+                raise SimulationError("capture interface is not linked")
+            adaptor = await self._get(topo)
+            if not adaptor.capture_enabled:
+                raise SimulationError("emulated capture unsupported: local FRR capture image is unavailable; build it explicitly")
+            if sum(s.project_id == pid for s in self._captures.values()) >= 4 or len(self._captures) >= 32:
+                raise SimulationError("capture session limit reached; delete an earlier capture")
+            if any(s.project_id == pid and s.node_id == node_id and s.state == "running" for s in self._captures.values()):
+                raise SimulationError("one active capture per node is allowed")
+            interface = await asyncio.to_thread(adaptor.capture_interface, node_id, link.id)
+            capture_id = uuid.uuid4().hex
+            path = f"/tmp/netgeo-capture-{capture_id}.pcap"
+            session = CaptureSession(pid, node_id, interface_id, self._fingerprint(topo), path)
+            self._captures[capture_id] = session
+            session.task = asyncio.create_task(self._run_capture(adaptor, session, interface, duration))
+            return capture_id
+
+    async def _run_capture(self, adaptor: PodmanAdaptor, session: CaptureSession, interface: str, duration: int) -> None:
+        try:
+            data = await asyncio.to_thread(adaptor.capture_pcap, session.node_id, interface, session.path, duration)
+            if session.state == "running" and self._holds_lease():
+                session.pcap = data
+                session.state = "complete"
+        except Exception as exc:  # noqa: BLE001 - present bounded failure without leaking container details
+            if session.state == "running":
+                session.error = type(exc).__name__
+                session.state = "error"
+
+    async def capture_status(self, topo: Topology, capture_id: str) -> dict:
+        session = self._captures.get(capture_id)
+        if session is None or session.project_id != topo.project.id:
+            raise SimulationError("capture not found in this project")
+        if session.fingerprint != self._fingerprint(topo) or not self._holds_lease():
+            await self.cancel_capture(topo.project.id, capture_id)
+            raise SimulationError("capture expired with the lab topology or lease")
+        return {"id": capture_id, "node_id": session.node_id, "interface_id": session.interface_id,
+                "state": session.state, "size": len(session.pcap or b""), "error": session.error}
+
+    async def capture_bytes(self, topo: Topology, capture_id: str) -> bytes:
+        status = await self.capture_status(topo, capture_id)
+        if status["state"] != "complete":
+            raise SimulationError("capture result is not complete")
+        return self._captures[capture_id].pcap or b""
+
+    async def cancel_capture(self, project_id: str, capture_id: str) -> None:
+        session = self._captures.get(capture_id)
+        if session is None or session.project_id != project_id:
+            raise SimulationError("capture not found in this project")
+        session.state = "cancelled"
+        session.pcap = None
+        lab = self._labs.get(project_id)
+        if lab and self._holds_lease():
+            try:
+                await asyncio.to_thread(lab[1].stop_capture, session.node_id, session.path)
+            except Exception:
+                pass  # destroy still removes owned container; timeout caps capture at 15s
+        if session.task:
+            await session.task
+        self._captures.pop(capture_id, None)
 
     async def ping(self, topo: Topology, src_id: str, dst_id: str, link_id: str, count: int) -> dict:
         pid = topo.project.id

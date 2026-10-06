@@ -30,3 +30,6 @@ KINDS: dict[str, KindSpec] = {
         caps=["NET_ADMIN", "NET_RAW", "SYS_ADMIN"],
     ),
 }
+
+# Built locally from packaging/nos/frr-capture/Containerfile. Never pulled by NetGeo.
+FRR_CAPTURE_IMAGE = "localhost/netgeo/frr-capture:10.7.0"

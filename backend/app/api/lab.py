@@ -50,6 +50,48 @@ class CliRequest(_Body):
     command: str
 
 
+class EmulCaptureRequest(_Body):
+    node_id: str
+    interface_id: str
+    duration: int = Field(default=15, ge=1, le=15)
+
+
+@router.post("/{project_id}/emul-captures", status_code=202)
+async def start_emul_capture(project_id: str, body: EmulCaptureRequest,
+                             r: Annotated[MemoryRepository, Depends(repo)]):
+    from app.services.emul_lab import get_emul_lab_manager
+    topo = await _topo(r, project_id)
+    capture_id = await get_emul_lab_manager().start_capture(
+        topo, body.node_id, body.interface_id, body.duration,
+    )
+    return {"id": capture_id, "state": "running"}
+
+
+@router.get("/{project_id}/emul-captures/{capture_id}")
+async def emul_capture_status(project_id: str, capture_id: str,
+                              r: Annotated[MemoryRepository, Depends(repo)]):
+    from app.services.emul_lab import get_emul_lab_manager
+    return await get_emul_lab_manager().capture_status(await _topo(r, project_id), capture_id)
+
+
+@router.get("/{project_id}/emul-captures/{capture_id}/pcap")
+async def emul_capture_pcap(project_id: str, capture_id: str,
+                            r: Annotated[MemoryRepository, Depends(repo)]):
+    from app.services.emul_lab import get_emul_lab_manager
+    data = await get_emul_lab_manager().capture_bytes(await _topo(r, project_id), capture_id)
+    return Response(data, media_type="application/vnd.tcpdump.pcap",
+                    headers={"Content-Disposition": f'attachment; filename="capture-{capture_id}.pcap"'})
+
+
+@router.delete("/{project_id}/emul-captures/{capture_id}", status_code=204)
+async def cancel_emul_capture(project_id: str, capture_id: str,
+                              r: Annotated[MemoryRepository, Depends(repo)]):
+    from app.services.emul_lab import get_emul_lab_manager
+    await _topo(r, project_id)
+    await get_emul_lab_manager().cancel_capture(project_id, capture_id)
+    return Response(status_code=204)
+
+
 class ModeRequest(_Body):
     mode: str  # "realtime" | "simulation"
 
@@ -521,9 +563,13 @@ async def lab_tables(
 @router.get("/{project_id}/status")
 async def lab_status(project_id: str, r: Annotated[MemoryRepository, Depends(repo)]):
     topo = await _topo(r, project_id)
+    from app.services.emul_lab import get_emul_lab_manager
     capture = {"supported": topo.project.mode == "pure-sim"}
     if not capture["supported"]:
         capture["reason"] = _EMUL_CAPTURE_REASON
+    emul_capture = {"supported": get_emul_lab_manager().capture_available(topo)}
+    if not emul_capture["supported"]:
+        emul_capture["reason"] = "requires an active rootless lab using the locally built FRR capture image"
 
     def work():
         lab = _lab_for(topo)
@@ -533,6 +579,7 @@ async def lab_status(project_id: str, r: Annotated[MemoryRepository, Depends(rep
             "events": lab.net.events_log[-50:],
             "capabilities": project_capabilities(topo.project.mode),
             "capture": capture,
+            "emul_capture": emul_capture,
         }
 
     return await _locked(project_id, work)
