@@ -236,7 +236,7 @@ seperti tarball di atas):**
   alasan ABI di atas dan mencetak hint instalasi Fedora,
   `webbrowser.open()` membuka **tab Firefox sungguhan** — `GET /` →
   200, JS/CSS asset → 200, `GET /api/auth/setup` → 200.
-- **VM Ubuntu 24.04 (headless, `superadmin@100.72.83.91`,
+- **VM uji Ubuntu 24.04 (headless, tanpa
   `webkit2gtk`/`libgtk-3-0`/`gir1.2-webkit2-4.1` tidak terinstal,
   `python3-gi` ada untuk python3.12 miliknya sendiri)**: disalin lewat
   scp, FUSE-mount dengan cara yang sama, mencetak hint instalasi
