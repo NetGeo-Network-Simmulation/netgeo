@@ -213,7 +213,7 @@ the tarball above):**
   reason above and printed the Fedora install hint, `webbrowser.open()`
   opened a **real Firefox tab** — `GET /` → 200, JS/CSS assets → 200,
   `GET /api/auth/setup` → 200.
-- **Ubuntu 24.04 VM (headless, `superadmin@100.72.83.91`, no
+- **Ubuntu 24.04 test VM (headless, with no
   `webkit2gtk`/`libgtk-3-0`/`gir1.2-webkit2-4.1` installed, `python3-gi`
   present for its own python3.12)**: copied over scp, FUSE-mounted the same
   way, printed the correct **Ubuntu/Debian** install hint (not the Fedora
